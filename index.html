@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Комната прошлого — workbench</title>
+  <title>Комната прошлого — workbench v2</title>
   <style>
     html, body { height: 100%; }
     body { margin: 0; overflow: hidden; background: #000; }
@@ -24,9 +24,8 @@
   <script src="assets/js/three.min.js"></script>
   <script src="assets/js/OrbitControls.js"></script>
   <script src="assets/js/GLTFLoader.js"></script>
-  <script src="assets/js/DRACOLoader.js"></script>
   <script>
-    let scene, camera, renderer, controls, listener, sound;
+    let scene, camera, renderer, controls, listener, sound, shadowPlane;
 
     const init = () => {
       scene = new THREE.Scene();
@@ -34,42 +33,62 @@
       scene.fog = new THREE.Fog(0x1a0f0a, 8, 22);
 
       // Camera
-      camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 100);
-      camera.position.set(0, 1.6, 3);
+      camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 100);
+      camera.position.set(0, 1.6, 3.4);
 
       // Renderer
       renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       renderer.setSize(window.innerWidth, window.innerHeight);
       renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 0.9;
+      renderer.toneMappingExposure = 0.95;
       document.body.appendChild(renderer.domElement);
 
       // Controls
       controls = new THREE.OrbitControls(camera, renderer.domElement);
       controls.target.set(0, 1.2, 0);
       controls.enableDamping = true;
-      controls.dampingFactor = 0.05;
+      controls.dampingFactor = 0.06;
+      controls.minDistance = 1.2;
+      controls.maxDistance = 8;
+      controls.maxPolarAngle = Math.PI * 0.49;
 
-      // Lighting — мягкое окружение
-      scene.add(new THREE.HemisphereLight(0xffddbb, 0x2a1a10, 0.35));
-      const warmAmbient = new THREE.AmbientLight(0xffe6cc, 0.35);
-      scene.add(warmAmbient);
+      // Lighting — тёплый направленный свет + лёгкое окружение
+      const hemi = new THREE.HemisphereLight(0xffe2c5, 0x1a0f0a, 0.25);
+      scene.add(hemi);
+      const ambient = new THREE.AmbientLight(0xfff2df, 0.12);
+      scene.add(ambient);
+      const dir = new THREE.DirectionalLight(0xffd0a0, 1.15);
+      dir.position.set(-2.5, 4.0, 2.0);
+      dir.castShadow = true;
+      dir.shadow.mapSize.set(2048, 2048);
+      dir.shadow.radius = 4;
+      dir.shadow.camera.near = 0.5;
+      dir.shadow.camera.far = 25;
+      dir.shadow.camera.left = -8;
+      dir.shadow.camera.right = 8;
+      dir.shadow.camera.top = 8;
+      dir.shadow.camera.bottom = -8;
+      scene.add(dir);
 
       // Textures
       const tl = new THREE.TextureLoader();
       const floorTex = tl.load('assets/textures/floor.jpg');
       const wallTex  = tl.load('assets/textures/wall.jpg');
       const mirrorTex = tl.load('assets/textures/mirror.jpg');
+      const maxAniso = renderer.capabilities.getMaxAnisotropy();
+      [floorTex, wallTex, mirrorTex].forEach(t => { if (t) t.anisotropy = maxAniso; });
       floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
       floorTex.repeat.set(3, 3);
       wallTex.wrapS = wallTex.wrapT = THREE.RepeatWrapping;
       wallTex.repeat.set(2, 2);
 
       // Materials
-      const floorMat = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 1, metalness: 0, side: THREE.DoubleSide });
-      const wallMat  = new THREE.MeshStandardMaterial({ map: wallTex,  roughness: 1, metalness: 0, side: THREE.DoubleSide });
+      const floorMat = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.95, metalness: 0.0, side: THREE.DoubleSide });
+      const wallMat  = new THREE.MeshStandardMaterial({ map: wallTex,  roughness: 1.00, metalness: 0.0, side: THREE.DoubleSide });
 
       // Room sizes
       const w = 10, h = 5, d = 10;
@@ -81,82 +100,58 @@
       floor.receiveShadow = true;
       scene.add(floor);
 
-      // Walls (4 шт.)
-      const wall1 = new THREE.Mesh(new THREE.PlaneGeometry(w, h), wallMat); // back (с зеркалом)
-      wall1.position.set(0, h/2, -d/2);
-
-      const wall4 = new THREE.Mesh(new THREE.PlaneGeometry(w, h), wallMat); // front
-      wall4.position.set(0, h/2,  d/2);
-      wall4.rotation.y = Math.PI;
-
-      const wall2 = new THREE.Mesh(new THREE.PlaneGeometry(d, h), wallMat); // left
-      wall2.position.set(-w/2, h/2, 0);
-      wall2.rotation.y =  Math.PI/2;
-
-      const wall3 = new THREE.Mesh(new THREE.PlaneGeometry(d, h), wallMat); // right
-      wall3.position.set( w/2, h/2, 0);
-      wall3.rotation.y = -Math.PI/2;
-
+      // Walls (4)
+      const wall1 = new THREE.Mesh(new THREE.PlaneGeometry(w, h), wallMat); wall1.position.set(0, h/2, -d/2);
+      const wall4 = new THREE.Mesh(new THREE.PlaneGeometry(w, h), wallMat); wall4.position.set(0, h/2,  d/2); wall4.rotation.y = Math.PI;
+      const wall2 = new THREE.Mesh(new THREE.PlaneGeometry(d, h), wallMat); wall2.position.set(-w/2, h/2, 0); wall2.rotation.y =  Math.PI/2;
+      const wall3 = new THREE.Mesh(new THREE.PlaneGeometry(d, h), wallMat); wall3.position.set( w/2, h/2, 0); wall3.rotation.y = -Math.PI/2;
       [wall1, wall2, wall3, wall4].forEach(wl => { wl.receiveShadow = true; wl.castShadow = false; scene.add(wl); });
 
-      // Mirror on the back wall
-      const mirror = new THREE.Mesh(
-        new THREE.PlaneGeometry(1.4, 0.9),
-        new THREE.MeshStandardMaterial({ map: mirrorTex, metalness: 0.85, roughness: 0.2, side: THREE.DoubleSide })
-      );
-      mirror.position.set(0, 1.6, -d/2 + 0.01);
-      scene.add(mirror);
+      // Mirror
+      const mirror = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 0.9),
+        new THREE.MeshStandardMaterial({ map: mirrorTex, metalness: 0.85, roughness: 0.2, side: THREE.DoubleSide }));
+      mirror.position.set(0, 1.6, -d/2 + 0.01); scene.add(mirror);
 
-      // Audio
+      // Contact shadow plane (полупрозрачная тень под объектом)
+      const shadowMat = new THREE.ShadowMaterial({ opacity: 0.35 });
+      shadowPlane = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 2.0), shadowMat);
+      shadowPlane.rotation.x = -Math.PI/2;
+      shadowPlane.position.set(w/2 - 1.0, 0.001, 0); // примерно под правой стеной
+      shadowPlane.receiveShadow = true;
+      scene.add(shadowPlane);
+
+      // Audio (загружаем ПОСЛЕ клика, чтобы не было ошибок автоплея/404)
       listener = new THREE.AudioListener();
       camera.add(listener);
       sound = new THREE.Audio(listener);
-      const audioLoader = new THREE.AudioLoader();
-      audioLoader.load('assets/music/music.mp3', buffer => {
-        sound.setBuffer(buffer);
-        sound.setLoop(true);
-        sound.setVolume(0.4);
-      });
 
-      // === GLTF workbench ===
+      // Load workbench
       const loader = new THREE.GLTFLoader();
-      try {
-        const draco = new THREE.DRACOLoader();
-        draco.setDecoderPath('assets/js/draco/'); // если нужно — положи декодеры сюда
-        loader.setDRACOLoader(draco);
-      } catch(e) {}
-
-      const MODEL_URL = 'assets/models/workbench.glb'; // Положи сюда конвертированную модель
+      const MODEL_URL = 'assets/models/workbench.glb';
       loader.load(MODEL_URL, (gltf) => {
         const model = gltf.scene;
         model.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
 
-        // Центрируем и нормализуем масштаб
+        // Center + scale a bit larger
         const box = new THREE.Box3().setFromObject(model);
         const size = new THREE.Vector3(); box.getSize(size);
         const center = new THREE.Vector3(); box.getCenter(center);
         model.position.sub(center);
-
-        // Выбираем разумный масштаб под комнату (диагональ ~2.2м)
         const diag = Math.sqrt(size.x*size.x + size.y*size.y + size.z*size.z);
-        const targetDiag = 2.2;
+        const targetDiag = 2.8; // больше, чем раньше
         const s = diag > 0 ? targetDiag / diag : 1;
         model.scale.setScalar(s);
 
-        // Ставим «на место ванны»: у правой стены, лицом к центру
-        const offsetFromWall = 0.6;
+        // Place at right wall, face center
+        const offsetFromWall = 0.8;
         model.position.set(w/2 - offsetFromWall, 0, 0);
         model.rotation.y = -Math.PI/2;
-
         scene.add(model);
-        console.log('Модель workbench загружена:', MODEL_URL);
+
+        // Position shadow plane under model
+        shadowPlane.position.set(model.position.x, 0.001, model.position.z);
       }, undefined, (err) => {
         console.warn('Не удалось загрузить модель (проверь путь):', (err && err.message) ? err.message : err);
-        try {
-          fetch(MODEL_URL, { method: 'HEAD' })
-            .then(r => console.log('HEAD статус для', MODEL_URL, '→', r.status))
-            .catch(e => console.log('HEAD ошибка для', MODEL_URL, '→', e));
-        } catch (_) {}
       });
 
       // Resize
@@ -166,7 +161,7 @@
         renderer.setSize(window.innerWidth, window.innerHeight);
       });
 
-      // Loop
+      // Animate
       const animate = () => {
         requestAnimationFrame(animate);
         controls.update();
@@ -174,14 +169,18 @@
       };
       animate();
 
-      // Start audio after gesture
+      // Start after user click: load audio safely
       document.getElementById('start').addEventListener('click', async () => {
         document.getElementById('overlay').style.display = 'none';
         try {
-          const ac = listener?.context;
-          if (ac && ac.state === 'suspended') await ac.resume();
+          const ac = listener?.context; if (ac && ac.state === 'suspended') await ac.resume();
         } catch(e) {}
-        if (sound.buffer && !sound.isPlaying) sound.play();
+        try {
+          const audioLoader = new THREE.AudioLoader();
+          audioLoader.load('assets/music/music.mp3', buffer => {
+            sound.setBuffer(buffer); sound.setLoop(true); sound.setVolume(0.4); sound.play();
+          }, undefined, (e)=>{ console.log('Аудио не найдено/не загрузилось — продолжаем без музыки.'); });
+        } catch(_) {}
       }, { once: true });
     };
 
