@@ -1,113 +1,43 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>3D Квест</title>
-  <style>
-    body { margin: 0; overflow: hidden; }
-    canvas { display: block; }
-  </style>
-</head>
-<body>
-  <!-- Three.js и расширения через CDN -->
-  <script src="https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.min.js"></script>
-  <script src="https://threejs.org/examples/js/controls/OrbitControls.js"></script>
-  <script src="https://threejs.org/examples/js/loaders/GLTFLoader.js"></script>
+<!-- Локальные скрипты -->
+<script src="assets/js/three.min.js"></script>
+<script src="assets/js/OrbitControls.js"></script>
+<script src="assets/js/GLTFLoader.js"></script>
 
-  <!-- Наш скрипт -->
-  <script>
-    // === Сцена и камера ===
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xaaaaaa);
+<!-- Твой JS -->
+<script>
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+  camera.position.set(0, 1.5, 3);
 
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-    camera.position.set(0, 1.5, 3);
+  const renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.appendChild(renderer.domElement);
 
-    // === Рендерер ===
-    const renderer = new THREE.WebGLRenderer({antialias: true});
+  const controls = new THREE.OrbitControls(camera, renderer.domElement);
+
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+  scene.add(ambientLight);
+
+  const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+  directionalLight.position.set(5, 10, 7);
+  scene.add(directionalLight);
+
+  // Загрузка модели
+  const loader = new THREE.GLTFLoader();
+  loader.load('assets/models/tub_model.glb', function(gltf){
+    scene.add(gltf.scene);
+  });
+
+  function animate(){
+    requestAnimationFrame(animate);
+    controls.update();
+    renderer.render(scene, camera);
+  }
+  animate();
+
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth/window.innerHeight;
+    camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
-    document.body.appendChild(renderer.domElement);
-
-    // === Управление камерой ===
-    const controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.25;
-    controls.maxPolarAngle = Math.PI / 2;
-
-    // === Освещение ===
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
-    scene.add(ambientLight);
-
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-    directionalLight.position.set(5, 10, 7);
-    scene.add(directionalLight);
-
-    // === Пол и стены ===
-    const loaderTexture = new THREE.TextureLoader();
-    const floorTex = loaderTexture.load('assets/textures/floor_texture.jpg');
-    const wallTex = loaderTexture.load('assets/textures/wall_texture.jpg');
-    const mirrorTex = loaderTexture.load('assets/textures/mirror_texture.jpg');
-
-    const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(10,10),
-      new THREE.MeshStandardMaterial({map: floorTex})
-    );
-    floor.rotation.x = -Math.PI/2;
-    scene.add(floor);
-
-    const backWall = new THREE.Mesh(
-      new THREE.PlaneGeometry(10,5),
-      new THREE.MeshStandardMaterial({map: wallTex})
-    );
-    backWall.position.set(0,2.5,-5);
-    scene.add(backWall);
-
-    const mirror = new THREE.Mesh(
-      new THREE.PlaneGeometry(2,2),
-      new THREE.MeshStandardMaterial({map: mirrorTex})
-    );
-    mirror.position.set(0,2,-4.9);
-    scene.add(mirror);
-
-    // === Модель ванны ===
-    const loaderGLTF = new THREE.GLTFLoader();
-    loaderGLTF.load('assets/models/tub_model.glb', function(gltf){
-      scene.add(gltf.scene);
-    }, undefined, function(error){
-      console.error(error);
-    });
-
-    // === Музыка ===
-    const listener = new THREE.AudioListener();
-    camera.add(listener);
-
-    const sound = new THREE.Audio(listener);
-    const audioLoader = new THREE.AudioLoader();
-    audioLoader.load('assets/music/music.mp3', function(buffer){
-      sound.setBuffer(buffer);
-      sound.setLoop(true);
-      sound.setVolume(0.5);
-      // Включаем музыку при клике
-      window.addEventListener('click', function(){
-        if(!sound.isPlaying) sound.play();
-      });
-    });
-
-    // === Анимация ===
-    function animate(){
-      requestAnimationFrame(animate);
-      controls.update();
-      renderer.render(scene, camera);
-    }
-    animate();
-
-    // === Адаптация под экран ===
-    window.addEventListener('resize', function(){
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    });
-  </script>
-</body>
-</html>
+  });
+</script>
