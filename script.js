@@ -1,9 +1,8 @@
-// Модульные импорты из CDN
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js';
 import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/loaders/GLTFLoader.js';
 
-// Сцена, камера, рендерер
+// Сцена, камера, рендер
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x111111);
 
@@ -24,7 +23,7 @@ const directionalLight = new THREE.DirectionalLight(0xffffff, 0.6);
 directionalLight.position.set(5,10,7);
 scene.add(directionalLight);
 
-// Загрузка текстур
+// Текстуры
 const loaderTexture = new THREE.TextureLoader();
 const floorTexture = loaderTexture.load('assets/floor_texture.jpg');
 const wallTexture = loaderTexture.load('assets/wall_texture.jpg');
@@ -66,17 +65,15 @@ window.addEventListener('click', (event)=>{
   if(intersects.length>0){
     alert("Вы нашли код на зеркале: 3 8 5");
   }
-}, false);
+});
 
-// Загрузка модели ванны
+// Модель ванны
 const loaderGLB = new GLTFLoader();
 loaderGLB.load('assets/tub_model.glb', function(gltf){
   const tub = gltf.scene;
   tub.position.set(0,0,0);
   scene.add(tub);
-}, undefined, function(err){
-  console.error(err);
-});
+}, undefined, console.error);
 
 // Музыка
 const listener = new THREE.AudioListener();
@@ -98,7 +95,6 @@ function animate(){
 }
 animate();
 
-// Обновление при ресайзе
 window.addEventListener('resize', ()=>{
   camera.aspect = window.innerWidth/window.innerHeight;
   camera.updateProjectionMatrix();
