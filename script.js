@@ -1,8 +1,4 @@
-import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js';
-import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/controls/OrbitControls.js';
-import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/loaders/GLTFLoader.js';
-
-// Сцена, камера, рендер
+// === Сцена, камера, рендер ===
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x111111);
 
@@ -13,23 +9,23 @@ const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
-// Контролы
-const controls = new OrbitControls(camera, renderer.domElement);
+// === Контролы ===
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 
-// Свет
+// === Свет ===
 scene.add(new THREE.AmbientLight(0xffffff, 0.6));
 const directionalLight = new THREE.DirectionalLight(0xffffff, 0.6);
 directionalLight.position.set(5,10,7);
 scene.add(directionalLight);
 
-// Текстуры
+// === Загрузка текстур ===
 const loaderTexture = new THREE.TextureLoader();
-const floorTexture = loaderTexture.load('assets/floor_texture.jpg');
-const wallTexture = loaderTexture.load('assets/wall_texture.jpg');
-const mirrorTexture = loaderTexture.load('assets/mirror_texture.jpg');
+const floorTexture = loaderTexture.load('assets/textures/floor_texture.jpg');
+const wallTexture = loaderTexture.load('assets/textures/wall_texture.jpg');
+const mirrorTexture = loaderTexture.load('assets/textures/mirror_texture.jpg');
 
-// Пол
+// === Пол ===
 const floor = new THREE.Mesh(
   new THREE.PlaneGeometry(10,10),
   new THREE.MeshStandardMaterial({ map: floorTexture })
@@ -37,7 +33,7 @@ const floor = new THREE.Mesh(
 floor.rotation.x = -Math.PI/2;
 scene.add(floor);
 
-// Стены
+// === Стены ===
 const backWall = new THREE.Mesh(
   new THREE.PlaneGeometry(10,5),
   new THREE.MeshStandardMaterial({ map: wallTexture })
@@ -45,7 +41,7 @@ const backWall = new THREE.Mesh(
 backWall.position.set(0,2.5,-5);
 scene.add(backWall);
 
-// Зеркало
+// === Зеркало ===
 const mirror = new THREE.Mesh(
   new THREE.PlaneGeometry(2,2),
   new THREE.MeshStandardMaterial({ map: mirrorTexture })
@@ -53,7 +49,7 @@ const mirror = new THREE.Mesh(
 mirror.position.set(0,2,-4.9);
 scene.add(mirror);
 
-// Клик по зеркалу
+// === Клик по зеркалу ===
 window.addEventListener('click', (event)=>{
   const mouse = new THREE.Vector2(
     (event.clientX/window.innerWidth)*2-1,
@@ -67,15 +63,15 @@ window.addEventListener('click', (event)=>{
   }
 });
 
-// Модель ванны
-const loaderGLB = new GLTFLoader();
-loaderGLB.load('assets/tub_model.glb', function(gltf){
+// === Загрузка модели ванны ===
+const loaderGLB = new THREE.GLTFLoader();
+loaderGLB.load('assets/models/tub_model.glb', function(gltf){
   const tub = gltf.scene;
   tub.position.set(0,0,0);
   scene.add(tub);
 }, undefined, console.error);
 
-// Музыка
+// === Музыка ===
 const listener = new THREE.AudioListener();
 camera.add(listener);
 const sound = new THREE.Audio(listener);
@@ -87,7 +83,7 @@ audioLoader.load('assets/music.mp3', function(buffer){
   window.addEventListener('click', ()=>{ if(!sound.isPlaying) sound.play(); }, {once:true});
 });
 
-// Анимация
+// === Анимация ===
 function animate(){
   requestAnimationFrame(animate);
   controls.update();
