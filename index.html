@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Комната прошлого — warm + tub</title>
+  <title>Комната прошлого — warm + tub + dust</title>
   <style>
     html, body { height: 100%; }
     body { margin: 0; overflow: hidden; background: #000; }
@@ -21,11 +21,14 @@
 <body>
   <div id="overlay"><button id="start">Войти в комнату</button></div>
 
+  <!-- Ожидается наличие этих файлов в репозитории -->
   <script src="assets/js/three.min.js"></script>
   <script src="assets/js/OrbitControls.js"></script>
   <script src="assets/js/GLTFLoader.js"></script>
+  <script src="assets/js/DRACOLoader.js"></script>
   <script>
     let scene, camera, renderer, controls, listener, sound;
+    let candle1, candle2, shaft1, shaft2, dust;
 
     const init = () => {
       scene = new THREE.Scene();
@@ -55,11 +58,11 @@
       scene.add(new THREE.HemisphereLight(0xffddbb, 0x2a1a10, 0.35));
       const warmAmbient = new THREE.AmbientLight(0xffe6cc, 0.25);
       scene.add(warmAmbient);
-      const candle1 = new THREE.PointLight(0xffb366, 0.9, 12);
+      candle1 = new THREE.PointLight(0xffb366, 0.9, 12);
       candle1.position.set(1.2, 1.6, -1.2);
       candle1.castShadow = true;
       scene.add(candle1);
-      const candle2 = new THREE.PointLight(0xffa060, 0.6, 10);
+      candle2 = new THREE.PointLight(0xffa060, 0.6, 10);
       candle2.position.set(-1.4, 1.3, 1.0);
       scene.add(candle2);
 
@@ -87,22 +90,18 @@
       floor.receiveShadow = true;
       scene.add(floor);
 
-      // Walls (4)
-      const wall1 = new THREE.Mesh(new THREE.PlaneGeometry(w, h), wallMat); // back with mirror
+      // Walls
+      const wall1 = new THREE.Mesh(new THREE.PlaneGeometry(w, h), wallMat); // back
       wall1.position.set(0, h/2, -d/2);
-
       const wall4 = new THREE.Mesh(new THREE.PlaneGeometry(w, h), wallMat); // front
       wall4.position.set(0, h/2,  d/2);
       wall4.rotation.y = Math.PI;
-
       const wall2 = new THREE.Mesh(new THREE.PlaneGeometry(d, h), wallMat); // left
       wall2.position.set(-w/2, h/2, 0);
       wall2.rotation.y =  Math.PI/2;
-
-      const wall3 = new THREE.Mesh(new THREE.PlaneGeometry(d, h), wallMat); // right (tub goes here)
+      const wall3 = new THREE.Mesh(new THREE.PlaneGeometry(d, h), wallMat); // right
       wall3.position.set( w/2, h/2, 0);
       wall3.rotation.y = -Math.PI/2;
-
       [wall1, wall2, wall3, wall4].forEach(wl => { wl.receiveShadow = true; wl.castShadow = false; scene.add(wl); });
 
       // Mirror on back wall
@@ -112,6 +111,44 @@
       );
       mirror.position.set(0, 1.6, -d/2 + 0.01);
       scene.add(mirror);
+
+      // Dust particles (Points)
+      const dustCount = 1200;
+      const positions = new Float32Array(dustCount * 3);
+      const speeds = new Float32Array(dustCount);
+      for (let i = 0; i < dustCount; i++) {
+        positions[i*3 + 0] = (Math.random()-0.5) * (w-1.0);
+        positions[i*3 + 1] = Math.random() * (h-0.5) + 0.3;
+        positions[i*3 + 2] = (Math.random()-0.5) * (d-1.0);
+        speeds[i] = 0.002 + Math.random() * 0.004;
+      }
+      const dustGeo = new THREE.BufferGeometry();
+      dustGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      dust = new THREE.Points(
+        dustGeo,
+        new THREE.PointsMaterial({
+          size: 0.03,
+          transparent: true,
+          opacity: 0.5,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending
+        })
+      );
+      dust.userData.speeds = speeds;
+      scene.add(dust);
+
+      // Light shafts (fake volumetric cones) above candles
+      const shaftMat = new THREE.MeshBasicMaterial({
+        color: 0xffb366, transparent: true, opacity: 0.12,
+        depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide
+      });
+      shaft1 = new THREE.Mesh(new THREE.ConeGeometry(0.35, 2.6, 48, 1, true), shaftMat);
+      shaft1.position.copy(candle1.position).add(new THREE.Vector3(0, 0.1, 0));
+      scene.add(shaft1);
+      shaft2 = new THREE.Mesh(new THREE.ConeGeometry(0.3, 2.2, 48, 1, true), shaftMat.clone());
+      shaft2.material.opacity = 0.10;
+      shaft2.position.copy(candle2.position).add(new THREE.Vector3(0, 0.1, 0));
+      scene.add(shaft2);
 
       // Audio
       listener = new THREE.AudioListener();
@@ -124,8 +161,15 @@
         sound.setVolume(0.4);
       });
 
-      // GLTF tub (user path converted to web slashes)
+      // GLTF tub (user path with forward slashes for the web)
       const loader = new THREE.GLTFLoader();
+      // DRACO (на случай, если модель сжатая)
+      try {
+        const draco = new THREE.DRACOLoader();
+        draco.setDecoderPath('assets/js/draco/'); // положи decoder *.wasm/*.js сюда при необходимости
+        loader.setDRACOLoader(draco);
+      } catch(e) {}
+
       const MODEL_URL = 'assets/models/tub_model.glb';
       loader.load(MODEL_URL, (gltf) => {
         const model = gltf.scene;
@@ -141,15 +185,21 @@
         const s = diag > 0 ? targetDiag / diag : 1;
         model.scale.setScalar(s);
 
-        // Place near right wall (no mirror), face toward center
+        // Place near right wall, face center
+        const wRoom = w, dRoom = d;
         const offsetFromWall = 0.6;
-        model.position.set(w/2 - offsetFromWall, 0, 0);
+        model.position.set(wRoom/2 - offsetFromWall, 0, 0);
         model.rotation.y = -Math.PI/2;
 
         scene.add(model);
+        console.log('Модель ванны загружена:', MODEL_URL);
       }, undefined, (err) => {
-        console.warn('Не удалось загрузить модель ванны:', err?.message || err);
-        console.warn('Проверь путь:', MODEL_URL);
+        console.warn('Не удалось загрузить GLB модель (проверь путь):', (err && err.message) ? err.message : err);
+        try {
+          fetch(MODEL_URL, { method: 'HEAD' })
+            .then(r => console.log('HEAD статус для', MODEL_URL, '→', r.status))
+            .catch(e => console.log('HEAD ошибка для', MODEL_URL, '→', e));
+        } catch (_) {}
       });
 
       // Resize
@@ -160,8 +210,26 @@
       });
 
       // Loop
+      let t = 0;
       const animate = () => {
         requestAnimationFrame(animate);
+        t += 0.01;
+        // лёгкое «мерцание» свечей и лучей
+        candle1.intensity = 0.9 + Math.sin(t*3.7) * 0.06;
+        candle2.intensity = 0.6 + Math.cos(t*2.9) * 0.05;
+        shaft1.material.opacity = 0.11 + Math.sin(t*1.3) * 0.02;
+        shaft2.material.opacity = 0.09 + Math.cos(t*1.6) * 0.02;
+
+        // медленное движение пылинок вверх
+        const pos = dust.geometry.attributes.position;
+        const spd = dust.userData.speeds;
+        for (let i = 0; i < pos.count; i++) {
+          let y = pos.getY(i) + spd[i];
+          if (y > 4.8) y = 0.3 + Math.random() * 0.5; // респавн низко
+          pos.setY(i, y);
+        }
+        pos.needsUpdate = true;
+
         controls.update();
         renderer.render(scene, camera);
       };
