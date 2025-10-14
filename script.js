@@ -19,13 +19,12 @@ const directionalLight = new THREE.DirectionalLight(0xffffff, 0.6);
 directionalLight.position.set(5,10,7);
 scene.add(directionalLight);
 
-// === Загрузка текстур ===
+// === Пол и стены ===
 const loaderTexture = new THREE.TextureLoader();
 const floorTexture = loaderTexture.load('assets/textures/floor_texture.jpg');
 const wallTexture = loaderTexture.load('assets/textures/wall_texture.jpg');
 const mirrorTexture = loaderTexture.load('assets/textures/mirror_texture.jpg');
 
-// === Пол ===
 const floor = new THREE.Mesh(
   new THREE.PlaneGeometry(10,10),
   new THREE.MeshStandardMaterial({ map: floorTexture })
@@ -33,7 +32,6 @@ const floor = new THREE.Mesh(
 floor.rotation.x = -Math.PI/2;
 scene.add(floor);
 
-// === Стены ===
 const backWall = new THREE.Mesh(
   new THREE.PlaneGeometry(10,5),
   new THREE.MeshStandardMaterial({ map: wallTexture })
