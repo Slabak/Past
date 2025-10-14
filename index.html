@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Комната прошлого — warm + tub + dust</title>
+  <title>Комната прошлого — populated</title>
   <style>
     html, body { height: 100%; }
     body { margin: 0; overflow: hidden; background: #000; }
@@ -21,186 +21,279 @@
 <body>
   <div id="overlay"><button id="start">Войти в комнату</button></div>
 
-  <!-- Ожидается наличие этих файлов в репозитории -->
   <script src="assets/js/three.min.js"></script>
   <script src="assets/js/OrbitControls.js"></script>
   <script src="assets/js/GLTFLoader.js"></script>
   <script src="assets/js/DRACOLoader.js"></script>
   <script>
     let scene, camera, renderer, controls, listener, sound;
-    let candle1, candle2, shaft1, shaft2, dust;
+    let candleLights = [], shafts = [], dust;
+    let tubModel = null;
+
+    const ROOM_W = 10, ROOM_H = 5, ROOM_D = 10;
+
+    // Utility materials
+    const makeWood = (color=0x8a5a2b, rough=0.95, metal=0.0) =>
+      new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal });
+    const makeMetal = (color=0x888888, rough=0.4, metal=0.9) =>
+      new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal });
+    const makeFabric = (color=0x55423a, rough=0.98) =>
+      new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: 0, side: THREE.DoubleSide, transparent: true, opacity: 0.94 });
+
+    // Add simple props
+    function addTable(x, z) {
+      const group = new THREE.Group();
+      const top = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.08, 0.9), makeWood(0x7b4b24));
+      top.position.y = 0.8;
+      group.add(top);
+      const legGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.8, 12);
+      const legMat = makeWood(0x6f4320);
+      const legs = [
+        [-0.72, 0, -0.38], [0.72, 0, -0.38], [-0.72, 0, 0.38], [0.72, 0, 0.38]
+      ];
+      legs.forEach(([lx,_,lz]) => {
+        const leg = new THREE.Mesh(legGeo, legMat);
+        leg.position.set(lx, 0.4, lz);
+        group.add(leg);
+      });
+      group.position.set(x, 0, z);
+      group.traverse(o=>{ if(o.isMesh){ o.castShadow = true; o.receiveShadow = true; } });
+      scene.add(group);
+      return group;
+    }
+
+    function addStool(x, z) {
+      const group = new THREE.Group();
+      const seat = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.24, 0.06, 24), makeWood(0x85512a));
+      seat.position.y = 0.46;
+      group.add(seat);
+      const legGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.44, 10);
+      const legMat = makeWood(0x6d4424);
+      [[ 0.15, 0.15],[ -0.15, 0.15],[ 0.15,-0.15],[ -0.15,-0.15]].forEach(([lx,lz])=>{
+        const leg = new THREE.Mesh(legGeo, legMat);
+        leg.position.set(lx, 0.22, lz);
+        group.add(leg);
+      });
+      group.position.set(x, 0, z);
+      group.traverse(o=>{ if(o.isMesh){ o.castShadow = true; o.receiveShadow = true; } });
+      scene.add(group);
+      return group;
+    }
+
+    function addCrate(x, z, w=0.8, h=0.5, d=0.6) {
+      const crate = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), makeWood(0x6e4a2f));
+      crate.position.set(x, h/2, z);
+      crate.castShadow = true; crate.receiveShadow = true;
+      scene.add(crate);
+      return crate;
+    }
+
+    function addBarrel(x, z) {
+      const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.32, 0.9, 16), makeWood(0x5e3d23));
+      const bands = new THREE.Mesh(new THREE.CylinderGeometry(0.33, 0.33, 0.05, 16), makeMetal(0x3a3a3a, 0.3, 0.8));
+      barrel.position.set(x, 0.45, z);
+      barrel.castShadow = true; barrel.receiveShadow = true;
+      bands.position.set(x, 0.70, z);
+      const bands2 = bands.clone(); bands2.position.y = 0.20;
+      scene.add(barrel, bands, bands2);
+      return barrel;
+    }
+
+    function addShelf(x, z) {
+      const group = new THREE.Group();
+      const plankGeo = new THREE.BoxGeometry(1.2, 0.06, 0.3);
+      const postGeo  = new THREE.BoxGeometry(0.06, 1.2, 0.06);
+      const wood = makeWood(0x7b4b24);
+      const s1 = new THREE.Mesh(plankGeo, wood); s1.position.set(0, 1.1, 0);
+      const s2 = new THREE.Mesh(plankGeo, wood); s2.position.set(0, 0.8, 0);
+      const s3 = new THREE.Mesh(plankGeo, wood); s3.position.set(0, 0.5, 0);
+      const p1 = new THREE.Mesh(postGeo, wood);  p1.position.set(-0.55, 0.8, 0.1);
+      const p2 = new THREE.Mesh(postGeo, wood);  p2.position.set( 0.55, 0.8, 0.1);
+      group.add(s1,s2,s3,p1,p2);
+      group.position.set(x, 0, z);
+      group.traverse(o=>{ if(o.isMesh){ o.castShadow = true; o.receiveShadow = true; } });
+      scene.add(group);
+      return group;
+    }
+
+    function addRug(x, z, w=2.2, d=1.4, color=0x3a2420) {
+      const rug = new THREE.Mesh(new THREE.PlaneGeometry(w, d, 1, 1),
+        new THREE.MeshStandardMaterial({ color, roughness: 1, metalness: 0, side: THREE.DoubleSide }));
+      rug.rotation.x = -Math.PI/2;
+      rug.position.set(x, 0.002, z);
+      rug.receiveShadow = true;
+      scene.add(rug);
+      return rug;
+    }
+
+    function addCurtain(x, z, w=1.6, h=2.2) {
+      const curtain = new THREE.Mesh(new THREE.PlaneGeometry(w, h, 10, 2), makeFabric(0x4b3b34));
+      curtain.position.set(x, 1.5, z);
+      curtain.rotation.y = Math.PI; // на передней стене, «внутрь»
+      curtain.castShadow = true; curtain.receiveShadow = true;
+      scene.add(curtain);
+      return curtain;
+    }
+
+    function addCandle(x, z, y=0.82, intensity=0.65) {
+      const holder = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 0.05, 12), makeMetal(0x6a5a4a, 0.6, 0.5));
+      holder.position.set(x, y, z);
+      holder.castShadow = true; holder.receiveShadow = true;
+      scene.add(holder);
+
+      const body = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.18, 16), new THREE.MeshStandardMaterial({
+        color: 0xf5deb3, roughness: 0.9, metalness: 0
+      }));
+      body.position.set(x, y + 0.12, z);
+      body.castShadow = true; body.receiveShadow = true;
+      scene.add(body);
+
+      const flame = new THREE.PointLight(0xffb366, intensity, 4.5);
+      flame.position.set(x, y + 0.22, z);
+      flame.castShadow = true;
+      flame.shadow.mapSize.set(512, 512);
+      scene.add(flame);
+      candleLights.push(flame);
+
+      const shaftMat = new THREE.MeshBasicMaterial({
+        color: 0xffb366, transparent: true, opacity: 0.1,
+        depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide
+      });
+      const shaft = new THREE.Mesh(new THREE.ConeGeometry(0.18, 1.2, 24, 1, true), shaftMat);
+      shaft.position.copy(flame.position).add(new THREE.Vector3(0, 0.05, 0));
+      scene.add(shaft);
+      shafts.push(shaft);
+    }
+
+    // External model loader (config-driven)
+    function loadModel(url, { position=[0,0,0], rotation=[0,0,0], scale=1 } = {}) {
+      return new Promise((resolve, reject) => {
+        const loader = new THREE.GLTFLoader();
+        try {
+          const draco = new THREE.DRACOLoader();
+          draco.setDecoderPath('assets/js/draco/');
+          loader.setDRACOLoader(draco);
+        } catch(e) {}
+        loader.load(url, (gltf) => {
+          const model = gltf.scene;
+          model.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+          model.position.set(position[0], position[1], position[2]);
+          model.rotation.set(rotation[0], rotation[1], rotation[2]);
+          model.scale.setScalar(scale);
+          scene.add(model);
+          resolve(model);
+        }, undefined, (err) => {
+          console.warn('Не удалось загрузить модель:', url, err && err.message ? err.message : err);
+          reject(err);
+        });
+      });
+    }
 
     const init = () => {
       scene = new THREE.Scene();
       scene.background = new THREE.Color(0x120a07);
       scene.fog = new THREE.Fog(0x1a0f0a, 8, 22);
 
-      // Camera
       camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 100);
       camera.position.set(0, 1.6, 3);
 
-      // Renderer
       renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       renderer.setSize(window.innerWidth, window.innerHeight);
       renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 0.9;
+      renderer.toneMappingExposure = 0.95;
       document.body.appendChild(renderer.domElement);
 
-      // Controls
       controls = new THREE.OrbitControls(camera, renderer.domElement);
       controls.target.set(0, 1.2, 0);
       controls.enableDamping = true;
-      controls.dampingFactor = 0.05;
+      controls.dampingFactor = 0.06;
+      controls.minDistance = 1.2;
+      controls.maxDistance = 8;
+      controls.maxPolarAngle = Math.PI * 0.49;
 
-      // Warm lights
+      // Lights base
       scene.add(new THREE.HemisphereLight(0xffddbb, 0x2a1a10, 0.35));
       const warmAmbient = new THREE.AmbientLight(0xffe6cc, 0.25);
       scene.add(warmAmbient);
-      candle1 = new THREE.PointLight(0xffb366, 0.9, 12);
-      candle1.position.set(1.2, 1.6, -1.2);
-      candle1.castShadow = true;
-      scene.add(candle1);
-      candle2 = new THREE.PointLight(0xffa060, 0.6, 10);
-      candle2.position.set(-1.4, 1.3, 1.0);
-      scene.add(candle2);
 
-      // Textures
+      // Room
       const tl = new THREE.TextureLoader();
       const floorTex = tl.load('assets/textures/floor.jpg');
       const wallTex  = tl.load('assets/textures/wall.jpg');
       const mirrorTex = tl.load('assets/textures/mirror.jpg');
-      floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
-      floorTex.repeat.set(3, 3);
-      wallTex.wrapS = wallTex.wrapT = THREE.RepeatWrapping;
-      wallTex.repeat.set(2, 2);
+      const floorMat = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.95, metalness: 0.0, side: THREE.DoubleSide });
+      const wallMat  = new THREE.MeshStandardMaterial({ map: wallTex,  roughness: 1.00, metalness: 0.0, side: THREE.DoubleSide });
+      floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping; floorTex.repeat.set(3, 3);
+      wallTex.wrapS = wallTex.wrapT = THREE.RepeatWrapping;   wallTex.repeat.set(2, 2);
 
-      // Materials
-      const floorMat = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 1, metalness: 0, side: THREE.DoubleSide });
-      const wallMat  = new THREE.MeshStandardMaterial({ map: wallTex,  roughness: 1, metalness: 0, side: THREE.DoubleSide });
+      const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_D), floorMat);
+      floor.rotation.x = -Math.PI/2; floor.position.set(0, 0, 0); floor.receiveShadow = true; scene.add(floor);
 
-      // Room sizes
-      const w = 10, h = 5, d = 10;
+      const wall1 = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_H), wallMat); wall1.position.set(0, ROOM_H/2, -ROOM_D/2);
+      const wall4 = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_H), wallMat); wall4.position.set(0, ROOM_H/2,  ROOM_D/2); wall4.rotation.y = Math.PI;
+      const wall2 = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_D, ROOM_H), wallMat); wall2.position.set(-ROOM_W/2, ROOM_H/2, 0); wall2.rotation.y =  Math.PI/2;
+      const wall3 = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_D, ROOM_H), wallMat); wall3.position.set( ROOM_W/2, ROOM_H/2, 0); wall3.rotation.y = -Math.PI/2;
+      [wall1, wall2, wall3, wall4].forEach(w=>{ w.receiveShadow = true; scene.add(w); });
 
-      // Floor
-      const floor = new THREE.Mesh(new THREE.PlaneGeometry(w, d), floorMat);
-      floor.rotation.x = -Math.PI/2;
-      floor.position.set(0, 0, 0);
-      floor.receiveShadow = true;
-      scene.add(floor);
+      const mirror = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 0.9),
+        new THREE.MeshStandardMaterial({ map: mirrorTex, metalness: 0.85, roughness: 0.2, side: THREE.DoubleSide }));
+      mirror.position.set(0, 1.6, -ROOM_D/2 + 0.01); scene.add(mirror);
 
-      // Walls
-      const wall1 = new THREE.Mesh(new THREE.PlaneGeometry(w, h), wallMat); // back
-      wall1.position.set(0, h/2, -d/2);
-      const wall4 = new THREE.Mesh(new THREE.PlaneGeometry(w, h), wallMat); // front
-      wall4.position.set(0, h/2,  d/2);
-      wall4.rotation.y = Math.PI;
-      const wall2 = new THREE.Mesh(new THREE.PlaneGeometry(d, h), wallMat); // left
-      wall2.position.set(-w/2, h/2, 0);
-      wall2.rotation.y =  Math.PI/2;
-      const wall3 = new THREE.Mesh(new THREE.PlaneGeometry(d, h), wallMat); // right
-      wall3.position.set( w/2, h/2, 0);
-      wall3.rotation.y = -Math.PI/2;
-      [wall1, wall2, wall3, wall4].forEach(wl => { wl.receiveShadow = true; wl.castShadow = false; scene.add(wl); });
+      // Populate: furniture & props
+      const table = addTable(-1.6, 0.4);
+      addStool(-2.1, 1.1);
+      addStool(-1.1, 1.1);
+      addCrate(2.2, -1.5);
+      addCrate(2.2, -2.3, 0.7, 0.45, 0.5);
+      addBarrel(-2.6, -1.8);
+      addBarrel(-2.9, -0.9);
+      addShelf(0, 0.1); // вдоль правой/левой стены можно повернуть при желании
 
-      // Mirror on back wall
-      const mirror = new THREE.Mesh(
-        new THREE.PlaneGeometry(1.4, 0.9),
-        new THREE.MeshStandardMaterial({ map: mirrorTex, metalness: 0.85, roughness: 0.2, side: THREE.DoubleSide })
-      );
-      mirror.position.set(0, 1.6, -d/2 + 0.01);
-      scene.add(mirror);
+      addRug(0.2, 0.2, 2.4, 1.6, 0x3b2420);
+      addCurtain(0.0, ROOM_D/2 - 0.01, 1.8, 2.3); // на передней стене
 
-      // Dust particles (Points)
+      // Candles (на столе и полках)
+      addCandle(-1.6, 0.2, 0.9, 0.8);
+      addCandle(-1.2, 0.5, 0.9, 0.6);
+      addCandle(0.5, 1.0, 1.0, 0.5); // полка
+      addCandle(0.0, -0.3, 1.3, 0.55); // полка
+
+      // Two main "candle" lights similar to earlier
+      const c1 = new THREE.PointLight(0xffb366, 0.7, 10); c1.position.set(1.2, 1.6, -1.2); c1.castShadow = true; scene.add(c1); candleLights.push(c1);
+      const c2 = new THREE.PointLight(0xffa060, 0.5, 9);  c2.position.set(-1.4, 1.3, 1.0); c2.castShadow = true; scene.add(c2); candleLights.push(c2);
+
+      // Dust
       const dustCount = 1200;
       const positions = new Float32Array(dustCount * 3);
       const speeds = new Float32Array(dustCount);
       for (let i = 0; i < dustCount; i++) {
-        positions[i*3 + 0] = (Math.random()-0.5) * (w-1.0);
-        positions[i*3 + 1] = Math.random() * (h-0.5) + 0.3;
-        positions[i*3 + 2] = (Math.random()-0.5) * (d-1.0);
+        positions[i*3 + 0] = (Math.random()-0.5) * (ROOM_W-1.0);
+        positions[i*3 + 1] = Math.random() * (ROOM_H-0.5) + 0.3;
+        positions[i*3 + 2] = (Math.random()-0.5) * (ROOM_D-1.0);
         speeds[i] = 0.002 + Math.random() * 0.004;
       }
       const dustGeo = new THREE.BufferGeometry();
       dustGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-      dust = new THREE.Points(
-        dustGeo,
-        new THREE.PointsMaterial({
-          size: 0.03,
-          transparent: true,
-          opacity: 0.5,
-          depthWrite: false,
-          blending: THREE.AdditiveBlending
-        })
-      );
+      dust = new THREE.Points(dustGeo, new THREE.PointsMaterial({ size: 0.03, transparent: true, opacity: 0.5, depthWrite: false, blending: THREE.AdditiveBlending }));
       dust.userData.speeds = speeds;
       scene.add(dust);
 
-      // Light shafts (fake volumetric cones) above candles
-      const shaftMat = new THREE.MeshBasicMaterial({
-        color: 0xffb366, transparent: true, opacity: 0.12,
-        depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide
-      });
-      shaft1 = new THREE.Mesh(new THREE.ConeGeometry(0.35, 2.6, 48, 1, true), shaftMat);
-      shaft1.position.copy(candle1.position).add(new THREE.Vector3(0, 0.1, 0));
-      scene.add(shaft1);
-      shaft2 = new THREE.Mesh(new THREE.ConeGeometry(0.3, 2.2, 48, 1, true), shaftMat.clone());
-      shaft2.material.opacity = 0.10;
-      shaft2.position.copy(candle2.position).add(new THREE.Vector3(0, 0.1, 0));
-      scene.add(shaft2);
-
       // Audio
-      listener = new THREE.AudioListener();
-      camera.add(listener);
+      listener = new THREE.AudioListener(); camera.add(listener);
       sound = new THREE.Audio(listener);
       const audioLoader = new THREE.AudioLoader();
-      audioLoader.load('assets/music/music.mp3', buffer => {
-        sound.setBuffer(buffer);
-        sound.setLoop(true);
-        sound.setVolume(0.4);
-      });
+      audioLoader.load('assets/music/music.mp3', buffer => { sound.setBuffer(buffer); sound.setLoop(true); sound.setVolume(0.35); });
 
-      // GLTF tub (user path with forward slashes for the web)
-      const loader = new THREE.GLTFLoader();
-      // DRACO (на случай, если модель сжатая)
-      try {
-        const draco = new THREE.DRACOLoader();
-        draco.setDecoderPath('assets/js/draco/'); // положи decoder *.wasm/*.js сюда при необходимости
-        loader.setDRACOLoader(draco);
-      } catch(e) {}
-
-      const MODEL_URL = 'assets/models/tub_model.glb';
-      loader.load(MODEL_URL, (gltf) => {
-        const model = gltf.scene;
-        model.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-
-        const box = new THREE.Box3().setFromObject(model);
-        const size = new THREE.Vector3(); box.getSize(size);
-        const center = new THREE.Vector3(); box.getCenter(center);
-        model.position.sub(center);
-
-        const diag = Math.sqrt(size.x*size.x + size.y*size.y + size.z*size.z);
-        const targetDiag = 2.2;
-        const s = diag > 0 ? targetDiag / diag : 1;
-        model.scale.setScalar(s);
-
-        // Place near right wall, face center
-        const wRoom = w, dRoom = d;
-        const offsetFromWall = 0.6;
-        model.position.set(wRoom/2 - offsetFromWall, 0, 0);
-        model.rotation.y = -Math.PI/2;
-
-        scene.add(model);
-        console.log('Модель ванны загружена:', MODEL_URL);
-      }, undefined, (err) => {
-        console.warn('Не удалось загрузить GLB модель (проверь путь):', (err && err.message) ? err.message : err);
-        try {
-          fetch(MODEL_URL, { method: 'HEAD' })
-            .then(r => console.log('HEAD статус для', MODEL_URL, '→', r.status))
-            .catch(e => console.log('HEAD ошибка для', MODEL_URL, '→', e));
-        } catch (_) {}
-      });
+      // Load tub at right wall if present
+      loadModel('assets/models/tub_model.glb', {
+        position: [ROOM_W/2 - 0.6, 0, 0],
+        rotation: [0, -Math.PI/2, 0],
+        scale: 1
+      }).then(model => { tubModel = model; }).catch(()=>{});
 
       // Resize
       window.addEventListener('resize', () => {
@@ -209,23 +302,23 @@
         renderer.setSize(window.innerWidth, window.innerHeight);
       });
 
-      // Loop
+      // Animate
       let t = 0;
       const animate = () => {
         requestAnimationFrame(animate);
         t += 0.01;
-        // лёгкое «мерцание» свечей и лучей
-        candle1.intensity = 0.9 + Math.sin(t*3.7) * 0.06;
-        candle2.intensity = 0.6 + Math.cos(t*2.9) * 0.05;
-        shaft1.material.opacity = 0.11 + Math.sin(t*1.3) * 0.02;
-        shaft2.material.opacity = 0.09 + Math.cos(t*1.6) * 0.02;
 
-        // медленное движение пылинок вверх
+        candleLights.forEach((l, i) => {
+          const s1 = 0.04 + (i%2?0.02:0.03);
+          const f  = (i%2?2.9:3.7);
+          l.intensity = (i%2?0.6:0.75) + Math.sin(t*f) * s1;
+        });
+
         const pos = dust.geometry.attributes.position;
         const spd = dust.userData.speeds;
         for (let i = 0; i < pos.count; i++) {
           let y = pos.getY(i) + spd[i];
-          if (y > 4.8) y = 0.3 + Math.random() * 0.5; // респавн низко
+          if (y > 4.8) y = 0.3 + Math.random() * 0.5;
           pos.setY(i, y);
         }
         pos.needsUpdate = true;
