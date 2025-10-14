@@ -1,70 +1,109 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
-  <meta charset="UTF-8" />
-  <title>Medieval Bathroom 3D Quest</title>
+  <meta charset="UTF-8">
+  <title>Комната прошлого</title>
   <style>
-    body {
-      margin: 0;
-      overflow: hidden;
-      background-color: #000;
-    }
-    canvas {
-      display: block;
-    }
+    body { margin: 0; overflow: hidden; background-color: #000; }
+    canvas { display: block; }
   </style>
 </head>
 <body>
-
-  <!-- Подключаем библиотеки Three.js -->
   <script src="assets/js/three.min.js"></script>
   <script src="assets/js/OrbitControls.js"></script>
   <script src="assets/js/GLTFLoader.js"></script>
 
   <script>
-    // === СЦЕНА И КАМЕРА ===
+    // Сцена
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(
-      75,
-      window.innerWidth / window.innerHeight,
-      0.1,
-      1000
-    );
-    camera.position.set(0, 1.5, 3);
+    scene.background = new THREE.Color(0x1a0f0a);
 
-    // === РЕНДЕРЕР ===
+    // Камера
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+    camera.position.set(0, 1.6, 3);
+
+    // Рендерер
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
     document.body.appendChild(renderer.domElement);
 
-    // === КОНТРОЛЫ ===
+    // Контролы
     const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.target.set(0, 1, 0);
     controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
+    controls.dampingFactor = 0.03;
+    controls.maxPolarAngle = Math.PI / 2.1;
+    controls.minDistance = 1;
+    controls.maxDistance = 5;
 
-    // === СВЕТ ===
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+    // Свет
+    const ambientLight = new THREE.AmbientLight(0xffe5b0, 0.6);
     scene.add(ambientLight);
+    const pointLight = new THREE.PointLight(0xffb080, 1.2, 20);
+    pointLight.position.set(1, 2.5, 1);
+    pointLight.castShadow = true;
+    scene.add(pointLight);
 
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-    directionalLight.position.set(5, 10, 7);
-    scene.add(directionalLight);
+    // Загрузка текстур
+    const textureLoader = new THREE.TextureLoader();
+    const floorTex = textureLoader.load('assets/textures/floor.jpg');
+    const wallTex = textureLoader.load('assets/textures/wall.jpg');
+    const mirrorTex = textureLoader.load('assets/textures/mirror.jpg');
 
-    // === ЗАГРУЗКА МОДЕЛИ ===
+    floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
+    floorTex.repeat.set(3, 3);
+    wallTex.wrapS = wallTex.wrapT = THREE.RepeatWrapping;
+    wallTex.repeat.set(2, 2);
+
+    // Пол
+    const floorGeo = new THREE.PlaneGeometry(10, 10);
+    const floorMat = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.9 });
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    scene.add(floor);
+
+    // Стены
+    const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, roughness: 1 });
+    const wall1 = new THREE.Mesh(new THREE.PlaneGeometry(10, 5), wallMat);
+    wall1.position.set(0, 2.5, -5);
+    scene.add(wall1);
+
+    const wall2 = new THREE.Mesh(new THREE.PlaneGeometry(10, 5), wallMat);
+    wall2.position.set(-5, 2.5, 0);
+    wall2.rotation.y = Math.PI / 2;
+    scene.add(wall2);
+
+    const wall3 = new THREE.Mesh(new THREE.PlaneGeometry(10, 5), wallMat);
+    wall3.position.set(5, 2.5, 0);
+    wall3.rotation.y = -Math.PI / 2;
+    scene.add(wall3);
+
+    // Зеркало
+    const mirrorGeo = new THREE.PlaneGeometry(1.2, 0.8);
+    const mirrorMat = new THREE.MeshStandardMaterial({
+      map: mirrorTex,
+      metalness: 0.9,
+      roughness: 0.1,
+      envMapIntensity: 1
+    });
+    const mirror = new THREE.Mesh(mirrorGeo, mirrorMat);
+    mirror.position.set(0, 1.6, -4.99);
+    scene.add(mirror);
+
+    // Модель
     const loader = new THREE.GLTFLoader();
-    loader.load(
-      'assets/models/tub_model.glb',
-      function (gltf) {
-        const model = gltf.scene;
-        scene.add(model);
-      },
-      undefined,
-      function (error) {
-        console.error('Ошибка загрузки модели:', error);
-      }
-    );
+    loader.load('assets/models/tub_model.glb', function (gltf) {
+      const model = gltf.scene;
+      model.position.set(0, 0, 0);
+      model.traverse(obj => {
+        if (obj.isMesh) obj.castShadow = true;
+      });
+      scene.add(model);
+    });
 
-    // === АНИМАЦИЯ ===
+    // Анимация
     function animate() {
       requestAnimationFrame(animate);
       controls.update();
@@ -72,25 +111,23 @@
     }
     animate();
 
-    // === РЕАГИРОВАНИЕ НА ИЗМЕНЕНИЕ РАЗМЕРА ОКНА ===
+    // Resize
     window.addEventListener('resize', () => {
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(window.innerWidth, window.innerHeight);
     });
 
-    // === МУЗЫКА ===
+    // Музыка
     const listener = new THREE.AudioListener();
     camera.add(listener);
-
     const sound = new THREE.Audio(listener);
     const audioLoader = new THREE.AudioLoader();
-
-    audioLoader.load('assets/music/music.mp3', function (buffer) {
+    audioLoader.load('assets/music/music.mp3', buffer => {
       sound.setBuffer(buffer);
       sound.setLoop(true);
-      sound.setVolume(0.5);
-      // sound.play(); // Раскомментируй, чтобы включить звук при загрузке
+      sound.setVolume(0.4);
+      sound.play();
     });
   </script>
 </body>
