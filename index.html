@@ -1,43 +1,82 @@
-<!-- Локальные скрипты -->
-<script src="assets/js/three.min.js"></script>
-<script src="assets/js/OrbitControls.js"></script>
-<script src="assets/js/GLTFLoader.js"></script>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Medieval Bathroom 3D Quest</title>
+  <style>
+    body { margin: 0; overflow: hidden; }
+    canvas { display: block; }
+  </style>
+</head>
+<body>
 
-<!-- Твой JS -->
-<script>
-  const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-  camera.position.set(0, 1.5, 3);
+  <!-- Подключаем локальные скрипты -->
+  <script src="assets/js/three.min.js"></script>
+  <script src="assets/js/OrbitControls.js"></script>
+  <script src="assets/js/GLTFLoader.js"></script>
 
-  const renderer = new THREE.WebGLRenderer({antialias:true});
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  document.body.appendChild(renderer.domElement);
+  <script>
+    // Сцена и камера
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(
+      75,
+      window.innerWidth / window.innerHeight,
+      0.1,
+      1000
+    );
+    camera.position.set(0, 1.5, 3);
 
-  const controls = new THREE.OrbitControls(camera, renderer.domElement);
-
-  const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
-  scene.add(ambientLight);
-
-  const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-  directionalLight.position.set(5, 10, 7);
-  scene.add(directionalLight);
-
-  // Загрузка модели
-  const loader = new THREE.GLTFLoader();
-  loader.load('assets/models/tub_model.glb', function(gltf){
-    scene.add(gltf.scene);
-  });
-
-  function animate(){
-    requestAnimationFrame(animate);
-    controls.update();
-    renderer.render(scene, camera);
-  }
-  animate();
-
-  window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth/window.innerHeight;
-    camera.updateProjectionMatrix();
+    // Рендерер
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-  });
-</script>
+    document.body.appendChild(renderer.domElement);
+
+    // Контролы
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+
+    // Свет
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+    scene.add(ambientLight);
+
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+    directionalLight.position.set(5, 10, 7);
+    scene.add(directionalLight);
+
+    // Загрузка 3D модели
+    const loader = new THREE.GLTFLoader();
+    loader.load(
+      'assets/models/tub_model.glb',
+      function (gltf) {
+        scene.add(gltf.scene);
+      },
+      undefined,
+      function (error) {
+        console.error(error);
+      }
+    );
+
+    // Анимация
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    // Адаптация под окно
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // Музыка
+    const listener = new THREE.AudioListener();
+    camera.add(listener);
+    const sound = new THREE.Audio(listener);
+    const audioLoader = new THREE.AudioLoader();
+    audioLoader.load('assets/music/music.mp3', function(buffer){
+      sound.setBuffer(buffer);
+      sound.setLoop(true);
+      sound.setVolume(0.5);
+      sound
