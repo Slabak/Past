@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Комната прошлого — clean</title>
+  <title>Комната прошлого — workbench</title>
   <style>
     html, body { height: 100%; }
     body { margin: 0; overflow: hidden; background: #000; }
@@ -52,7 +52,7 @@
       controls.enableDamping = true;
       controls.dampingFactor = 0.05;
 
-      // Lighting — только мягкое окружение, без «ламп»
+      // Lighting — мягкое окружение
       scene.add(new THREE.HemisphereLight(0xffddbb, 0x2a1a10, 0.35));
       const warmAmbient = new THREE.AmbientLight(0xffe6cc, 0.35);
       scene.add(warmAmbient);
@@ -118,7 +118,7 @@
         sound.setVolume(0.4);
       });
 
-      // === GLTF tub ===
+      // === GLTF workbench ===
       const loader = new THREE.GLTFLoader();
       try {
         const draco = new THREE.DRACOLoader();
@@ -126,32 +126,32 @@
         loader.setDRACOLoader(draco);
       } catch(e) {}
 
-      const MODEL_URL = 'assets/models/tub_model.glb';
+      const MODEL_URL = 'assets/models/workbench.glb'; // Положи сюда конвертированную модель
       loader.load(MODEL_URL, (gltf) => {
         const model = gltf.scene;
         model.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
 
-        // Центрируем
+        // Центрируем и нормализуем масштаб
         const box = new THREE.Box3().setFromObject(model);
         const size = new THREE.Vector3(); box.getSize(size);
         const center = new THREE.Vector3(); box.getCenter(center);
         model.position.sub(center);
 
-        // Базовый масштаб как раньше → умножаем на 4
+        // Выбираем разумный масштаб под комнату (диагональ ~2.2м)
         const diag = Math.sqrt(size.x*size.x + size.y*size.y + size.z*size.z);
         const targetDiag = 2.2;
         const s = diag > 0 ? targetDiag / diag : 1;
-        model.scale.setScalar(s * 4); // ×4 по твоей просьбе
+        model.scale.setScalar(s);
 
-        // Ставим у правой стены и поворачиваем к центру
-        const offsetFromWall = 0.6 * 4/1; // чуть корректнее с учётом размера
+        // Ставим «на место ванны»: у правой стены, лицом к центру
+        const offsetFromWall = 0.6;
         model.position.set(w/2 - offsetFromWall, 0, 0);
         model.rotation.y = -Math.PI/2;
 
         scene.add(model);
-        console.log('Модель ванны загружена:', MODEL_URL);
+        console.log('Модель workbench загружена:', MODEL_URL);
       }, undefined, (err) => {
-        console.warn('Не удалось загрузить GLB модель (проверь путь):', (err && err.message) ? err.message : err);
+        console.warn('Не удалось загрузить модель (проверь путь):', (err && err.message) ? err.message : err);
         try {
           fetch(MODEL_URL, { method: 'HEAD' })
             .then(r => console.log('HEAD статус для', MODEL_URL, '→', r.status))
