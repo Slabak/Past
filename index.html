@@ -1,20 +1,28 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>Medieval Bathroom 3D Quest</title>
   <style>
-    body { margin: 0; overflow: hidden; }
-    canvas { display: block; }
+    body {
+      margin: 0;
+      overflow: hidden;
+      background-color: #000;
+    }
+    canvas {
+      display: block;
+    }
   </style>
 </head>
 <body>
 
-  <!-- Подключаем только основной three.js -->
+  <!-- Подключаем библиотеки Three.js -->
   <script src="assets/js/three.min.js"></script>
-  
+  <script src="assets/js/OrbitControls.js"></script>
+  <script src="assets/js/GLTFLoader.js"></script>
+
   <script>
-    // Сцена и камера
+    // === СЦЕНА И КАМЕРА ===
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(
       75,
@@ -24,17 +32,17 @@
     );
     camera.position.set(0, 1.5, 3);
 
-    // Рендерер
+    // === РЕНДЕРЕР ===
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
 
-    // Контролы - используем глобальную версию
+    // === КОНТРОЛЫ ===
     const controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
 
-    // Свет
+    // === СВЕТ ===
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
     scene.add(ambientLight);
 
@@ -42,12 +50,13 @@
     directionalLight.position.set(5, 10, 7);
     scene.add(directionalLight);
 
-    // Загрузка 3D модели
+    // === ЗАГРУЗКА МОДЕЛИ ===
     const loader = new THREE.GLTFLoader();
     loader.load(
       'assets/models/tub_model.glb',
       function (gltf) {
-        scene.add(gltf.scene);
+        const model = gltf.scene;
+        scene.add(model);
       },
       undefined,
       function (error) {
@@ -55,7 +64,7 @@
       }
     );
 
-    // Анимация
+    // === АНИМАЦИЯ ===
     function animate() {
       requestAnimationFrame(animate);
       controls.update();
@@ -63,23 +72,25 @@
     }
     animate();
 
-    // Адаптация под окно
+    // === РЕАГИРОВАНИЕ НА ИЗМЕНЕНИЕ РАЗМЕРА ОКНА ===
     window.addEventListener('resize', () => {
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(window.innerWidth, window.innerHeight);
     });
 
-    // Музыка (исправлено - добавлена закрывающая скобка)
+    // === МУЗЫКА ===
     const listener = new THREE.AudioListener();
     camera.add(listener);
+
     const sound = new THREE.Audio(listener);
     const audioLoader = new THREE.AudioLoader();
-    audioLoader.load('assets/music/music.mp3', function(buffer){
+
+    audioLoader.load('assets/music/music.mp3', function (buffer) {
       sound.setBuffer(buffer);
       sound.setLoop(true);
       sound.setVolume(0.5);
-      // sound.play(); // Раскомментируйте когда нужно воспроизведение
+      // sound.play(); // Раскомментируй, чтобы включить звук при загрузке
     });
   </script>
 </body>
