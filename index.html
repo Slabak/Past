@@ -149,12 +149,12 @@
         // 4) ПОЗИЦИЯ — правь тут:
         const wallOffset = 0.65;           // ← отступ от левой стены (м). Больше — правее.
         const x = -w/2 + wallOffset;       // -2 + 0.65 = -1.35
-        const z = -1.40;                    // ← вперёд-назад. Больше — ближе к передней стене.
+        const z = -1;                    // ← вперёд-назад. Больше — ближе к передней стене.
         chest.position.x = x;
         chest.position.z = z;
 
         // 5) ПОВОРОТ — правь тут:
-        chest.rotation.y = Math.PI / 2;    // ← вдоль левой стены. 45°: Math.PI/4, 180°: Math.PI
+        chest.rotation.y = Math.PI / 1;    // ← вдоль левой стены. 45°: Math.PI/4, 180°: Math.PI
 
         scene.add(chest);
       }, undefined, err => console.warn('Не удалось загрузить сундук:', err));
