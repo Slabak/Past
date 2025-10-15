@@ -49,11 +49,16 @@
   <script src="assets/js/GLTFLoader.js"></script>
 
   <script>
-    /** ОРИЕНТИРЫ:
-     *  +Z — к ПЕРЕДНЕЙ стене (там где зеркало по центру).
+    /** ОРИЕНТИРЫ ОСЕЙ:
+     *  +Z — к ПЕРЕДНЕЙ стене (там где зеркало).
      *  +X — к ПРАВОЙ стене.
      *   Y — вверх.
+     *
+     * РУЧНЫЕ НАСТРОЙКИ ПОЛОЖЕНИЯ БОЧЕК:
      */
+    const BARRELS_GAP_Z  = 0.80; // смещение бочек вдоль левой стены ОТ сундука (по +Z). Увеличь, если «врезаются».
+    const BARRELS_NUDGE_X = 0.08; // отступ бочек к центру комнаты (по +X), чтобы не пересекались со стеной/сундуком.
+
     let scene, camera, renderer, controls, listener, bgm, portalSound;
 
     // размеры комнаты (м)
@@ -68,7 +73,7 @@
           portalSound.setBuffer(buffer); portalSound.setLoop(false);
           portalSound.setVolume(0.9); portalSound.play();
         });
-      } catch { /* no-op */ }
+      } catch {}
     }
     function startBGM() {
       try {
@@ -77,8 +82,8 @@
         bgm = new THREE.Audio(listener);
         loader.load('assets/music/music.mp3', (buffer) => {
           bgm.setBuffer(buffer); bgm.setLoop(true); bgm.setVolume(0.35); bgm.play();
-        });
-      } catch { /* no-op */ }
+        }, undefined, () => console.warn('music.mp3 не найден'));
+      } catch {}
     }
 
     function init() {
@@ -92,9 +97,9 @@
       scene.background = new THREE.Color(0x100806);
       scene.fog = new THREE.Fog(0x1a0f0a, 5, 12);
 
-      // КАМЕРА: стоим по центру комнаты и крутим только головой
+      // КАМЕРА: по центру, 360° вращение, «свайповая» инерция
       camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 50);
-      camera.position.set(0, 1.6, 0); // центр, высота глаз ~1.6 м
+      camera.position.set(0, 1.6, 0);
 
       renderer = new THREE.WebGLRenderer({ antialias: true });
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -108,13 +113,19 @@
 
       controls = new THREE.OrbitControls(camera, renderer.domElement);
       controls.target.set(0, 1.5, 0);
-      controls.enableDamping = true;
       controls.enableZoom = false;
       controls.enablePan  = false;
-      controls.minPolarAngle = Math.PI / 4;
-      controls.maxPolarAngle = Math.PI - Math.PI / 4;
-      controls.minAzimuthAngle = -Math.PI; // можно ограничить сектор обзора при желании
-      controls.maxAzimuthAngle =  Math.PI;
+      controls.enableRotate = true;
+      // 360° по горизонту
+      controls.minAzimuthAngle = -Infinity;
+      controls.maxAzimuthAngle =  Infinity;
+      // почти полный диапазон по вертикали, без переворота
+      controls.minPolarAngle = THREE.MathUtils.degToRad(2);
+      controls.maxPolarAngle = THREE.MathUtils.degToRad(178);
+      // инерция «свайпа»
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.12;
+      controls.rotateSpeed   = 0.6; // поставь -0.6, если хочешь инвертировать ощущение
 
       // свет
       const hemi = new THREE.HemisphereLight(0xffd9b0, 0x1a0f0a, 0.35); scene.add(hemi);
@@ -157,7 +168,7 @@
       })();
     }
 
-    // Загрузка сцены с прогрессом: текстуры, комната, сундук (по твоему коду), бочки-группа
+    // Загрузка: текстуры, комната, сундук (по твоему коду), бочки-группа
     function loadAllAssetsWithProgress(onProgress) {
       return new Promise((resolve) => {
         const manager = new THREE.LoadingManager(
@@ -173,14 +184,14 @@
         const tl = new THREE.TextureLoader(manager);
         const floorTex = tl.load('assets/textures/floor.jpg'); floorTex.colorSpace = THREE.SRGBColorSpace;
         floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping; floorTex.repeat.set(2, 2);
-        const wallTex  = tl.load('assets/textures/wall.jpg?v=9'); wallTex.colorSpace = THREE.SRGBColorSpace;
+        const wallTex  = tl.load('assets/textures/wall.jpg?v=10'); wallTex.colorSpace = THREE.SRGBColorSpace;
         wallTex.wrapS = wallTex.wrapT = THREE.ClampToEdgeWrapping;
         const mirrorTex = tl.load('assets/textures/mirror.jpg'); mirrorTex.colorSpace = THREE.SRGBColorSpace;
 
-        // ROOM (опустил стены на 1 см, чтобы не было щели)
+        // ROOM (слегка опускаем стены, чтобы не светила щель)
         const floor = new THREE.Mesh(new THREE.PlaneGeometry(w, d),
           new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.9 }));
-        floor.rotation.x = -Math.PI/2; floor.position.y = 0.0005; // небольшой подъём пола
+        floor.rotation.x = -Math.PI/2; floor.position.y = 0.0005;
         floor.receiveShadow = true; scene.add(floor);
 
         const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, roughness: 1.0 });
@@ -203,7 +214,7 @@
         // MODELS
         const gltfLoader = new THREE.GLTFLoader(manager);
 
-        // ---- СУНДУК (как у тебя было) ----
+        // ---- СУНДУК (как в твоём примере) ----
         gltfLoader.load('assets/models/chest.glb', (gltf) => {
           const chest = gltf.scene;
           chest.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
@@ -252,11 +263,10 @@
             const g1 = new THREE.Box3().setFromObject(barrels);
             barrels.position.y -= g1.min.y;
 
-            // СПРАВА от сундука: +Z (вдоль стены к передней), чуть к центру по +X чтобы не пересекалось
-            const gapZ = 0.75;     // расстояние по стене между центрами
-            const nudgeX = 0.06;   // 6 см в сторону центра комнаты
-            barrels.position.x = chest.position.x + nudgeX;
-            barrels.position.z = Math.min(d/2 - 0.35, chest.position.z + gapZ);
+            // >>> КЛЮЧЕВЫЕ 2 ПАРАМЕТРА ДЛЯ ПЕРЕДВИЖЕНИЯ БОЧЕК <<<
+            // СПРАВА от сундука: вдоль стены по +Z и чуть к центру по +X
+            barrels.position.x = chest.position.x + BARRELS_NUDGE_X;
+            barrels.position.z = Math.min(d/2 - 0.75, chest.position.z + BARRELS_GAP_Z);
 
             // Повернуть на 90° влево относительно сундука
             barrels.rotation.y = chest.rotation.y - Math.PI / 2;
