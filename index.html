@@ -61,7 +61,7 @@
     // ---- Параметры комнаты/объектов ----
     const w = 4, d = 4, h = 3; // м
 
-    // Сундук (как договаривались)
+    // Сундук
     const CHEST_SIZE_MULT     = 1.5;
     const CHEST_WALLOFFSET_X  = 0.45;
     const CHEST_Z             = 1.10;
@@ -72,12 +72,12 @@
     const BARRELS_Z             = -1.10;
     const BARRELS_ROT_LEFT_90   = true;
 
-    // БАЛКИ (plank.glb)
-    const BEAM_THICKNESS     = 0.16;     // толщина/ширина ~16 см
-    const BEAM_INSET_WALL    = 0.000;    // от стен
-    const BEAM_INSET_CEIL    = 0.000;    // от потолка
-    const POST_FLOOR_GAP     = 0.000;    // приподнять стойки от пола
-    const BEAM_MITER_OVERLAP = BEAM_THICKNESS * 1.2; // заход в углы, чтобы исключить щель
+    // БАЛКИ (plank.glb) — УВЕЛИЧЕНО
+    const BEAM_THICKNESS     = 0.24;           // было 0.16 → стало 0.24 м (24 см)
+    const BEAM_INSET_WALL    = 0.000;
+    const BEAM_INSET_CEIL    = 0.000;
+    const POST_FLOOR_GAP     = 0.000;
+    const BEAM_MITER_OVERLAP = BEAM_THICKNESS * 1.3; // заход в угол
 
     // ---- Глобальные ----
     let scene, camera, renderer;
@@ -230,7 +230,7 @@
         // Текстуры
         const tl=new THREE.TextureLoader(manager);
         const floorTex=tl.load('assets/textures/floor.jpg'); floorTex.colorSpace=THREE.SRGBColorSpace; floorTex.wrapS=floorTex.wrapT=THREE.RepeatWrapping; floorTex.repeat.set(2,2);
-        const wallTex =tl.load('assets/textures/wall.jpg?v=17'); wallTex.colorSpace=THREE.SRGBColorSpace; wallTex.wrapS=wallTex.wrapT=THREE.ClampToEdgeWrapping;
+        const wallTex =tl.load('assets/textures/wall.jpg?v=18'); wallTex.colorSpace=THREE.SRGBColorSpace; wallTex.wrapS=wallTex.wrapT=THREE.ClampToEdgeWrapping;
         const mirrorTex=tl.load('assets/textures/mirror.jpg'); mirrorTex.colorSpace=THREE.SRGBColorSpace;
         fallbackWood  =tl.load('assets/textures/wood.jpg', t=>{t.colorSpace=THREE.SRGBColorSpace; t.anisotropy=renderer.capabilities.getMaxAnisotropy?.()||8;});
 
@@ -315,8 +315,8 @@
           const zF =  d/2 - BEAM_INSET_WALL - half; // передняя
 
           const y0 = 0 + POST_FLOOR_GAP + half;           // низ стоек (центр)
-          const yT = h - BEAM_INSET_CEIL - half;          // верх стоек (центр → верхняя плоскость ровно у потолка)
-          const yH = yT - half;                           // центр горизонтальных, чтобы верх совпал с потолком и со стойками
+          const yT = h - BEAM_INSET_CEIL - half;          // верх стоек (центр)
+          const yH = yT - half;                           // центр горизонтальных, чтобы верх совпал с потолком/стойками
 
           // 4 вертикальные стойки
           spawnBetween(new THREE.Vector3(xL,y0,zB), new THREE.Vector3(xL,yT,zB));
