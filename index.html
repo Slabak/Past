@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Комната — портал, 360° камера, сундук, бочки и балки</title>
+  <title>Комната — портал, 360° камера, сундук, бочки, балки и потолок</title>
   <style>
     html, body { height:100%; margin:0; overflow:hidden; background:#000; }
     #overlay, #loading-screen {
@@ -72,12 +72,13 @@
     const BARRELS_Z             = -1.10;
     const BARRELS_ROT_LEFT_90   = true;
 
-    // БАЛКИ (plank.glb) — УВЕЛИЧЕНО
-    const BEAM_THICKNESS     = 0.24;           // было 0.16 → стало 0.24 м (24 см)
+    // БАЛКИ (plank.glb)
+    const BEAM_THICKNESS     = 0.24;                // 24 см
     const BEAM_INSET_WALL    = 0.000;
     const BEAM_INSET_CEIL    = 0.000;
     const POST_FLOOR_GAP     = 0.000;
-    const BEAM_MITER_OVERLAP = BEAM_THICKNESS * 1.3; // заход в угол
+    const BEAM_MITER_OVERLAP = BEAM_THICKNESS * 1.3;
+    const BACK_BEAM_RAISE    = 0.04;                // поднять заднюю горизонтальную балку (над зеркалом) на 4 см
 
     // ---- Глобальные ----
     let scene, camera, renderer;
@@ -229,19 +230,30 @@
 
         // Текстуры
         const tl=new THREE.TextureLoader(manager);
-        const floorTex=tl.load('assets/textures/floor.jpg'); floorTex.colorSpace=THREE.SRGBColorSpace; floorTex.wrapS=floorTex.wrapT=THREE.RepeatWrapping; floorTex.repeat.set(2,2);
-        const wallTex =tl.load('assets/textures/wall.jpg?v=18'); wallTex.colorSpace=THREE.SRGBColorSpace; wallTex.wrapS=wallTex.wrapT=THREE.ClampToEdgeWrapping;
-        const mirrorTex=tl.load('assets/textures/mirror.jpg'); mirrorTex.colorSpace=THREE.SRGBColorSpace;
-        fallbackWood  =tl.load('assets/textures/wood.jpg', t=>{t.colorSpace=THREE.SRGBColorSpace; t.anisotropy=renderer.capabilities.getMaxAnisotropy?.()||8;});
+        const floorTex  = tl.load('assets/textures/floor.jpg'); floorTex.colorSpace=THREE.SRGBColorSpace; floorTex.wrapS=floorTex.wrapT=THREE.RepeatWrapping; floorTex.repeat.set(2,2);
+        const wallTex   = tl.load('assets/textures/wall.jpg?v=19'); wallTex.colorSpace=THREE.SRGBColorSpace; wallTex.wrapS=wallTex.wrapT=THREE.ClampToEdgeWrapping;
+        const mirrorTex = tl.load('assets/textures/mirror.jpg'); mirrorTex.colorSpace=THREE.SRGBColorSpace;
+        const ceilTex   = tl.load('assets/textures/potolok.jpg'); ceilTex.colorSpace=THREE.SRGBColorSpace; // потолок
+        fallbackWood    = tl.load('assets/textures/wood.jpg', t=>{t.colorSpace=THREE.SRGBColorSpace; t.anisotropy=renderer.capabilities.getMaxAnisotropy?.()||8;});
 
-        // Комната
+        // Комната: пол
         const floor=new THREE.Mesh(new THREE.PlaneGeometry(w,d), new THREE.MeshStandardMaterial({map:floorTex, roughness:0.9}));
         floor.rotation.x=-Math.PI/2; floor.position.y=0.0005; floor.receiveShadow=true; scene.add(floor);
 
+        // Стены
         const wallMat=new THREE.MeshStandardMaterial({map:wallTex, roughness:1.0});
         const walls=[[0,h/2-0.01,-d/2,0],[0,h/2-0.01,d/2,Math.PI],[-w/2,h/2-0.01,0,Math.PI/2],[w/2,h/2-0.01,0,-Math.PI/2]];
         walls.forEach(([x,y,z,ry])=>{ const wall=new THREE.Mesh(new THREE.PlaneGeometry(ry?d:w,h+0.02), wallMat); wall.position.set(x,y,z); if(ry) wall.rotation.y=ry; wall.receiveShadow=true; scene.add(wall); });
 
+        // Потолок
+        const ceilMat = new THREE.MeshStandardMaterial({ map: ceilTex, roughness: 0.85, metalness: 0.0 });
+        const ceil = new THREE.Mesh(new THREE.PlaneGeometry(w, d), ceilMat);
+        ceil.rotation.x = Math.PI; // смотрит вниз
+        ceil.position.set(0, h - 0.001, 0);
+        ceil.receiveShadow = true;
+        scene.add(ceil);
+
+        // Зеркало
         const mirror=new THREE.Mesh(new THREE.PlaneGeometry(0.9,0.6), new THREE.MeshStandardMaterial({map:mirrorTex, metalness:0.85, roughness:0.22}));
         mirror.position.set(0,1.5,-d/2+0.01); scene.add(mirror);
 
@@ -316,7 +328,7 @@
 
           const y0 = 0 + POST_FLOOR_GAP + half;           // низ стоек (центр)
           const yT = h - BEAM_INSET_CEIL - half;          // верх стоек (центр)
-          const yH = yT - half;                           // центр горизонтальных, чтобы верх совпал с потолком/стойками
+          const yH = yT - half;                           // центр горизонтальных (общий)
 
           // 4 вертикальные стойки
           spawnBetween(new THREE.Vector3(xL,y0,zB), new THREE.Vector3(xL,yT,zB));
@@ -324,8 +336,12 @@
           spawnBetween(new THREE.Vector3(xL,y0,zF), new THREE.Vector3(xL,yT,zF));
           spawnBetween(new THREE.Vector3(xR,y0,zF), new THREE.Vector3(xR,yT,zF));
 
-          // 4 горизонтальные под потолком (с заходом в углы)
-          spawnBetween(new THREE.Vector3(xL-BEAM_MITER_OVERLAP,yH,zB), new THREE.Vector3(xR+BEAM_MITER_OVERLAP,yH,zB)); // задняя
+          // 4 горизонтальные (с заходом в углы)
+          // ЗАДНЯЯ — поднята на BACK_BEAM_RAISE
+          const yH_back = yH + BACK_BEAM_RAISE;
+          spawnBetween(new THREE.Vector3(xL-BEAM_MITER_OVERLAP,yH_back,zB), new THREE.Vector3(xR+BEAM_MITER_OVERLAP,yH_back,zB)); // задняя
+
+          // Остальные три — как обычно
           spawnBetween(new THREE.Vector3(xL-BEAM_MITER_OVERLAP,yH,zF), new THREE.Vector3(xR+BEAM_MITER_OVERLAP,yH,zF)); // передняя
           spawnBetween(new THREE.Vector3(xL,yH,zB-BEAM_MITER_OVERLAP), new THREE.Vector3(xL,yH,zF+BEAM_MITER_OVERLAP)); // левая
           spawnBetween(new THREE.Vector3(xR,yH,zB-BEAM_MITER_OVERLAP), new THREE.Vector3(xR,yH,zF+BEAM_MITER_OVERLAP)); // правая
