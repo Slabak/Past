@@ -3,10 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Комната прошлого — 4x4x3 + сундук v2</title>
+  <title>Комната прошлого — 4x4x3 + сундук</title>
   <style>
-    html, body { height: 100%; }
-    body { margin: 0; overflow: hidden; background: #000; }
+    html, body { height: 100%; margin: 0; overflow: hidden; background: #000; }
     #overlay {
       position: fixed; inset: 0; display: grid; place-items: center;
       font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
@@ -24,6 +23,7 @@
   <script src="assets/js/three.min.js"></script>
   <script src="assets/js/OrbitControls.js"></script>
   <script src="assets/js/GLTFLoader.js"></script>
+
   <script>
     let scene, camera, renderer, controls, listener, sound;
 
@@ -62,12 +62,6 @@
       dir.castShadow = true;
       dir.shadow.mapSize.set(1024, 1024);
       dir.shadow.radius = 4;
-      dir.shadow.camera.near = 0.1;
-      dir.shadow.camera.far = 12;
-      dir.shadow.camera.left = -4;
-      dir.shadow.camera.right = 4;
-      dir.shadow.camera.top = 4;
-      dir.shadow.camera.bottom = -4;
       scene.add(dir);
 
       const tl = new THREE.TextureLoader();
@@ -75,96 +69,71 @@
       const wallTex  = tl.load('assets/textures/wall.jpg');
       const mirrorTex = tl.load('assets/textures/mirror.jpg');
       const maxAniso = renderer.capabilities.getMaxAnisotropy();
-      ;[floorTex, wallTex, mirrorTex].forEach(t => { if (t) t.anisotropy = maxAniso; });
+      [floorTex, wallTex, mirrorTex].forEach(t => { if (t) t.anisotropy = maxAniso; });
       floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping; floorTex.repeat.set(2, 2);
       wallTex.wrapS = wallTex.wrapT = THREE.RepeatWrapping; wallTex.repeat.set(2, 1.5);
 
-      const floorMat = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.95, metalness: 0.0, side: THREE.DoubleSide });
-      const wallMat  = new THREE.MeshStandardMaterial({ map: wallTex,  roughness: 1.00, metalness: 0.0, side: THREE.DoubleSide });
+      const floorMat = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.95, metalness: 0.0 });
+      const wallMat  = new THREE.MeshStandardMaterial({ map: wallTex,  roughness: 1.00, metalness: 0.0 });
 
       const floor = new THREE.Mesh(new THREE.PlaneGeometry(w, d), floorMat);
-      floor.rotation.x = -Math.PI/2; floor.position.set(0, 0, 0); floor.receiveShadow = true; scene.add(floor);
+      floor.rotation.x = -Math.PI/2; floor.receiveShadow = true; scene.add(floor);
 
-      const wall1 = new THREE.Mesh(new THREE.PlaneGeometry(w, h), wallMat); wall1.position.set(0, h/2, -d/2);
-      const wall4 = new THREE.Mesh(new THREE.PlaneGeometry(w, h), wallMat); wall4.position.set(0, h/2,  d/2); wall4.rotation.y = Math.PI;
-      const wall2 = new THREE.Mesh(new THREE.PlaneGeometry(d, h), wallMat); wall2.position.set(-w/2, h/2, 0); wall2.rotation.y =  Math.PI/2;
-      const wall3 = new THREE.Mesh(new THREE.PlaneGeometry(d, h), wallMat); wall3.position.set( w/2, h/2, 0); wall3.rotation.y = -Math.PI/2;
-      [wall1, wall2, wall3, wall4].forEach(wl => { wl.receiveShadow = true; wl.castShadow = false; scene.add(wl); });
+      const walls = [
+        [0, h/2, -d/2, 0], [0, h/2, d/2, Math.PI],
+        [-w/2, h/2, 0,  Math.PI/2], [w/2, h/2, 0, -Math.PI/2]
+      ];
+      walls.forEach(([x,y,z,rot])=>{
+        const wall = new THREE.Mesh(new THREE.PlaneGeometry(rot?d:w, h), wallMat);
+        wall.position.set(x,y,z); if(rot) wall.rotation.y = rot; wall.receiveShadow = true; scene.add(wall);
+      });
 
-      const mirror = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.6),
-        new THREE.MeshStandardMaterial({ map: mirrorTex, metalness: 0.85, roughness: 0.22, side: THREE.DoubleSide }));
+      const mirror = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.9, 0.6),
+        new THREE.MeshStandardMaterial({ map: mirrorTex, metalness: 0.85, roughness: 0.22 })
+      );
       mirror.position.set(0, 1.5, -d/2 + 0.01); scene.add(mirror);
-
-      listener = new THREE.AudioListener(); camera.add(listener);
-      sound = new THREE.Audio(listener);
 
       const loader = new THREE.GLTFLoader();
 
-      // Workbench (правый край)
-      loader.load('assets/models/workbench.glb', (gltf) => {
+      // Верстак
+      loader.load('assets/models/workbench.glb', gltf=>{
         const model = gltf.scene;
-        model.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+        model.traverse(o=>{ if(o.isMesh){ o.castShadow = o.receiveShadow = true; }});
         const box = new THREE.Box3().setFromObject(model);
         const size = new THREE.Vector3(); box.getSize(size);
         const center = new THREE.Vector3(); box.getCenter(center);
         model.position.sub(center);
-        const diag = Math.sqrt(size.x*size.x + size.y*size.y + size.z*size.z);
-        const targetDiag = 1.6;
-        const s = diag > 0 ? targetDiag / diag : 1;
+        const s = 1.6 / Math.sqrt(size.x**2 + size.y**2 + size.z**2);
         model.scale.setScalar(s);
-        const offsetFromWall = 0.35;
-        model.position.set(w/2 - offsetFromWall, 0, 0);
+        model.position.set(w/2 - 0.35, 0, 0);
         model.rotation.y = -Math.PI/2;
         scene.add(model);
       });
 
-      // Chest (bench.glb) — левая стена, ближе к переднему углу (к зрителю)
-      loader.load('assets/models/bench.glb', (gltf) => {
+      // Сундук
+      loader.load('assets/models/chest.glb', gltf=>{
         const chest = gltf.scene;
-        chest.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-        // Нормализация
+        chest.traverse(o=>{ if(o.isMesh){ o.castShadow = o.receiveShadow = true; }});
         const box = new THREE.Box3().setFromObject(chest);
         const size = new THREE.Vector3(); box.getSize(size);
         const center = new THREE.Vector3(); box.getCenter(center);
         chest.position.sub(center);
-        // Масштаб под комнату (сундук ~1.2м диагональ)
-        const diag = Math.sqrt(size.x*size.x + size.y*size.y + size.z*size.z);
-        const targetDiag = 1.2;
-        const s = diag > 0 ? targetDiag / diag : 1;
+        const s = 1.2 / Math.sqrt(size.x**2 + size.y**2 + size.z**2);
         chest.scale.setScalar(s);
-        // Позиция у левой стены, ближе к переднему краю
-        const x = -w/2 + 0.25; // отступ от стены 25 см
-        const z =  1.4;        // ближе к передней стене (передний край = +2)
-        chest.position.set(x, 0, z);
-        chest.rotation.y = Math.PI / 2; // «лицом» в центр комнаты
+        chest.position.set(-w/2 + 0.25, 0, 1.4);
+        chest.rotation.y = Math.PI/2;
         scene.add(chest);
       });
 
-      window.addEventListener('resize', () => {
+      window.addEventListener('resize', ()=>{
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
       });
 
-      const animate = () => {
-        requestAnimationFrame(animate);
-        controls.update();
-        renderer.render(scene, camera);
-      };
+      const animate = ()=>{ requestAnimationFrame(animate); controls.update(); renderer.render(scene, camera); };
       animate();
-
-      document.getElementById('start').addEventListener('click', async () => {
-        document.getElementById('overlay').style.display = 'none';
-        try {
-          const ac = listener?.context; if (ac && ac.state === 'suspended') await ac.resume();
-        } catch(e) {}
-        try {
-          const audioLoader = new THREE.AudioLoader();
-          audioLoader.load('assets/music/music.mp3', buffer => {
-            sound.setBuffer(buffer); sound.setLoop(true); sound.setVolume(0.35); sound.play();
-          }, undefined, ()=>{});
-        } catch(_) {}
-      }, { once: true });
     };
 
     window.addEventListener('load', init);
