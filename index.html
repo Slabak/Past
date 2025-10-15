@@ -132,41 +132,42 @@
 
       // СУНДУК (центр -> масштаб -> поставить на пол -> позиция -> поворот)
       try {
-        const loader = new THREE.GLTFLoader();
-        loader.load('assets/models/chest.glb', (gltf) => {
-          const chest = gltf.scene;
-          chest.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
+      const loader = new THREE.GLTFLoader();
+      loader.load('assets/models/chest.glb', (gltf) => {
+        const chest = gltf.scene;
+        chest.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
 
-          // центрируем
-          const box0 = new THREE.Box3().setFromObject(chest);
-          chest.position.sub(box0.getCenter(new THREE.Vector3()));
+        // 1) Центрируем модель вокруг (0,0,0)
+        const box0 = new THREE.Box3().setFromObject(chest);
+        chest.position.sub(box0.getCenter(new THREE.Vector3()));
 
-          // МАСШТАБ — правь множитель SIZE_MULT при желании
-          const SIZE_MULT = 1.5;                 // 1.0 = оригинал, 1.5 = больше
-          const targetDiag = 1.2 * SIZE_MULT;    // целевая диагональ модели
-          const diag0 = box0.getSize(new THREE.Vector3()).length();
-          const s = diag0 > 0 ? targetDiag / diag0 : 1;
-          chest.scale.setScalar(s);
+        // 2) МАСШТАБ — правь тут:
+        //    базовая «целевая диагональ» 1.2 м, дополнительно множитель SIZE_MULT.
+        const SIZE_MULT = 1.5;                 // ← увеличить/уменьшить размер сундука
+        const targetDiag = 1.2 * SIZE_MULT;    // ← целевая диагональ в метрах
+        const diag0 = box0.getSize(new THREE.Vector3()).length();
+        const s = diag0 > 0 ? targetDiag / diag0 : 1;
+        chest.scale.setScalar(s);
 
-          // поставить «на пол»
-          const box1 = new THREE.Box3().setFromObject(chest);
-          chest.position.y -= box1.min.y;
+        // 3) Поднять на пол (y = 0)
+        const box1 = new THREE.Box3().setFromObject(chest);
+        chest.position.y -= box1.min.y; // основание теперь стоит на полу
 
-          // ПОЗИЦИЯ вдоль левой стены — правь при необходимости
-          const wallOffset = 0.65;               // отступ от левой стены (м). Больше — правее.
-          const x = -w/2 + wallOffset;           // -2 + 0.65 = -1.35
-          const z = -1.50;                       // к зеркалу (задняя стена z=-2). Увеличь к -1.7/-1.8, если нужно ближе.
-          chest.position.x = x;
-          chest.position.z = z;
+        // 4) ПОЗИЦИЯ — правь тут:
+        const wallOffset = 0.45;           // ← отступ от левой стены (м). Больше — правее.
+        const x = -w/2 + wallOffset;       // -2 + 0.65 = -1.35
+        const z = 1.10;                    // ← вперёд-назад. Больше — ближе к передней стене.
+        chest.position.x = x;
+        chest.position.z = z;
 
-          // ПОВОРОТ вдоль стены
-          chest.rotation.y = Math.PI / 2;        // 90°. Меняй на нужный угол.
+        // 5) ПОВОРОТ — правь тут:
+        chest.rotation.y = Math.PI / 1;    // ← вдоль левой стены. 45°: Math.PI/4, 180°: Math.PI
 
-          scene.add(chest);
-        }, undefined, err => console.warn('Не удалось загрузить сундук:', err));
-      } catch (e) {
-        console.warn('GLTFLoader error:', e);
-      }
+        scene.add(chest);
+      }, undefined, err => console.warn('Не удалось загрузить сундук:', err));
+    } catch (e) {
+      console.warn('GLTFLoader error:', e);
+    }
 
       // resize + анимация
       window.addEventListener('resize', () => {
