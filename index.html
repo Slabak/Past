@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Комната — портал с прогрессом</title>
+  <title>Комната — портал, сундук и двойные бочки</title>
   <style>
     html, body { height: 100%; margin: 0; overflow: hidden; background: #000; }
     #overlay, #loading-screen {
@@ -48,15 +48,8 @@
   <script src="assets/js/GLTFLoader.js"></script>
 
   <script>
-    // ---------- СЦЕНА/РЕНДЕР ----------
     let scene, camera, renderer, controls, listener, bgm, portalSound;
     const w = 4, d = 4, h = 3; // размеры комнаты
-
-    // Настраиваемые размеры моделей (чтобы «не были гигантами»)
-    const CHEST_TARGET_DIAG = 1.0;    // м — «диагональ» сундука после нормализации
-    const BARREL_RELATIVE    = 0.80;   // от размера сундука (0.8 = чуть меньше сундука)
-    const BARREL_Z_OFFSET    = -0.70;  // сдвиг бочки по Z относительно сундука (вдоль стены)
-    const WALL_OFFSET_X      = 0.45;   // отступ от левой стены для обеих моделей
 
     function playPortal() {
       try {
@@ -110,14 +103,16 @@
       // свет
       const hemi = new THREE.HemisphereLight(0xffd9b0, 0x1a0f0a, 0.35); scene.add(hemi);
       const ambient = new THREE.AmbientLight(0xffd7aa, 0.15); scene.add(ambient);
-      const dir = new THREE.DirectionalLight(0xffb366, 1.25); dir.position.set(-2.5, 3.5, 1.5);
-      dir.castShadow = true; dir.shadow.mapSize.set(2048, 2048); dir.shadow.radius = 6; scene.add(dir);
+      const dir = new THREE.DirectionalLight(0xffb366, 1.25);
+      dir.position.set(-2.5, 3.5, 1.5);
+      dir.castShadow = true; dir.shadow.mapSize.set(2048, 2048); dir.shadow.radius = 6;
+      scene.add(dir);
       const fire = new THREE.PointLight(0xffa860, 0.6, 6); fire.position.set(-1.5, 1.2, 1.2); scene.add(fire);
 
       // аудио-листенер
       listener = new THREE.AudioListener(); camera.add(listener);
 
-      // кнопка входа -> включаем портал и начинаем загрузку ассетов
+      // кнопка -> портал -> загрузка
       startBtn.addEventListener('click', () => {
         overlay.style.display = 'none';
         loadingScreen.style.display = 'grid';
@@ -128,10 +123,7 @@
         }).then(() => {
           playPortal();
           loadingScreen.classList.add('fade-out');
-          setTimeout(() => {
-            loadingScreen.remove();
-            startBGM(); // музыка только после портала
-          }, 1000);
+          setTimeout(() => { loadingScreen.remove(); startBGM(); }, 1000);
         });
       }, { once: true });
 
@@ -146,40 +138,29 @@
         controls.update(); renderer.render(scene, camera); })();
     }
 
-    // ---------- ЗАГРУЗКА С ПРОГРЕССОМ ----------
+    // Загрузка с прогрессом: комната + сундук (по твоему коду) + группа из 2 бочек
     function loadAllAssetsWithProgress(onProgress) {
       return new Promise((resolve) => {
-        // LoadingManager даёт общий прогресс по ВСЕМ загрузкам (текстуры + модели)
         const manager = new THREE.LoadingManager(
-          () => resolve(), // onLoad (всё загрузилось)
+          () => resolve(),
           (url, itemsLoaded, itemsTotal) => {
             const pct = Math.min(100, Math.floor(itemsLoaded / itemsTotal * 100));
             onProgress?.(pct);
           },
-          (url) => {
-            console.warn('Ошибка загрузки:', url);
-          }
+          (url) => console.warn('Ошибка загрузки:', url)
         );
 
         // Текстуры через manager
         const tl = new THREE.TextureLoader(manager);
-        const floorTex = tl.load('assets/textures/floor.jpg');
-        floorTex.colorSpace = THREE.SRGBColorSpace;
-        floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
-        floorTex.repeat.set(2, 2);
-
-        const wallTex  = tl.load('assets/textures/wall.jpg?v=6');
-        wallTex.colorSpace = THREE.SRGBColorSpace;
+        const floorTex = tl.load('assets/textures/floor.jpg'); floorTex.colorSpace = THREE.SRGBColorSpace;
+        floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping; floorTex.repeat.set(2, 2);
+        const wallTex  = tl.load('assets/textures/wall.jpg?v=8'); wallTex.colorSpace = THREE.SRGBColorSpace;
         wallTex.wrapS = wallTex.wrapT = THREE.ClampToEdgeWrapping;
+        const mirrorTex = tl.load('assets/textures/mirror.jpg'); mirrorTex.colorSpace = THREE.SRGBColorSpace;
 
-        const mirrorTex = tl.load('assets/textures/mirror.jpg');
-        mirrorTex.colorSpace = THREE.SRGBColorSpace;
-
-        // Комната (можно создавать сразу — текстуры подтянутся, когда догрузятся)
-        const floor = new THREE.Mesh(
-          new THREE.PlaneGeometry(w, d),
-          new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.9 })
-        );
+        // Комната
+        const floor = new THREE.Mesh(new THREE.PlaneGeometry(w, d),
+          new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.9 }));
         floor.rotation.x = -Math.PI/2; floor.receiveShadow = true; scene.add(floor);
 
         const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, roughness: 1.0 });
@@ -193,66 +174,79 @@
           wall.receiveShadow = true; scene.add(wall);
         });
 
-        const mirror = new THREE.Mesh(
-          new THREE.PlaneGeometry(0.9, 0.6),
-          new THREE.MeshStandardMaterial({ map: mirrorTex, metalness: 0.85, roughness: 0.22 })
-        );
+        const mirror = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.6),
+          new THREE.MeshStandardMaterial({ map: mirrorTex, metalness: 0.85, roughness: 0.22 }));
         mirror.position.set(0, 1.5, -d/2 + 0.01); scene.add(mirror);
 
-        // Модели через manager
+        // Модели
         const gltfLoader = new THREE.GLTFLoader(manager);
 
-        // Сундук
+        // --- СУНДУК: как в твоём примере ---
         gltfLoader.load('assets/models/chest.glb', (gltf) => {
           const chest = gltf.scene;
           chest.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
 
-          // нормализация/масштаб
+          // 1) Центр
           const box0 = new THREE.Box3().setFromObject(chest);
           chest.position.sub(box0.getCenter(new THREE.Vector3()));
+
+          // 2) Масштаб
+          const SIZE_MULT = 1.5;
+          const targetDiag = 1.2 * SIZE_MULT;
           const diag0 = box0.getSize(new THREE.Vector3()).length();
-          const s = diag0 > 0 ? (CHEST_TARGET_DIAG / diag0) : 1;
+          const s = diag0 > 0 ? targetDiag / diag0 : 1;
           chest.scale.setScalar(s);
 
-          // на пол
+          // 3) На пол
           const box1 = new THREE.Box3().setFromObject(chest);
           chest.position.y -= box1.min.y;
 
-          // позиция и поворот (как ты задавал)
-          chest.position.set(-w/2 + WALL_OFFSET_X, 0, 1.10);
-          chest.rotation.y = Math.PI;
+          // 4) Позиция
+          const wallOffset = 0.45;
+          const x = -w/2 + wallOffset;
+          const z = 1.10;
+          chest.position.x = x;
+          chest.position.z = z;
+
+          // 5) Поворот
+          chest.rotation.y = Math.PI / 1;
 
           scene.add(chest);
 
-          // Бочка (зависит от сундука, но тоже учитывается в общем прогрессе)
+          // --- ДВОЙНЫЕ БОЧКИ из одного GLB ---
           gltfLoader.load('assets/models/barrel.glb', (gltf2) => {
-            const barrel = gltf2.scene;
-            barrel.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
+            // весь GLB как один "групповой" объект (внутри 2 бочки разного размера)
+            const barrels = gltf2.scene;
+            barrels.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
 
-            // нормализация
-            const b0 = new THREE.Box3().setFromObject(barrel);
-            barrel.position.sub(b0.getCenter(new THREE.Vector3()));
+            // центрируем группу
+            const g0 = new THREE.Box3().setFromObject(barrels);
+            barrels.position.sub(g0.getCenter(new THREE.Vector3()));
 
-            // масштаб относительно сундука
-            const chestSize = new THREE.Box3().setFromObject(chest).getSize(new THREE.Vector3()).length();
-            const barrelSize = b0.getSize(new THREE.Vector3()).length();
-            const rel = barrelSize > 0 ? (chestSize / barrelSize) * BARREL_RELATIVE : 1;
-            barrel.scale.setScalar(rel);
+            // хотим: высота большей бочки ≈ 110% высоты сундука
+            // берём высоту группы (по Y), как прокси большей бочки
+            const chestH = new THREE.Box3().setFromObject(chest).getSize(new THREE.Vector3()).y;
+            const groupH = g0.getSize(new THREE.Vector3()).y;
+            const scale = groupH > 0 ? (chestH * 1.10) / groupH : 1;
+            barrels.scale.setScalar(scale);
 
-            // на пол
-            const b1 = new THREE.Box3().setFromObject(barrel);
-            barrel.position.y -= b1.min.y;
+            // ставим на пол
+            const g1 = new THREE.Box3().setFromObject(barrels);
+            barrels.position.y -= g1.min.y;
 
-            // справа от сундука вдоль стены
-            barrel.position.x = chest.position.x;
-            barrel.position.z = chest.position.z + BARREL_Z_OFFSET; // отрицательное — «назад» по стене
-            barrel.rotation.y = chest.rotation.y;
+            // позиция: вдоль той же (левой) стены, СПРАВА от сундука
+            const gap = 0.70; // расстояние вдоль стены между сундуком и центром группы бочек
+            barrels.position.x = chest.position.x;
+            barrels.position.z = Math.min(d/2 - 0.35, chest.position.z + gap);
 
-            scene.add(barrel);
-          }, undefined, (err)=>console.warn('Ошибка бочки', err));
-        }, undefined, (err)=>console.warn('Ошибка сундука', err));
+            // поворот: на 90° влево относительно сундука
+            barrels.rotation.y = chest.rotation.y - Math.PI / 2;
 
-        // страховка: даже если что-то пойдёт не так, через 12с — вход
+            scene.add(barrels);
+          }, undefined, (err)=>console.warn('Ошибка загрузки barrel.glb', err));
+        }, undefined, (err)=>console.warn('Ошибка загрузки chest.glb', err));
+
+        // страховка: через 12с впустим даже при сбое загрузки
         setTimeout(()=>resolve(), 12000);
       });
     }
