@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Комната прошлого — тёплый свет и сундук</title>
+  <title>Комната прошлого — сундук, тёплый свет</title>
   <style>
     html, body { height: 100%; margin: 0; overflow: hidden; background: #000; }
     #overlay {
@@ -12,9 +12,7 @@
       color: white; background: radial-gradient(ellipse at center, rgba(0,0,0,.65), rgba(0,0,0,.9));
       z-index: 9999;
     }
-    #overlay button {
-      font-size: 16px; padding: 12px 18px; border-radius: 10px; border: none; cursor: pointer;
-    }
+    #overlay button { font-size: 16px; padding: 12px 18px; border-radius: 10px; border: none; cursor: pointer; }
   </style>
 </head>
 <body>
@@ -25,132 +23,141 @@
   <script src="assets/js/GLTFLoader.js"></script>
 
   <script>
-    let scene, camera, renderer, controls, listener, sound;
+  let scene, camera, renderer, controls, listener, sound;
 
-    const init = () => {
-      // кнопка работает всегда
-      const overlay = document.getElementById('overlay');
-      document.getElementById('start').addEventListener('click', () => {
-        overlay.style.display = 'none';
-      }, { once: true });
+  const w = 4, d = 4, h = 3;
 
-      // сцена
-      scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x100806);
-      scene.fog = new THREE.Fog(0x1a0f0a, 5, 12);
+  function safeStartAudio() {
+    try {
+      const ac = listener?.context;
+      if (ac && ac.state === 'suspended') ac.resume();
+      const loader = new THREE.AudioLoader();
+      loader.load('assets/music/music.mp3', (buffer) => {
+        sound.setBuffer(buffer);
+        sound.setLoop(true);
+        sound.setVolume(0.35);
+        sound.play();
+        console.log('Музыка: ok');
+      }, undefined, () => console.warn('Музыка не найдена по пути assets/music/music.mp3 — продолжаем без неё'));
+    } catch (e) {
+      console.warn('Audio error:', e);
+    }
+  }
 
-      const w = 4, d = 4, h = 3;
+  function init() {
+    // кнопка — работает всегда
+    const overlay = document.getElementById('overlay');
+    document.getElementById('start').addEventListener('click', () => {
+      overlay.style.display = 'none';
+      safeStartAudio();
+    }, { once: true });
 
-      // камера
-      camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 50);
-      camera.position.set(0, 1.6, 2.8);
+    // сцена
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x100806);
+    scene.fog = new THREE.Fog(0x1a0f0a, 5, 12);
 
-      // рендер
-      renderer = new THREE.WebGLRenderer({ antialias: true });
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      renderer.shadowMap.enabled = true;
-      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-      renderer.outputColorSpace = THREE.SRGBColorSpace;
-      renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1.05;
-      document.body.appendChild(renderer.domElement);
+    // камера
+    camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.05, 50);
+    camera.position.set(0, 1.6, 2.8);
 
-      // контролы
-      controls = new THREE.OrbitControls(camera, renderer.domElement);
-      controls.target.set(0, 1.2, 0);
-      controls.enableDamping = true;
+    // рендер
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.05;
+    document.body.appendChild(renderer.domElement);
 
-      // мягкий свет
-      const hemi = new THREE.HemisphereLight(0xffd9b0, 0x1a0f0a, 0.35); scene.add(hemi);
-      const ambient = new THREE.AmbientLight(0xffd7aa, 0.15); scene.add(ambient);
-      const dir = new THREE.DirectionalLight(0xffb366, 1.3);
-      dir.position.set(-2.5, 3.5, 1.5);
-      dir.castShadow = true;
-      dir.shadow.mapSize.set(2048, 2048);
-      dir.shadow.radius = 6;
-      scene.add(dir);
+    // контролы
+    controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.target.set(0, 1.2, 0);
+    controls.enableDamping = true;
 
-      // лёгкое «пульсирование» как от огня
-      const fireLight = new THREE.PointLight(0xffa860, 0.6, 6);
-      fireLight.position.set(-1.5, 1.2, 1.2);
-      scene.add(fireLight);
+    // свет — «средневековый»
+    const hemi = new THREE.HemisphereLight(0xffd9b0, 0x1a0f0a, 0.35); scene.add(hemi);
+    const ambient = new THREE.AmbientLight(0xffd7aa, 0.15); scene.add(ambient);
+    const dir = new THREE.DirectionalLight(0xffb366, 1.25);
+    dir.position.set(-2.5, 3.5, 1.5);
+    dir.castShadow = true; dir.shadow.mapSize.set(2048, 2048); dir.shadow.radius = 6;
+    scene.add(dir);
+    const fire = new THREE.PointLight(0xffa860, 0.6, 6); fire.position.set(-1.5, 1.2, 1.2); scene.add(fire);
 
-      // текстуры
-      const tl = new THREE.TextureLoader();
-      const floorTex = tl.load('assets/textures/floor.jpg');
-      const wallTex  = tl.load('assets/textures/wall.jpg');
-      const mirrorTex = tl.load('assets/textures/mirror.jpg');
-      [floorTex, wallTex, mirrorTex].forEach(t => { if (t) t.anisotropy = renderer.capabilities.getMaxAnisotropy(); });
-      floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping; floorTex.repeat.set(2, 2);
-      wallTex.wrapS = wallTex.wrapT = THREE.RepeatWrapping; wallTex.repeat.set(2, 1.5);
+    // текстуры
+    const tl = new THREE.TextureLoader();
+    const floorTex = tl.load('assets/textures/floor.jpg');
+    const wallTex  = tl.load('assets/textures/wall.jpg');
+    const mirrorTex = tl.load('assets/textures/mirror.jpg');
+    [floorTex, wallTex, mirrorTex].forEach(t => t && (t.anisotropy = renderer.capabilities.getMaxAnisotropy()));
+    floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping; floorTex.repeat.set(2, 2);
+    wallTex.wrapS = wallTex.wrapT = THREE.RepeatWrapping; wallTex.repeat.set(2, 1.5);
 
-      const floorMat = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.9 });
-      const wallMat  = new THREE.MeshStandardMaterial({ map: wallTex, roughness: 1.0 });
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.9 }));
+    floor.rotation.x = -Math.PI/2; floor.receiveShadow = true; scene.add(floor);
 
-      // пол
-      const floor = new THREE.Mesh(new THREE.PlaneGeometry(w, d), floorMat);
-      floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+    const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, roughness: 1.0 });
+    const walls = [
+      [0, h/2, -d/2, 0], [0, h/2, d/2, Math.PI],
+      [-w/2, h/2, 0, Math.PI/2], [w/2, h/2, 0, -Math.PI/2]
+    ];
+    walls.forEach(([x,y,z,ry])=>{
+      const wall = new THREE.Mesh(new THREE.PlaneGeometry(ry ? d : w, h), wallMat);
+      wall.position.set(x,y,z); if (ry) wall.rotation.y = ry; wall.receiveShadow = true; scene.add(wall);
+    });
 
-      // стены
-      const walls = [
-        [0, h/2, -d/2, 0], [0, h/2, d/2, Math.PI],
-        [-w/2, h/2, 0, Math.PI/2], [w/2, h/2, 0, -Math.PI/2]
-      ];
-      walls.forEach(([x, y, z, rot]) => {
-        const wall = new THREE.Mesh(new THREE.PlaneGeometry(rot ? d : w, h), wallMat);
-        wall.position.set(x, y, z);
-        if (rot) wall.rotation.y = rot;
-        wall.receiveShadow = true;
-        scene.add(wall);
-      });
+    const mirror = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.6),
+      new THREE.MeshStandardMaterial({ map: mirrorTex, metalness: 0.85, roughness: 0.22 }));
+    mirror.position.set(0, 1.5, -d/2 + 0.01); scene.add(mirror);
 
-      // зеркало
-      const mirror = new THREE.Mesh(
-        new THREE.PlaneGeometry(0.9, 0.6),
-        new THREE.MeshStandardMaterial({ map: mirrorTex, metalness: 0.85, roughness: 0.22 })
-      );
-      mirror.position.set(0, 1.5, -d/2 + 0.01);
-      scene.add(mirror);
+    // аудио-объекты
+    listener = new THREE.AudioListener(); camera.add(listener);
+    sound = new THREE.Audio(listener);
 
-      // сундук
+    // сундук — чуть правее и дальше от стены, чтобы не пересекался
+    try {
       const loader = new THREE.GLTFLoader();
-      loader.load('assets/models/chest.glb', gltf => {
+      loader.load('assets/models/chest.glb', (gltf) => {
         const chest = gltf.scene;
         chest.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
-
+        // центрируем
         const box = new THREE.Box3().setFromObject(chest);
-        const size = new THREE.Vector3(); box.getSize(size);
-        const center = new THREE.Vector3(); box.getCenter(center);
-        chest.position.sub(center);
-
-        // увеличиваем ×1.5 и ставим вдоль стены
-        const s = 1.5 * (1.2 / Math.sqrt(size.x**2 + size.y**2 + size.z**2));
+        const s = 1.5 * (1.2 / box.getSize(new THREE.Vector3()).length()); // тот же ×1.5
+        // позиция: левую стену держим, но отодвигаем от нее + «правее» к центру
         chest.scale.setScalar(s);
-        chest.position.set(-w/2 + 0.25, 0, 1.4);
-        chest.rotation.y = Math.PI; // разворот на 180°, вдоль стены
+        const center = box.getCenter(new THREE.Vector3());
+        chest.position.sub(center);
+        const wallOffset = 0.45; // 45 см от левой стены (больше зазор = нет пересечения)
+        const x = -w/2 + wallOffset;
+        const z = 1.4;           // как было (передний сектор)
+        chest.position.set(x, 0, z);
+        chest.rotation.y = Math.PI / 2; // вдоль стены, «лицом» в комнату
         scene.add(chest);
-      }, undefined, e => console.warn('Не удалось загрузить сундук:', e));
+      }, undefined, err => console.warn('Не удалось загрузить сундук:', err));
+    } catch (e) {
+      console.warn('GLTFLoader error:', e);
+    }
 
-      // Resize
-      window.addEventListener('resize', () => {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth, window.innerHeight);
-      });
+    // resize + animate
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
 
-      // Анимация
-      const animate = () => {
-        requestAnimationFrame(animate);
-        // пульсирующий свет
-        fireLight.intensity = 0.5 + Math.sin(Date.now() * 0.003) * 0.15;
-        controls.update();
-        renderer.render(scene, camera);
-      };
-      animate();
-    };
+    function animate(){
+      requestAnimationFrame(animate);
+      // лёгкое «дыхание» огня
+      fire.intensity = 0.55 + Math.sin(performance.now() * 0.003) * 0.15;
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+  }
 
-    window.addEventListener('load', init);
+  window.addEventListener('load', init);
   </script>
 </body>
 </html>
