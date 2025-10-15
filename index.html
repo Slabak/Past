@@ -126,6 +126,36 @@
         chest.position.set(-w/2 + 0.25, 0, 1.4);
         chest.rotation.y = Math.PI / 2;
         scene.add(chest);
+      }, undefined, err => {
+        console.warn('Не удалось загрузить модель сундука:', err);
+      });
+
+      // Аудио безопасно
+      listener = new THREE.AudioListener();
+      camera.add(listener);
+      sound = new THREE.Audio(listener);
+
+      // Безопасный запуск
+      document.getElementById('start').addEventListener('click', async () => {
+        document.getElementById('overlay').style.display = 'none';
+        try {
+          const ac = listener?.context;
+          if (ac && ac.state === 'suspended') await ac.resume();
+        } catch(e) { console.warn('AudioContext resume error', e); }
+
+        try {
+          const audioLoader = new THREE.AudioLoader();
+          audioLoader.load('assets/music/music.mp3', buffer => {
+            sound.setBuffer(buffer);
+            sound.setLoop(true);
+            sound.setVolume(0.35);
+            sound.play();
+          }, undefined, err => {
+            console.warn('Музыка не найдена — продолжаем без неё');
+          });
+        } catch(e) {
+          console.warn('Audio load error:', e);
+        }
       });
 
       // Resize
