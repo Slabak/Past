@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Комната — портал, центр. камера, сундук и двойные бочки</title>
+  <title>Комната — портал, центр. камера, сундук и бочки в другом углу</title>
   <style>
     html, body { height: 100%; margin: 0; overflow: hidden; background: #000; }
     #overlay, #loading-screen {
@@ -49,20 +49,26 @@
   <script src="assets/js/GLTFLoader.js"></script>
 
   <script>
-    /** ОРИЕНТИРЫ ОСЕЙ:
-     *  +Z — к ПЕРЕДНЕЙ стене (там где зеркало).
+    /** ОСИ СЦЕНЫ
+     *  +Z — к ПЕРЕДНЕЙ стене (где зеркало по центру).
      *  +X — к ПРАВОЙ стене.
      *   Y — вверх.
-     *
-     * РУЧНЫЕ НАСТРОЙКИ ПОЛОЖЕНИЯ БОЧЕК:
      */
-    const BARRELS_GAP_Z  = 0.80; // смещение бочек вдоль левой стены ОТ сундука (по +Z). Увеличь, если «врезаются».
-    const BARRELS_NUDGE_X = 0.08; // отступ бочек к центру комнаты (по +X), чтобы не пересекались со стеной/сундуком.
+
+    // --- ПАРАМЕТРЫ, КОТОРЫЕ МОЖНО ПРАВИТЬ ---
+    // Сундук (как у тебя в образце)
+    const CHEST_SIZE_MULT     = 1.5;     // множитель размера (цел. диагональ 1.2м * этот множитель)
+    const CHEST_WALLOFFSET_X  = 0.45;    // отступ от левой стены (м)
+    const CHEST_Z             = 1.10;    // положение вдоль стены (к передней стене = +Z)
+
+    // БОЧКИ (двойная модель) — СТАВИМ В ДРУГОМ УГЛУ ЛЕВОЙ СТЕНЫ (у заднего левого угла)
+    const BARRELS_TARGET_HEIGHT = 1.30;  // целевая высота группы бочек в метрах (на глаз)
+    const BARRELS_WALLOFFSET_X  = 0.45;  // такой же отступ от левой стены
+    const BARRELS_Z             = -1.10; // положение вдоль левой стены, «слева от зеркала» = ближе к задней стене
+    const BARRELS_TURN_LEFT_90  = true;  // повернуть на 90° влево
 
     let scene, camera, renderer, controls, listener, bgm, portalSound;
-
-    // размеры комнаты (м)
-    const w = 4, d = 4, h = 3;
+    const w = 4, d = 4, h = 3; // размеры комнаты
 
     // -------- АУДИО --------
     function playPortal() {
@@ -97,7 +103,7 @@
       scene.background = new THREE.Color(0x100806);
       scene.fog = new THREE.Fog(0x1a0f0a, 5, 12);
 
-      // КАМЕРА: по центру, 360° вращение, «свайповая» инерция
+      // КАМЕРА: центр комнаты, 360°, инвертированный «скролл»
       camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 50);
       camera.position.set(0, 1.6, 0);
 
@@ -119,13 +125,14 @@
       // 360° по горизонту
       controls.minAzimuthAngle = -Infinity;
       controls.maxAzimuthAngle =  Infinity;
-      // почти полный диапазон по вертикали, без переворота
+      // почти полный диапазон по вертикали
       controls.minPolarAngle = THREE.MathUtils.degToRad(2);
       controls.maxPolarAngle = THREE.MathUtils.degToRad(178);
-      // инерция «свайпа»
+      // «слайдинг» и ИНВЕРСИЯ как скролл
       controls.enableDamping = true;
       controls.dampingFactor = 0.12;
-      controls.rotateSpeed   = 0.6; // поставь -0.6, если хочешь инвертировать ощущение
+      controls.rotateSpeed   = -0.8; // МИНУС = инверсия (палец влево → картинка вправо)
+      controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
 
       // свет
       const hemi = new THREE.HemisphereLight(0xffd9b0, 0x1a0f0a, 0.35); scene.add(hemi);
@@ -168,7 +175,7 @@
       })();
     }
 
-    // Загрузка: текстуры, комната, сундук (по твоему коду), бочки-группа
+    // Загрузка: текстуры, комната, сундук (как в образце), бочки в другом углу
     function loadAllAssetsWithProgress(onProgress) {
       return new Promise((resolve) => {
         const manager = new THREE.LoadingManager(
@@ -184,11 +191,11 @@
         const tl = new THREE.TextureLoader(manager);
         const floorTex = tl.load('assets/textures/floor.jpg'); floorTex.colorSpace = THREE.SRGBColorSpace;
         floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping; floorTex.repeat.set(2, 2);
-        const wallTex  = tl.load('assets/textures/wall.jpg?v=10'); wallTex.colorSpace = THREE.SRGBColorSpace;
+        const wallTex  = tl.load('assets/textures/wall.jpg?v=11'); wallTex.colorSpace = THREE.SRGBColorSpace;
         wallTex.wrapS = wallTex.wrapT = THREE.ClampToEdgeWrapping;
         const mirrorTex = tl.load('assets/textures/mirror.jpg'); mirrorTex.colorSpace = THREE.SRGBColorSpace;
 
-        // ROOM (слегка опускаем стены, чтобы не светила щель)
+        // ROOM (слегка опускаем стены)
         const floor = new THREE.Mesh(new THREE.PlaneGeometry(w, d),
           new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.9 }));
         floor.rotation.x = -Math.PI/2; floor.position.y = 0.0005;
@@ -196,7 +203,7 @@
 
         const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, roughness: 1.0 });
         const walls = [
-          [0, h/2 - 0.01, -d/2, 0],           // back
+          [0, h/2 - 0.01, -d/2, 0],           // back (зеркало здесь)
           [0, h/2 - 0.01,  d/2, Math.PI],     // front
           [-w/2, h/2 - 0.01, 0,  Math.PI/2],  // left
           [ w/2, h/2 - 0.01, 0, -Math.PI/2],  // right
@@ -214,7 +221,7 @@
         // MODELS
         const gltfLoader = new THREE.GLTFLoader(manager);
 
-        // ---- СУНДУК (как в твоём примере) ----
+        // ---- СУНДУК (ровно как в образце) ----
         gltfLoader.load('assets/models/chest.glb', (gltf) => {
           const chest = gltf.scene;
           chest.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
@@ -224,8 +231,7 @@
           chest.position.sub(box0.getCenter(new THREE.Vector3()));
 
           // 2) Масштаб
-          const SIZE_MULT = 1.5;                 // ← множитель
-          const targetDiag = 1.2 * SIZE_MULT;    // ← целевая диагональ
+          const targetDiag = 1.2 * CHEST_SIZE_MULT;
           const diag0 = box0.getSize(new THREE.Vector3()).length();
           const s = diag0 > 0 ? targetDiag / diag0 : 1;
           chest.scale.setScalar(s);
@@ -235,45 +241,40 @@
           chest.position.y -= box1.min.y;
 
           // 4) Позиция (левая стена, ближе к передней)
-          const wallOffset = 0.45;
-          const x = -w/2 + wallOffset;
-          const z = 1.10;
-          chest.position.x = x;
-          chest.position.z = z;
+          chest.position.x = -w/2 + CHEST_WALLOFFSET_X;
+          chest.position.z = CHEST_Z;
 
-          // 5) Поворот (вдоль левой стены)
-          chest.rotation.y = Math.PI / 1;
+          // 5) Поворот вдоль левой стены
+          chest.rotation.y = Math.PI;
 
           scene.add(chest);
-
-          // ---- БОЧКИ (две в одном GLB): СПРАВА от сундука, вдоль той же стены ----
-          gltfLoader.load('assets/models/barrel.glb', (gltf2) => {
-            const barrels = gltf2.scene;
-            barrels.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
-
-            // центр и масштаб: высота группы ≈ 110% высоты сундука
-            const g0 = new THREE.Box3().setFromObject(barrels);
-            barrels.position.sub(g0.getCenter(new THREE.Vector3()));
-            const chestH = new THREE.Box3().setFromObject(chest).getSize(new THREE.Vector3()).y;
-            const groupH = g0.getSize(new THREE.Vector3()).y;
-            const scale = groupH > 0 ? (chestH * 1.10) / groupH : 1;
-            barrels.scale.setScalar(scale);
-
-            // на пол
-            const g1 = new THREE.Box3().setFromObject(barrels);
-            barrels.position.y -= g1.min.y;
-
-            // >>> КЛЮЧЕВЫЕ 2 ПАРАМЕТРА ДЛЯ ПЕРЕДВИЖЕНИЯ БОЧЕК <<<
-            // СПРАВА от сундука: вдоль стены по +Z и чуть к центру по +X
-            barrels.position.x = chest.position.x + BARRELS_NUDGE_X;
-            barrels.position.z = Math.min(d/2 - 0.75, chest.position.z + BARRELS_GAP_Z);
-
-            // Повернуть на 90° влево относительно сундука
-            barrels.rotation.y = chest.rotation.y - Math.PI / 2;
-
-            scene.add(barrels);
-          }, undefined, (err)=>console.warn('Ошибка загрузки barrel.glb', err));
         }, undefined, (err)=>console.warn('Ошибка загрузки chest.glb', err));
+
+        // ---- БОЧКИ (двойная модель), независимо от сундука ----
+        gltfLoader.load('assets/models/barrel.glb', (gltf2) => {
+          const barrels = gltf2.scene;
+          barrels.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
+
+          // центр и масштаб по целевой высоте
+          const g0 = new THREE.Box3().setFromObject(barrels);
+          barrels.position.sub(g0.getCenter(new THREE.Vector3()));
+          const groupH = g0.getSize(new THREE.Vector3()).y;
+          const scale = groupH > 0 ? (BARRELS_TARGET_HEIGHT / groupH) : 1;
+          barrels.scale.setScalar(scale);
+
+          // на пол
+          const g1 = new THREE.Box3().setFromObject(barrels);
+          barrels.position.y -= g1.min.y;
+
+          // координаты у ЛЕВОГО-ЗАДНЕГО угла, на той же (левой) стене
+          barrels.position.x = -w/2 + BARRELS_WALLOFFSET_X; // та же левая стена
+          barrels.position.z = BARRELS_Z;                   // «слева от зеркала» = ближе к задней стене
+
+          // поворот: 90° влево при необходимости
+          if (BARRELS_TURN_LEFT_90) barrels.rotation.y = Math.PI / 2; // повернули вдоль стены
+
+          scene.add(barrels);
+        }, undefined, (err)=>console.warn('Ошибка загрузки barrel.glb', err));
 
         // страховка от вечного портала
         setTimeout(()=>resolve(), 12000);
