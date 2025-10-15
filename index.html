@@ -32,6 +32,7 @@
       background: rgba(0,0,0,.55); color: #fff; border:1px solid rgba(255,255,255,.2);
       padding: 10px 12px; border-radius: 10px; font-size: 14px; cursor: pointer;
       backdrop-filter: blur(6px);
+      display: none;
     }
     #toast {
       position: fixed; left: 50%; transform: translateX(-50%);
@@ -52,14 +53,12 @@
   </div>
 
   <!-- переключение управления -->
-  <button id="modeToggle" style="display:none;">Управление: ПАЛЕЦ</button>
+  <button id="modeToggle">Управление: ПАЛЕЦ</button>
   <div id="toast"></div>
 
   <!-- three -->
   <script src="assets/js/three.min.js"></script>
   <script src="assets/js/OrbitControls.js"></script>
-  <!-- DeviceOrientationControls (UMD-версия из examples/js) -->
-  <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/controls/DeviceOrientationControls.js"></script>
   <script src="assets/js/GLTFLoader.js"></script>
 
   <script>
@@ -83,7 +82,7 @@
 
     let scene, camera, renderer;
     let orbitControls = null;
-    let deviceControls = null;
+    let deviceControls = null; // наш встроенный контрол
     let activeControls = null;
 
     let listener, bgm, portalSound, fallbackWood = null;
@@ -117,6 +116,53 @@
           bgm.setBuffer(buffer); bgm.setLoop(true); bgm.setVolume(0.35); bgm.play();
         }, undefined, () => console.warn('music.mp3 не найден'));
       } catch {}
+    }
+
+    // ---- ВСТРОЕННЫЙ контрол вращения телефоном (без внешних файлов) ----
+    function makeDeviceControls(camera) {
+      let alphaOffset = 0; // для калибровки "смотреть вперёд"
+      let lastEvent = null;
+      const zee = new THREE.Vector3(0, 0, 1);
+      const euler = new THREE.Euler();
+      const q0 = new THREE.Quaternion();
+      const q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)); // - PI/2 вокруг X
+      let screenOrientation = (window.orientation || 0);
+
+      function onScreenOrientationChangeEvent() {
+        screenOrientation = (window.orientation || 0);
+      }
+      function onDeviceOrientationChangeEvent(e) {
+        lastEvent = e;
+      }
+      function setObjectQuaternion(quaternion, alpha, beta, gamma, orient) {
+        euler.set(beta, alpha, -gamma, 'YXZ');
+        quaternion.setFromEuler(euler);
+        quaternion.multiply(q1);
+        quaternion.multiply(q0.setFromAxisAngle(zee, -orient));
+      }
+
+      window.addEventListener('orientationchange', onScreenOrientationChangeEvent, false);
+      window.addEventListener('deviceorientation', onDeviceOrientationChangeEvent, true);
+
+      return {
+        update() {
+          if (!lastEvent) return;
+          const alpha = THREE.MathUtils.degToRad(lastEvent.alpha || 0) + alphaOffset;
+          const beta  = THREE.MathUtils.degToRad(lastEvent.beta  || 0);
+          const gamma = THREE.MathUtils.degToRad(lastEvent.gamma || 0);
+          const orient = THREE.MathUtils.degToRad(screenOrientation || 0);
+          setObjectQuaternion(camera.quaternion, alpha, beta, gamma, orient);
+        },
+        disconnect() {
+          window.removeEventListener('deviceorientation', onDeviceOrientationChangeEvent, true);
+          window.removeEventListener('orientationchange', onScreenOrientationChangeEvent, false);
+        },
+        calibrateToCurrentHeading() {
+          if (!lastEvent) return;
+          const heading = THREE.MathUtils.degToRad(lastEvent.alpha || 0);
+          alphaOffset = -heading;
+        }
+      };
     }
 
     function init() {
@@ -173,7 +219,7 @@
             startBGM();
             // показать кнопку переключения управления
             modeBtn.style.display = 'block';
-            // включаем по умолчанию ПАЛЕЦ (орбита)
+            // по умолчанию — ПАЛЕЦ (орбита)
             enableOrbitControls();
           }, 1000);
         });
@@ -189,10 +235,19 @@
           const ok = await tryEnableDeviceControls();
           if (ok) {
             modeBtn.textContent = 'Управление: ТЕЛЕФОН';
-            toast('Режим: телефоном (гироскоп)');
+            toast('Режим: телефоном (гироскоп). Долгий тап — калибровка.');
           } else {
             toast('Доступ к датчикам отклонён — остаётся режим пальцем');
           }
+        }
+      });
+
+      // Долгий тап по кнопке — калибровка "смотреть вперёд"
+      modeBtn.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        if (deviceControls && activeControls === deviceControls) {
+          deviceControls.calibrateToCurrentHeading();
+          toast('Калибровка: взгляд вперёд сохранён');
         }
       });
 
@@ -214,7 +269,7 @@
     // ---- включение/выключение контролов ----
     function enableOrbitControls() {
       // уничтожаем device
-      if (deviceControls) { deviceControls.disconnect(); deviceControls = null; }
+      if (deviceControls && deviceControls.disconnect) { deviceControls.disconnect(); deviceControls = null; }
       // создаём/настраиваем orbit
       if (!orbitControls) {
         orbitControls = new THREE.OrbitControls(camera, renderer.domElement);
@@ -235,7 +290,7 @@
     }
 
     async function tryEnableDeviceControls() {
-      // iOS 13+: нужно разрешение
+      // iOS 13+: запрос разрешения
       try {
         if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') {
           const perm = await DeviceOrientationEvent.requestPermission();
@@ -245,12 +300,8 @@
         console.warn(e);
         return false;
       }
-      // создаём device-controls
-      if (!deviceControls) {
-        deviceControls = new THREE.DeviceOrientationControls(camera);
-      } else {
-        deviceControls.connect();
-      }
+      // создаём встроенный контрол
+      deviceControls = makeDeviceControls(camera);
       // выключаем orbit
       if (orbitControls) { orbitControls.dispose(); orbitControls = null; }
       activeControls = deviceControls;
@@ -269,12 +320,10 @@
           } else if (fallbackWood) {
             mat.map = fallbackWood; mat.color?.set?.(0xffffff);
           } else {
-            // чисто коричневый, если даже запасной текстуры нет
             mat.color?.set?.(0x8a5a3a);
           }
           if (mat.roughness === undefined) mat.roughness = 0.85;
           if (mat.metalness === undefined) mat.metalness = 0.0;
-          // иногда чёрнота из-за vertex colors
           if ('vertexColors' in mat) mat.vertexColors = false;
           mat.needsUpdate = true;
         };
@@ -300,10 +349,10 @@
         const tl = new THREE.TextureLoader(manager);
         const floorTex = tl.load('assets/textures/floor.jpg'); floorTex.colorSpace = THREE.SRGBColorSpace;
         floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping; floorTex.repeat.set(2, 2);
-        const wallTex  = tl.load('assets/textures/wall.jpg?v=13'); wallTex.colorSpace = THREE.SRGBColorSpace;
+        const wallTex  = tl.load('assets/textures/wall.jpg?v=14'); wallTex.colorSpace = THREE.SRGBColorSpace;
         wallTex.wrapS = wallTex.wrapT = THREE.ClampToEdgeWrapping;
         const mirrorTex = tl.load('assets/textures/mirror.jpg'); mirrorTex.colorSpace = THREE.SRGBColorSpace;
-        // запасная древесная текстура (на случай отсутствия карт в GLB)
+        // запасная древесная текстура
         fallbackWood = tl.load('assets/textures/wood.jpg', t => {
           t.colorSpace = THREE.SRGBColorSpace;
           t.anisotropy = renderer.capabilities.getMaxAnisotropy?.() || 8;
