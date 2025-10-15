@@ -78,7 +78,7 @@
     const BEAM_INSET_CEIL    = 0.000;
     const POST_FLOOR_GAP     = 0.000;
     const BEAM_MITER_OVERLAP = BEAM_THICKNESS * 1.3;
-    const BACK_BEAM_RAISE    = 0.04;                // поднять заднюю горизонтальную балку (над зеркалом) на 4 см
+    const BACK_BEAM_RAISE    = 0.04;                // над зеркалом
 
     // ---- Глобальные ----
     let scene, camera, renderer;
@@ -88,14 +88,12 @@
     const $ = s => document.querySelector(s);
     const toast = (m,ms=2200)=>{const t=$('#toast'); t.textContent=m;t.style.display='block';clearTimeout(toast._t);toast._t=setTimeout(()=>t.style.display='none',ms);};
 
-    // ---- Аудио ----
     function playPortal(){ try{ const l=new THREE.AudioLoader(); portalSound=new THREE.Audio(listener);
       l.load('assets/music/portal.mp3',buf=>{portalSound.setBuffer(buf);portalSound.setLoop(false);portalSound.setVolume(0.9);portalSound.play();}); }catch{} }
     function startBGM(){ try{ const ac=listener?.context; if(ac&&ac.state==='suspended') ac.resume();
       const l=new THREE.AudioLoader(); bgm=new THREE.Audio(listener);
       l.load('assets/music/music.mp3',buf=>{bgm.setBuffer(buf);bgm.setLoop(true);bgm.setVolume(0.35);bgm.play();},undefined,()=>console.warn('music.mp3 не найден')); }catch{} }
 
-    // ---- Встроенный DeviceOrientation-контрол ----
     function makeDeviceControls(cam){
       let alphaOffset=0,last=null;
       const zee=new THREE.Vector3(0,0,1), euler=new THREE.Euler(), q0=new THREE.Quaternion(),
@@ -200,7 +198,6 @@
       activeControls=deviceControls; return true;
     }
 
-    // Материалы: sRGB + запасная текстура дерева
     function fixMaterials(root){
       root.traverse(obj=>{
         if(!obj.isMesh) return;
@@ -219,7 +216,6 @@
       });
     }
 
-    // Загрузка ассетов (с прогрессом)
     function loadAllAssetsWithProgress(onProgress){
       return new Promise((resolve)=>{
         const manager=new THREE.LoadingManager(
@@ -228,15 +224,14 @@
           (url)=>console.warn('Ошибка загрузки:', url)
         );
 
-        // Текстуры
         const tl=new THREE.TextureLoader(manager);
         const floorTex  = tl.load('assets/textures/floor.jpg'); floorTex.colorSpace=THREE.SRGBColorSpace; floorTex.wrapS=floorTex.wrapT=THREE.RepeatWrapping; floorTex.repeat.set(2,2);
         const wallTex   = tl.load('assets/textures/wall.jpg?v=19'); wallTex.colorSpace=THREE.SRGBColorSpace; wallTex.wrapS=wallTex.wrapT=THREE.ClampToEdgeWrapping;
         const mirrorTex = tl.load('assets/textures/mirror.jpg'); mirrorTex.colorSpace=THREE.SRGBColorSpace;
-        const ceilTex   = tl.load('assets/textures/potolok.jpg'); ceilTex.colorSpace=THREE.SRGBColorSpace; // потолок
+        const ceilTex   = tl.load('assets/textures/potolok.jpg'); ceilTex.colorSpace=THREE.SRGBColorSpace;
         fallbackWood    = tl.load('assets/textures/wood.jpg', t=>{t.colorSpace=THREE.SRGBColorSpace; t.anisotropy=renderer.capabilities.getMaxAnisotropy?.()||8;});
 
-        // Комната: пол
+        // Пол
         const floor=new THREE.Mesh(new THREE.PlaneGeometry(w,d), new THREE.MeshStandardMaterial({map:floorTex, roughness:0.9}));
         floor.rotation.x=-Math.PI/2; floor.position.y=0.0005; floor.receiveShadow=true; scene.add(floor);
 
@@ -245,10 +240,10 @@
         const walls=[[0,h/2-0.01,-d/2,0],[0,h/2-0.01,d/2,Math.PI],[-w/2,h/2-0.01,0,Math.PI/2],[w/2,h/2-0.01,0,-Math.PI/2]];
         walls.forEach(([x,y,z,ry])=>{ const wall=new THREE.Mesh(new THREE.PlaneGeometry(ry?d:w,h+0.02), wallMat); wall.position.set(x,y,z); if(ry) wall.rotation.y=ry; wall.receiveShadow=true; scene.add(wall); });
 
-        // Потолок
-        const ceilMat = new THREE.MeshStandardMaterial({ map: ceilTex, roughness: 0.85, metalness: 0.0 });
+        // Потолок (исправлено: параллелен полу)
+        const ceilMat = new THREE.MeshStandardMaterial({ map: ceilTex, roughness: 0.9, metalness: 0.0 });
         const ceil = new THREE.Mesh(new THREE.PlaneGeometry(w, d), ceilMat);
-        ceil.rotation.x = Math.PI; // смотрит вниз
+        ceil.rotation.x = Math.PI / 2;   // << было Math.PI — теперь потолок горизонтален
         ceil.position.set(0, h - 0.001, 0);
         ceil.receiveShadow = true;
         scene.add(ceil);
@@ -291,7 +286,7 @@
             src.position.sub(box.getCenter(new THREE.Vector3()));
             const s=box.getSize(new THREE.Vector3());
             let axis='y'; if(s.x>=s.y && s.x>=s.z) axis='x'; else if(s.z>=s.y && s.z>=s.x) axis='z';
-            if(axis==='x') src.rotation.set(0,0,Math.PI/2); else if(axis==='z') src.rotation.set(-Math.PI/2,0,0);
+            if(axis==='x') src.rotation.set(0,0,Math.PI/2); else if(axis==='з') src.rotation.set(-Math.PI/2,0,0);
 
             const box2=new THREE.Box3().setFromObject(src), lenY=Math.max(box2.getSize(new THREE.Vector3()).y,1e-6);
             src.scale.multiplyScalar(1/lenY);
@@ -319,7 +314,6 @@
 
           const {spawnBetween}=prepareUnit(root);
 
-          // Центры сечений — на полтолщины от стен/потолка
           const half = BEAM_THICKNESS * 0.5;
           const xL = -w/2 + BEAM_INSET_WALL + half;
           const xR =  w/2 - BEAM_INSET_WALL - half;
@@ -336,18 +330,14 @@
           spawnBetween(new THREE.Vector3(xL,y0,zF), new THREE.Vector3(xL,yT,zF));
           spawnBetween(new THREE.Vector3(xR,y0,zF), new THREE.Vector3(xR,yT,zF));
 
-          // 4 горизонтальные (с заходом в углы)
-          // ЗАДНЯЯ — поднята на BACK_BEAM_RAISE
+          // Горизонтальные
           const yH_back = yH + BACK_BEAM_RAISE;
           spawnBetween(new THREE.Vector3(xL-BEAM_MITER_OVERLAP,yH_back,zB), new THREE.Vector3(xR+BEAM_MITER_OVERLAP,yH_back,zB)); // задняя
-
-          // Остальные три — как обычно
-          spawnBetween(new THREE.Vector3(xL-BEAM_MITER_OVERLAP,yH,zF), new THREE.Vector3(xR+BEAM_MITER_OVERLAP,yH,zF)); // передняя
-          spawnBetween(new THREE.Vector3(xL,yH,zB-BEAM_MITER_OVERLAP), new THREE.Vector3(xL,yH,zF+BEAM_MITER_OVERLAP)); // левая
-          spawnBetween(new THREE.Vector3(xR,yH,zB-BEAM_MITER_OVERLAP), new THREE.Vector3(xR,yH,zF+BEAM_MITER_OVERLAP)); // правая
+          spawnBetween(new THREE.Vector3(xL-BEAM_MITER_OVERLAP,yH,zF),      new THREE.Vector3(xR+BEAM_MITER_OVERLAP,yH,zF));      // передняя
+          spawnBetween(new THREE.Vector3(xL,yH,zB-BEAM_MITER_OVERLAP),      new THREE.Vector3(xL,yH,zF+BEAM_MITER_OVERLAP));      // левая
+          spawnBetween(new THREE.Vector3(xR,yH,zB-BEAM_MITER_OVERLAP),      new THREE.Vector3(xR,yH,zF+BEAM_MITER_OVERLAP));      // правая
         },undefined,(e)=>console.warn('Ошибка plank.glb',e));
 
-        // страховка от вечной загрузки
         setTimeout(()=>resolve(),12000);
       });
     }
