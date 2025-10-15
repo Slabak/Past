@@ -88,12 +88,14 @@
     const $ = s => document.querySelector(s);
     const toast = (m,ms=2200)=>{const t=$('#toast'); t.textContent=m;t.style.display='block';clearTimeout(toast._t);toast._t=setTimeout(()=>t.style.display='none',ms);};
 
+    // ---- Аудио ----
     function playPortal(){ try{ const l=new THREE.AudioLoader(); portalSound=new THREE.Audio(listener);
       l.load('assets/music/portal.mp3',buf=>{portalSound.setBuffer(buf);portalSound.setLoop(false);portalSound.setVolume(0.9);portalSound.play();}); }catch{} }
     function startBGM(){ try{ const ac=listener?.context; if(ac&&ac.state==='suspended') ac.resume();
       const l=new THREE.AudioLoader(); bgm=new THREE.Audio(listener);
       l.load('assets/music/music.mp3',buf=>{bgm.setBuffer(buf);bgm.setLoop(true);bgm.setVolume(0.35);bgm.play();},undefined,()=>console.warn('music.mp3 не найден')); }catch{} }
 
+    // ---- Встроенный DeviceOrientation-контрол ----
     function makeDeviceControls(cam){
       let alphaOffset=0,last=null;
       const zee=new THREE.Vector3(0,0,1), euler=new THREE.Euler(), q0=new THREE.Quaternion(),
@@ -286,7 +288,7 @@
             src.position.sub(box.getCenter(new THREE.Vector3()));
             const s=box.getSize(new THREE.Vector3());
             let axis='y'; if(s.x>=s.y && s.x>=s.z) axis='x'; else if(s.z>=s.y && s.z>=s.x) axis='z';
-            if(axis==='x') src.rotation.set(0,0,Math.PI/2); else if(axis==='з') src.rotation.set(-Math.PI/2,0,0);
+            if(axis==='x') src.rotation.set(0,0,Math.PI/2); else if(axis==='z') src.rotation.set(-Math.PI/2,0,0);
 
             const box2=new THREE.Box3().setFromObject(src), lenY=Math.max(box2.getSize(new THREE.Vector3()).y,1e-6);
             src.scale.multiplyScalar(1/lenY);
