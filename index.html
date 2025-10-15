@@ -3,28 +3,72 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Комната — сундук и бочка</title>
+  <title>Комната — вход через портал</title>
   <style>
     html, body { height: 100%; margin: 0; overflow: hidden; background: #000; }
-    #overlay {
+    #overlay, #loading-screen {
       position: fixed; inset: 0; display: grid; place-items: center;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-      color: white; background: radial-gradient(ellipse at center, rgba(0,0,0,.65), rgba(0,0,0,.9));
+      background: radial-gradient(circle at center, rgba(0,0,0,.85), rgba(0,0,0,1));
+      color: white; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
       z-index: 9999;
     }
-    #overlay button { font-size: 16px; padding: 12px 18px; border-radius: 10px; border: none; cursor: pointer; }
+    #overlay button {
+      font-size: 18px; padding: 14px 24px; border-radius: 12px; border: none;
+      background: #ffb366; color: #000; cursor: pointer; transition: transform .2s, background .3s;
+    }
+    #overlay button:hover { transform: scale(1.05); background: #ffd5a3; }
+
+    .portal-text {
+      font-size: 1.3rem; letter-spacing: 1px; text-align: center; margin-bottom: 24px;
+      animation: flicker 1.2s infinite alternate;
+    }
+    @keyframes flicker { from { opacity: 0.7; } to { opacity: 1; } }
+
+    .portal-ring {
+      width: 80px; height: 80px;
+      border: 4px solid rgba(255, 200, 100, 0.5);
+      border-top-color: #ffb366;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .fade-out { animation: fadeOut 1s forwards; }
+    @keyframes fadeOut { to { opacity: 0; visibility: hidden; } }
   </style>
 </head>
 <body>
-  <div id="overlay"><button id="start">Войти в комнату</button></div>
+  <div id="overlay">
+    <button id="start">Войти в комнату</button>
+  </div>
+
+  <div id="loading-screen" style="display:none;">
+    <div>
+      <div class="portal-text">Переносимся через портал...</div>
+      <div class="portal-ring"></div>
+    </div>
+  </div>
 
   <script src="assets/js/three.min.js"></script>
   <script src="assets/js/OrbitControls.js"></script>
   <script src="assets/js/GLTFLoader.js"></script>
 
   <script>
-    let scene, camera, renderer, controls, listener, sound;
+    let scene, camera, renderer, controls, listener, sound, portalSound;
     const w = 4, d = 4, h = 3;
+
+    function playPortalSound() {
+      try {
+        const loader = new THREE.AudioLoader();
+        portalSound = new THREE.Audio(listener);
+        loader.load('assets/music/portal.mp3', (buffer) => {
+          portalSound.setBuffer(buffer);
+          portalSound.setLoop(false);
+          portalSound.setVolume(0.9);
+          portalSound.play();
+        });
+      } catch(e) { console.warn('Ошибка загрузки portal.mp3'); }
+    }
 
     function safeStartAudio() {
       try {
@@ -36,17 +80,54 @@
           sound.setLoop(true);
           sound.setVolume(0.35);
           sound.play();
-        }, undefined, () => console.warn('Музыка не найдена — продолжаем без неё'));
+        }, undefined, () => console.warn('Музыка не найдена'));
       } catch(e) { console.warn('Audio error:', e); }
+    }
+
+    function loadSceneAssets() {
+      return new Promise((resolve) => {
+        let loaded = 0, total = 2;
+        const onLoaded = () => { if (++loaded >= total) resolve(); };
+
+        const loader = new THREE.GLTFLoader();
+        // сундук
+        loader.load('assets/models/chest.glb', (gltf) => {
+          const chest = gltf.scene;
+          chest.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
+          const box0 = new THREE.Box3().setFromObject(chest);
+          chest.position.sub(box0.getCenter(new THREE.Vector3()));
+          chest.scale.setScalar(1.5);
+          const box1 = new THREE.Box3().setFromObject(chest);
+          chest.position.y -= box1.min.y;
+          chest.position.set(-w/2 + 0.45, 0, 1.10);
+          chest.rotation.y = Math.PI;
+          scene.add(chest);
+          onLoaded();
+        });
+
+        // бочка
+        loader.load('assets/models/barrel.glb', (gltf2) => {
+          const barrel = gltf2.scene;
+          barrel.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
+          const bBox = new THREE.Box3().setFromObject(barrel);
+          barrel.position.sub(bBox.getCenter(new THREE.Vector3()));
+          barrel.scale.setScalar(1.8);
+          const bBox2 = new THREE.Box3().setFromObject(barrel);
+          barrel.position.y -= bBox2.min.y;
+          barrel.position.set(-w/2 + 0.45, 0, 0.1);
+          barrel.rotation.y = Math.PI;
+          scene.add(barrel);
+          onLoaded();
+        });
+      });
     }
 
     function init() {
       const overlay = document.getElementById('overlay');
-      document.getElementById('start').addEventListener('click', () => {
-        overlay.style.display = 'none';
-        safeStartAudio();
-      }, { once: true });
+      const loadingScreen = document.getElementById('loading-screen');
+      const startBtn = document.getElementById('start');
 
+      // сцена
       scene = new THREE.Scene();
       scene.background = new THREE.Color(0x100806);
       scene.fog = new THREE.Fog(0x1a0f0a, 5, 12);
@@ -75,104 +156,57 @@
       dir.position.set(-2.5, 3.5, 1.5);
       dir.castShadow = true; dir.shadow.mapSize.set(2048, 2048); dir.shadow.radius = 6;
       scene.add(dir);
-      const fire = new THREE.PointLight(0xffa860, 0.6, 6);
-      fire.position.set(-1.5, 1.2, 1.2); scene.add(fire);
+      const fire = new THREE.PointLight(0xffa860, 0.6, 6); fire.position.set(-1.5, 1.2, 1.2); scene.add(fire);
 
-      // текстуры
+      // текстуры и геометрия
       const tl = new THREE.TextureLoader();
       const floorTex = tl.load('assets/textures/floor.jpg');
       floorTex.colorSpace = THREE.SRGBColorSpace;
       floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
       floorTex.repeat.set(2, 2);
 
-      const wallTex  = tl.load('assets/textures/wall.jpg?v=3');
+      const wallTex = tl.load('assets/textures/wall.jpg?v=5');
       wallTex.colorSpace = THREE.SRGBColorSpace;
       wallTex.wrapS = wallTex.wrapT = THREE.ClampToEdgeWrapping;
 
       const mirrorTex = tl.load('assets/textures/mirror.jpg');
       mirrorTex.colorSpace = THREE.SRGBColorSpace;
 
-      const floor = new THREE.Mesh(
-        new THREE.PlaneGeometry(w, d),
-        new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.9, metalness: 0.0 })
-      );
+      const floor = new THREE.Mesh(new THREE.PlaneGeometry(w, d),
+        new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.9 }));
       floor.rotation.x = -Math.PI/2; floor.receiveShadow = true; scene.add(floor);
 
-      const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, roughness: 1.0, metalness: 0.0 });
-      const back  = new THREE.Mesh(new THREE.PlaneGeometry(w, h), wallMat); back.position.set(0, h/2, -d/2);
-      const front = new THREE.Mesh(new THREE.PlaneGeometry(w, h), wallMat); front.position.set(0, h/2,  d/2); front.rotation.y = Math.PI;
-      const left  = new THREE.Mesh(new THREE.PlaneGeometry(d, h), wallMat); left.position.set(-w/2, h/2, 0); left.rotation.y  =  Math.PI/2;
-      const right = new THREE.Mesh(new THREE.PlaneGeometry(d, h), wallMat); right.position.set( w/2, h/2, 0); right.rotation.y = -Math.PI/2;
-      [back, front, left, right].forEach(wl => wl.receiveShadow = true);
-      scene.add(back, front, left, right);
+      const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, roughness: 1.0 });
+      const walls = [
+        [0, h/2, -d/2, 0], [0, h/2, d/2, Math.PI],
+        [-w/2, h/2, 0, Math.PI/2], [w/2, h/2, 0, -Math.PI/2]
+      ];
+      walls.forEach(([x,y,z,ry])=>{
+        const wall = new THREE.Mesh(new THREE.PlaneGeometry(ry ? d : w, h), wallMat);
+        wall.position.set(x,y,z); if (ry) wall.rotation.y = ry;
+        wall.receiveShadow = true; scene.add(wall);
+      });
 
-      const mirror = new THREE.Mesh(
-        new THREE.PlaneGeometry(0.9, 0.6),
-        new THREE.MeshStandardMaterial({ map: mirrorTex, metalness: 0.85, roughness: 0.22 })
-      );
+      const mirror = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.6),
+        new THREE.MeshStandardMaterial({ map: mirrorTex, metalness: 0.85, roughness: 0.22 }));
       mirror.position.set(0, 1.5, -d/2 + 0.01);
       scene.add(mirror);
 
       listener = new THREE.AudioListener(); camera.add(listener);
       sound = new THREE.Audio(listener);
 
-      // === СУНДУК и БОЧКА ===
-      try {
-        const loader = new THREE.GLTFLoader();
-        loader.load('assets/models/chest.glb', (gltf) => {
-          const chest = gltf.scene;
-          chest.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
+      // Кнопка -> загрузка портала
+      startBtn.addEventListener('click', () => {
+        overlay.style.display = 'none';
+        loadingScreen.style.display = 'grid';
+        safeStartAudio();
 
-          const box0 = new THREE.Box3().setFromObject(chest);
-          chest.position.sub(box0.getCenter(new THREE.Vector3()));
-
-          const SIZE_MULT = 1.5;
-          const targetDiag = 1.2 * SIZE_MULT;
-          const diag0 = box0.getSize(new THREE.Vector3()).length();
-          const s = diag0 > 0 ? targetDiag / diag0 : 1;
-          chest.scale.setScalar(s);
-
-          const box1 = new THREE.Box3().setFromObject(chest);
-          chest.position.y -= box1.min.y;
-
-          // новая позиция сундука
-          const wallOffset = 0.45;
-          const x = -w/2 + wallOffset;
-          const z = 1.10;
-          chest.position.x = x;
-          chest.position.z = z;
-          chest.rotation.y = Math.PI / 1;
-          scene.add(chest);
-
-          // теперь добавим бочку справа от сундука
-          const barrelLoader = new THREE.GLTFLoader();
-          barrelLoader.load('assets/models/barrel.glb', (gltf2) => {
-            const barrel = gltf2.scene;
-            barrel.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
-
-            const bBox = new THREE.Box3().setFromObject(barrel);
-            barrel.position.sub(bBox.getCenter(new THREE.Vector3()));
-
-            const chestBox = new THREE.Box3().setFromObject(chest);
-            const chestSize = chestBox.getSize(new THREE.Vector3()).length();
-            const barrelSize = bBox.getSize(new THREE.Vector3()).length();
-            const relScale = (chestSize / barrelSize) * 1.25; // немного больше сундука
-            barrel.scale.setScalar(relScale);
-
-            const bBox2 = new THREE.Box3().setFromObject(barrel);
-            barrel.position.y -= bBox2.min.y;
-
-            // ставим бочку справа от сундука, вдоль той же стены
-            barrel.position.x = chest.position.x;
-            barrel.position.z = chest.position.z - 1.0; // -1.0 = чуть позади сундука
-            barrel.rotation.y = Math.PI / 1;
-
-            scene.add(barrel);
-          }, undefined, err => console.warn('Не удалось загрузить бочку:', err));
-        }, undefined, err => console.warn('Не удалось загрузить сундук:', err));
-      } catch (e) {
-        console.warn('GLTFLoader error:', e);
-      }
+        loadSceneAssets().then(() => {
+          playPortalSound();
+          loadingScreen.classList.add('fade-out');
+          setTimeout(() => loadingScreen.remove(), 1200);
+        });
+      }, { once: true });
 
       window.addEventListener('resize', () => {
         camera.aspect = window.innerWidth / window.innerHeight;
