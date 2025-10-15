@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Комната — портал, сундук и двойные бочки</title>
+  <title>Комната — портал, центр. камера, сундук и двойные бочки</title>
   <style>
     html, body { height: 100%; margin: 0; overflow: hidden; background: #000; }
     #overlay, #loading-screen {
@@ -43,14 +43,23 @@
     </div>
   </div>
 
+  <!-- three -->
   <script src="assets/js/three.min.js"></script>
   <script src="assets/js/OrbitControls.js"></script>
   <script src="assets/js/GLTFLoader.js"></script>
 
   <script>
+    /** ОРИЕНТИРЫ:
+     *  +Z — к ПЕРЕДНЕЙ стене (там где зеркало по центру).
+     *  +X — к ПРАВОЙ стене.
+     *   Y — вверх.
+     */
     let scene, camera, renderer, controls, listener, bgm, portalSound;
-    const w = 4, d = 4, h = 3; // размеры комнаты
 
+    // размеры комнаты (м)
+    const w = 4, d = 4, h = 3;
+
+    // -------- АУДИО --------
     function playPortal() {
       try {
         const loader = new THREE.AudioLoader();
@@ -59,7 +68,7 @@
           portalSound.setBuffer(buffer); portalSound.setLoop(false);
           portalSound.setVolume(0.9); portalSound.play();
         });
-      } catch (e) { console.warn('portal.mp3 не найден'); }
+      } catch { /* no-op */ }
     }
     function startBGM() {
       try {
@@ -68,8 +77,8 @@
         bgm = new THREE.Audio(listener);
         loader.load('assets/music/music.mp3', (buffer) => {
           bgm.setBuffer(buffer); bgm.setLoop(true); bgm.setVolume(0.35); bgm.play();
-        }, undefined, () => console.warn('music.mp3 не найден'));
-      } catch (e) { console.warn('BGM error', e); }
+        });
+      } catch { /* no-op */ }
     }
 
     function init() {
@@ -83,8 +92,9 @@
       scene.background = new THREE.Color(0x100806);
       scene.fog = new THREE.Fog(0x1a0f0a, 5, 12);
 
+      // КАМЕРА: стоим по центру комнаты и крутим только головой
       camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 50);
-      camera.position.set(0, 1.6, 2.8);
+      camera.position.set(0, 1.6, 0); // центр, высота глаз ~1.6 м
 
       renderer = new THREE.WebGLRenderer({ antialias: true });
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -97,8 +107,14 @@
       document.body.appendChild(renderer.domElement);
 
       controls = new THREE.OrbitControls(camera, renderer.domElement);
-      controls.target.set(0, 1.2, 0);
+      controls.target.set(0, 1.5, 0);
       controls.enableDamping = true;
+      controls.enableZoom = false;
+      controls.enablePan  = false;
+      controls.minPolarAngle = Math.PI / 4;
+      controls.maxPolarAngle = Math.PI - Math.PI / 4;
+      controls.minAzimuthAngle = -Math.PI; // можно ограничить сектор обзора при желании
+      controls.maxAzimuthAngle =  Math.PI;
 
       // свет
       const hemi = new THREE.HemisphereLight(0xffd9b0, 0x1a0f0a, 0.35); scene.add(hemi);
@@ -109,10 +125,10 @@
       scene.add(dir);
       const fire = new THREE.PointLight(0xffa860, 0.6, 6); fire.position.set(-1.5, 1.2, 1.2); scene.add(fire);
 
-      // аудио-листенер
+      // listener
       listener = new THREE.AudioListener(); camera.add(listener);
 
-      // кнопка -> портал -> загрузка
+      // кнопка -> портал
       startBtn.addEventListener('click', () => {
         overlay.style.display = 'none';
         loadingScreen.style.display = 'grid';
@@ -127,18 +143,21 @@
         });
       }, { once: true });
 
-      // resize + анимация
+      // ресайз + анимация
       window.addEventListener('resize', () => {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
       });
-      (function animate(){ requestAnimationFrame(animate);
+      (function animate(){
+        requestAnimationFrame(animate);
         fire.intensity = 0.55 + Math.sin(performance.now() * 0.003) * 0.15;
-        controls.update(); renderer.render(scene, camera); })();
+        controls.update();
+        renderer.render(scene, camera);
+      })();
     }
 
-    // Загрузка с прогрессом: комната + сундук (по твоему коду) + группа из 2 бочек
+    // Загрузка сцены с прогрессом: текстуры, комната, сундук (по твоему коду), бочки-группа
     function loadAllAssetsWithProgress(onProgress) {
       return new Promise((resolve) => {
         const manager = new THREE.LoadingManager(
@@ -150,26 +169,29 @@
           (url) => console.warn('Ошибка загрузки:', url)
         );
 
-        // Текстуры через manager
+        // TEXTURES
         const tl = new THREE.TextureLoader(manager);
         const floorTex = tl.load('assets/textures/floor.jpg'); floorTex.colorSpace = THREE.SRGBColorSpace;
         floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping; floorTex.repeat.set(2, 2);
-        const wallTex  = tl.load('assets/textures/wall.jpg?v=8'); wallTex.colorSpace = THREE.SRGBColorSpace;
+        const wallTex  = tl.load('assets/textures/wall.jpg?v=9'); wallTex.colorSpace = THREE.SRGBColorSpace;
         wallTex.wrapS = wallTex.wrapT = THREE.ClampToEdgeWrapping;
         const mirrorTex = tl.load('assets/textures/mirror.jpg'); mirrorTex.colorSpace = THREE.SRGBColorSpace;
 
-        // Комната
+        // ROOM (опустил стены на 1 см, чтобы не было щели)
         const floor = new THREE.Mesh(new THREE.PlaneGeometry(w, d),
           new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.9 }));
-        floor.rotation.x = -Math.PI/2; floor.receiveShadow = true; scene.add(floor);
+        floor.rotation.x = -Math.PI/2; floor.position.y = 0.0005; // небольшой подъём пола
+        floor.receiveShadow = true; scene.add(floor);
 
         const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, roughness: 1.0 });
         const walls = [
-          [0, h/2, -d/2, 0], [0, h/2, d/2, Math.PI],
-          [-w/2, h/2, 0, Math.PI/2], [w/2, h/2, 0, -Math.PI/2]
+          [0, h/2 - 0.01, -d/2, 0],           // back
+          [0, h/2 - 0.01,  d/2, Math.PI],     // front
+          [-w/2, h/2 - 0.01, 0,  Math.PI/2],  // left
+          [ w/2, h/2 - 0.01, 0, -Math.PI/2],  // right
         ];
         walls.forEach(([x,y,z,ry])=>{
-          const wall = new THREE.Mesh(new THREE.PlaneGeometry(ry ? d : w, h), wallMat);
+          const wall = new THREE.Mesh(new THREE.PlaneGeometry(ry ? d : w, h + 0.02), wallMat);
           wall.position.set(x,y,z); if (ry) wall.rotation.y = ry;
           wall.receiveShadow = true; scene.add(wall);
         });
@@ -178,10 +200,10 @@
           new THREE.MeshStandardMaterial({ map: mirrorTex, metalness: 0.85, roughness: 0.22 }));
         mirror.position.set(0, 1.5, -d/2 + 0.01); scene.add(mirror);
 
-        // Модели
+        // MODELS
         const gltfLoader = new THREE.GLTFLoader(manager);
 
-        // --- СУНДУК: как в твоём примере ---
+        // ---- СУНДУК (как у тебя было) ----
         gltfLoader.load('assets/models/chest.glb', (gltf) => {
           const chest = gltf.scene;
           chest.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
@@ -191,8 +213,8 @@
           chest.position.sub(box0.getCenter(new THREE.Vector3()));
 
           // 2) Масштаб
-          const SIZE_MULT = 1.5;
-          const targetDiag = 1.2 * SIZE_MULT;
+          const SIZE_MULT = 1.5;                 // ← множитель
+          const targetDiag = 1.2 * SIZE_MULT;    // ← целевая диагональ
           const diag0 = box0.getSize(new THREE.Vector3()).length();
           const s = diag0 > 0 ? targetDiag / diag0 : 1;
           chest.scale.setScalar(s);
@@ -201,52 +223,49 @@
           const box1 = new THREE.Box3().setFromObject(chest);
           chest.position.y -= box1.min.y;
 
-          // 4) Позиция
+          // 4) Позиция (левая стена, ближе к передней)
           const wallOffset = 0.45;
           const x = -w/2 + wallOffset;
           const z = 1.10;
           chest.position.x = x;
           chest.position.z = z;
 
-          // 5) Поворот
+          // 5) Поворот (вдоль левой стены)
           chest.rotation.y = Math.PI / 1;
 
           scene.add(chest);
 
-          // --- ДВОЙНЫЕ БОЧКИ из одного GLB ---
+          // ---- БОЧКИ (две в одном GLB): СПРАВА от сундука, вдоль той же стены ----
           gltfLoader.load('assets/models/barrel.glb', (gltf2) => {
-            // весь GLB как один "групповой" объект (внутри 2 бочки разного размера)
             const barrels = gltf2.scene;
             barrels.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
 
-            // центрируем группу
+            // центр и масштаб: высота группы ≈ 110% высоты сундука
             const g0 = new THREE.Box3().setFromObject(barrels);
             barrels.position.sub(g0.getCenter(new THREE.Vector3()));
-
-            // хотим: высота большей бочки ≈ 110% высоты сундука
-            // берём высоту группы (по Y), как прокси большей бочки
             const chestH = new THREE.Box3().setFromObject(chest).getSize(new THREE.Vector3()).y;
             const groupH = g0.getSize(new THREE.Vector3()).y;
             const scale = groupH > 0 ? (chestH * 1.10) / groupH : 1;
             barrels.scale.setScalar(scale);
 
-            // ставим на пол
+            // на пол
             const g1 = new THREE.Box3().setFromObject(barrels);
             barrels.position.y -= g1.min.y;
 
-            // позиция: вдоль той же (левой) стены, СПРАВА от сундука
-            const gap = 0.70; // расстояние вдоль стены между сундуком и центром группы бочек
-            barrels.position.x = chest.position.x;
-            barrels.position.z = Math.min(d/2 - 0.35, chest.position.z + gap);
+            // СПРАВА от сундука: +Z (вдоль стены к передней), чуть к центру по +X чтобы не пересекалось
+            const gapZ = 0.75;     // расстояние по стене между центрами
+            const nudgeX = 0.06;   // 6 см в сторону центра комнаты
+            barrels.position.x = chest.position.x + nudgeX;
+            barrels.position.z = Math.min(d/2 - 0.35, chest.position.z + gapZ);
 
-            // поворот: на 90° влево относительно сундука
+            // Повернуть на 90° влево относительно сундука
             barrels.rotation.y = chest.rotation.y - Math.PI / 2;
 
             scene.add(barrels);
           }, undefined, (err)=>console.warn('Ошибка загрузки barrel.glb', err));
         }, undefined, (err)=>console.warn('Ошибка загрузки chest.glb', err));
 
-        // страховка: через 12с впустим даже при сбое загрузки
+        // страховка от вечного портала
         setTimeout(()=>resolve(), 12000);
       });
     }
