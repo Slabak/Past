@@ -3,33 +3,28 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Комната — портал, центр. камера, сундук и бочки в другом углу</title>
+  <title>Комната — портал, 360° камера, сундук и бочки</title>
   <style>
-    html, body { height: 100%; margin: 0; overflow: hidden; background: #000; }
+    html, body { height:100%; margin:0; overflow:hidden; background:#000; }
     #overlay, #loading-screen {
-      position: fixed; inset: 0; display: grid; place-items: center;
-      background: radial-gradient(circle at center, rgba(0,0,0,.85), rgba(0,0,0,1));
-      color: #fff; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-      z-index: 9999;
+      position:fixed; inset:0; display:grid; place-items:center;
+      background:radial-gradient(circle at center, rgba(0,0,0,.85), rgba(0,0,0,1));
+      color:#fff; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; z-index:9999;
     }
     #overlay button {
-      font-size: 18px; padding: 14px 24px; border-radius: 12px; border: none;
-      background: #ffb366; color: #000; cursor: pointer; transition: transform .2s, background .3s;
+      font-size:18px; padding:14px 24px; border-radius:12px; border:none;
+      background:#ffb366; color:#000; cursor:pointer; transition:transform .2s,background .3s;
     }
-    #overlay button:hover { transform: scale(1.05); background: #ffd5a3; }
-
+    #overlay button:hover { transform:scale(1.05); background:#ffd5a3; }
     .portal-wrap { display:flex; flex-direction:column; align-items:center; gap:14px; }
-    .portal-text { font-size: 1.1rem; letter-spacing: .5px; text-align:center; }
-    .portal-ring {
-      width: 72px; height: 72px;
-      border: 4px solid rgba(255,200,100,.45); border-top-color:#ffb366; border-radius: 50%;
-      animation: spin 1s linear infinite;
-    }
-    .bar { width: 260px; height: 8px; background: rgba(255,255,255,.12); border-radius:8px; overflow:hidden; }
-    .bar-fill { height:100%; width:0%; background:#ffb366; transition: width .15s ease; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .fade-out { animation: fadeOut 1s forwards; }
-    @keyframes fadeOut { to { opacity: 0; visibility: hidden; } }
+    .portal-text { font-size:1.1rem; letter-spacing:.5px; text-align:center; }
+    .portal-ring { width:72px; height:72px; border:4px solid rgba(255,200,100,.45);
+      border-top-color:#ffb366; border-radius:50%; animation:spin 1s linear infinite; }
+    .bar { width:260px; height:8px; background:rgba(255,255,255,.12); border-radius:8px; overflow:hidden; }
+    .bar-fill { height:100%; width:0%; background:#ffb366; transition:width .15s ease; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    .fade-out { animation:fadeOut 1s forwards; }
+    @keyframes fadeOut { to { opacity:0; visibility:hidden; } }
   </style>
 </head>
 <body>
@@ -50,22 +45,22 @@
 
   <script>
     /** ОСИ СЦЕНЫ
-     *  +Z — к ПЕРЕДНЕЙ стене (где зеркало по центру).
-     *  +X — к ПРАВОЙ стене.
-     *   Y — вверх.
+     * +Z — к ПЕРЕДНЕЙ стене (где зеркало).
+     * +X — к ПРАВОЙ стене.
+     *  Y — вверх.
      */
 
-    // --- ПАРАМЕТРЫ, КОТОРЫЕ МОЖНО ПРАВИТЬ ---
-    // Сундук (как у тебя в образце)
-    const CHEST_SIZE_MULT     = 1.5;     // множитель размера (цел. диагональ 1.2м * этот множитель)
-    const CHEST_WALLOFFSET_X  = 0.45;    // отступ от левой стены (м)
-    const CHEST_Z             = 1.10;    // положение вдоль стены (к передней стене = +Z)
+    // ---- ПАРАМЕТРЫ, КОТОРЫЕ УДОБНО ПРАВИТЬ ----
+    // Сундук (как в твоём шаблоне)
+    const CHEST_SIZE_MULT     = 1.5;   // множитель размера (целевая диагональ 1.2м * этот множитель)
+    const CHEST_WALLOFFSET_X  = 0.45;  // отступ от левой стены
+    const CHEST_Z             = 1.10;  // положение вдоль левой стены (к передней = +Z)
 
-    // БОЧКИ (двойная модель) — СТАВИМ В ДРУГОМ УГЛУ ЛЕВОЙ СТЕНЫ (у заднего левого угла)
-    const BARRELS_TARGET_HEIGHT = 1.30;  // целевая высота группы бочек в метрах (на глаз)
-    const BARRELS_WALLOFFSET_X  = 0.45;  // такой же отступ от левой стены
-    const BARRELS_Z             = -1.10; // положение вдоль левой стены, «слева от зеркала» = ближе к задней стене
-    const BARRELS_TURN_LEFT_90  = true;  // повернуть на 90° влево
+    // Бочки (независимо от сундука) — у левого-заднего угла той же стены
+    const BARRELS_TARGET_HEIGHT = 1.30; // желаемая общая высота группы/модели (м)
+    const BARRELS_WALLOFFSET_X  = 0.45; // отступ от левой стены
+    const BARRELS_Z             = -1.10;// вдоль левой стены (к задней = минус)
+    const BARRELS_ROT_LEFT_90   = true; // повернуть вдоль стены
 
     let scene, camera, renderer, controls, listener, bgm, portalSound;
     const w = 4, d = 4, h = 3; // размеры комнаты
@@ -103,7 +98,7 @@
       scene.background = new THREE.Color(0x100806);
       scene.fog = new THREE.Fog(0x1a0f0a, 5, 12);
 
-      // КАМЕРА: центр комнаты, 360°, инвертированный «скролл»
+      // КАМЕРА: центр комнаты, 360°, инверсия «как скролл»
       camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 50);
       camera.position.set(0, 1.6, 0);
 
@@ -122,22 +117,19 @@
       controls.enableZoom = false;
       controls.enablePan  = false;
       controls.enableRotate = true;
-      // 360° по горизонту
       controls.minAzimuthAngle = -Infinity;
       controls.maxAzimuthAngle =  Infinity;
-      // почти полный диапазон по вертикали
       controls.minPolarAngle = THREE.MathUtils.degToRad(2);
       controls.maxPolarAngle = THREE.MathUtils.degToRad(178);
-      // «слайдинг» и ИНВЕРСИЯ как скролл
       controls.enableDamping = true;
       controls.dampingFactor = 0.12;
-      controls.rotateSpeed   = -0.8; // МИНУС = инверсия (палец влево → картинка вправо)
+      controls.rotateSpeed   = -0.8; // МИНУС = инверсия жеста
       controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
 
       // свет
       const hemi = new THREE.HemisphereLight(0xffd9b0, 0x1a0f0a, 0.35); scene.add(hemi);
-      const ambient = new THREE.AmbientLight(0xffd7aa, 0.15); scene.add(ambient);
-      const dir = new THREE.DirectionalLight(0xffb366, 1.25);
+      const ambient = new THREE.AmbientLight(0xffd7aa, 0.22); scene.add(ambient); // чуть ярче
+      const dir = new THREE.DirectionalLight(0xffb366, 1.35);
       dir.position.set(-2.5, 3.5, 1.5);
       dir.castShadow = true; dir.shadow.mapSize.set(2048, 2048); dir.shadow.radius = 6;
       scene.add(dir);
@@ -175,7 +167,30 @@
       })();
     }
 
-    // Загрузка: текстуры, комната, сундук (как в образце), бочки в другом углу
+    // ---- Утилита починки материалов/текстур ----
+    let fallbackWood = null;
+    function fixMaterials(root) {
+      root.traverse(obj => {
+        if (!obj.isMesh) return;
+        const apply = (mat) => {
+          if (!mat) return;
+          if (mat.map) {
+            mat.map.colorSpace = THREE.SRGBColorSpace;
+            mat.map.anisotropy = renderer.capabilities.getMaxAnisotropy?.() || 8;
+          } else if (fallbackWood) {
+            mat.map = fallbackWood; mat.color?.set?.(0xffffff);
+          }
+          if (mat.roughness === undefined) mat.roughness = 0.85;
+          if (mat.metalness === undefined) mat.metalness = 0.0;
+          mat.needsUpdate = true;
+        };
+        if (Array.isArray(obj.material)) obj.material.forEach(apply);
+        else apply(obj.material);
+        obj.castShadow = true; obj.receiveShadow = true;
+      });
+    }
+
+    // Загрузка: текстуры, комната, сундук, бочки
     function loadAllAssetsWithProgress(onProgress) {
       return new Promise((resolve) => {
         const manager = new THREE.LoadingManager(
@@ -191,9 +206,14 @@
         const tl = new THREE.TextureLoader(manager);
         const floorTex = tl.load('assets/textures/floor.jpg'); floorTex.colorSpace = THREE.SRGBColorSpace;
         floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping; floorTex.repeat.set(2, 2);
-        const wallTex  = tl.load('assets/textures/wall.jpg?v=11'); wallTex.colorSpace = THREE.SRGBColorSpace;
+        const wallTex  = tl.load('assets/textures/wall.jpg?v=12'); wallTex.colorSpace = THREE.SRGBColorSpace;
         wallTex.wrapS = wallTex.wrapT = THREE.ClampToEdgeWrapping;
         const mirrorTex = tl.load('assets/textures/mirror.jpg'); mirrorTex.colorSpace = THREE.SRGBColorSpace;
+        // запасная древесная текстура (на случай отсутствия карт в GLB)
+        fallbackWood = tl.load('assets/textures/wood.jpg', t => {
+          t.colorSpace = THREE.SRGBColorSpace;
+          t.anisotropy = renderer.capabilities.getMaxAnisotropy?.() || 8;
+        });
 
         // ROOM (слегка опускаем стены)
         const floor = new THREE.Mesh(new THREE.PlaneGeometry(w, d),
@@ -221,10 +241,9 @@
         // MODELS
         const gltfLoader = new THREE.GLTFLoader(manager);
 
-        // ---- СУНДУК (ровно как в образце) ----
+        // ---- СУНДУК (как в твоём образце) ----
         gltfLoader.load('assets/models/chest.glb', (gltf) => {
           const chest = gltf.scene;
-          chest.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
 
           // 1) Центр
           const box0 = new THREE.Box3().setFromObject(chest);
@@ -247,34 +266,38 @@
           // 5) Поворот вдоль левой стены
           chest.rotation.y = Math.PI;
 
+          fixMaterials(chest);
           scene.add(chest);
         }, undefined, (err)=>console.warn('Ошибка загрузки chest.glb', err));
 
-        // ---- БОЧКИ (двойная модель), независимо от сундука ----
-        gltfLoader.load('assets/models/barrel.glb', (gltf2) => {
+        // ---- БОЧКИ (независимо, в другом углу той же стены) ----
+        // Попытаемся сначала лёгкую, если нет — возьмём старую.
+        const loadBarrels = (url) => gltfLoader.load(url, (gltf2) => {
           const barrels = gltf2.scene;
-          barrels.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
 
           // центр и масштаб по целевой высоте
           const g0 = new THREE.Box3().setFromObject(barrels);
           barrels.position.sub(g0.getCenter(new THREE.Vector3()));
-          const groupH = g0.getSize(new THREE.Vector3()).y;
-          const scale = groupH > 0 ? (BARRELS_TARGET_HEIGHT / groupH) : 1;
+          const groupH = g0.getSize(new THREE.Vector3()).y || 1;
+          const scale = BARRELS_TARGET_HEIGHT / groupH;
           barrels.scale.setScalar(scale);
 
           // на пол
           const g1 = new THREE.Box3().setFromObject(barrels);
           barrels.position.y -= g1.min.y;
 
-          // координаты у ЛЕВОГО-ЗАДНЕГО угла, на той же (левой) стене
-          barrels.position.x = -w/2 + BARRELS_WALLOFFSET_X; // та же левая стена
-          barrels.position.z = BARRELS_Z;                   // «слева от зеркала» = ближе к задней стене
+          // координаты у ЛЕВОГО-ЗАДНЕГО угла
+          barrels.position.x = -w/2 + BARRELS_WALLOFFSET_X;
+          barrels.position.z = BARRELS_Z;
 
-          // поворот: 90° влево при необходимости
-          if (BARRELS_TURN_LEFT_90) barrels.rotation.y = Math.PI / 2; // повернули вдоль стены
+          if (BARRELS_ROT_LEFT_90) barrels.rotation.y = Math.PI / 2;
 
+          fixMaterials(barrels);
           scene.add(barrels);
-        }, undefined, (err)=>console.warn('Ошибка загрузки barrel.glb', err));
+        }, undefined, (err)=>console.warn('Ошибка загрузки', url, err));
+
+        loadBarrels('assets/models/barrel_light.glb'); // если есть лёгкая версия
+        loadBarrels('assets/models/barrel.glb');       // и/или старая тяжёлая — догрузится, заменив предыдущую
 
         // страховка от вечного портала
         setTimeout(()=>resolve(), 12000);
