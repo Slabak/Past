@@ -28,17 +28,44 @@
     let scene, camera, renderer, controls, listener, sound;
 
     const init = () => {
+      // --- СНАЧАЛА: безопасный обработчик кнопки ---
+      const overlay = document.getElementById('overlay');
+      const startBtn = document.getElementById('start');
+      if (startBtn) {
+        startBtn.addEventListener('click', async () => {
+          // Снимаем оверлей всегда
+          overlay.style.display = 'none';
+
+          // Безопасно пытаемся запустить аудио (но ошибка не критична)
+          try {
+            const ac = listener?.context;
+            if (ac && ac.state === 'suspended') await ac.resume();
+
+            if (sound) {
+              const audioLoader = new THREE.AudioLoader();
+              audioLoader.load('assets/music/music.mp3', buffer => {
+                sound.setBuffer(buffer);
+                sound.setLoop(true);
+                sound.setVolume(0.35);
+                sound.play();
+              }, undefined, () => console.warn('Музыка не найдена — продолжаем без неё'));
+            }
+          } catch (e) {
+            console.warn('Audio start error:', e);
+          }
+        }, { once: true });
+      }
+
+      // --- Сцена/камера/рендер ---
       scene = new THREE.Scene();
       scene.background = new THREE.Color(0x120a07);
       scene.fog = new THREE.Fog(0x1a0f0a, 5, 12);
 
       const w = 4, d = 4, h = 3;
 
-      // Камера
       camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 50);
       camera.position.set(0, 1.6, 2.6);
 
-      // Рендер
       renderer = new THREE.WebGLRenderer({ antialias: true });
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       renderer.setSize(window.innerWidth, window.innerHeight);
@@ -49,7 +76,6 @@
       renderer.toneMappingExposure = 0.95;
       document.body.appendChild(renderer.domElement);
 
-      // Контролы
       controls = new THREE.OrbitControls(camera, renderer.domElement);
       controls.target.set(0, 1.2, 0);
       controls.enableDamping = true;
@@ -58,7 +84,7 @@
       controls.maxDistance = 5;
       controls.maxPolarAngle = Math.PI * 0.49;
 
-      // Свет
+      // --- Свет ---
       const hemi = new THREE.HemisphereLight(0xffe2c5, 0x1a0f0a, 0.25);
       scene.add(hemi);
       const ambient = new THREE.AmbientLight(0xfff2df, 0.10);
@@ -70,7 +96,7 @@
       dir.shadow.radius = 4;
       scene.add(dir);
 
-      // Текстуры
+      // --- Геометрия комнаты ---
       const tl = new THREE.TextureLoader();
       const floorTex = tl.load('assets/textures/floor.jpg');
       const wallTex  = tl.load('assets/textures/wall.jpg');
@@ -83,13 +109,11 @@
       const floorMat = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.95 });
       const wallMat  = new THREE.MeshStandardMaterial({ map: wallTex, roughness: 1.00 });
 
-      // Пол
       const floor = new THREE.Mesh(new THREE.PlaneGeometry(w, d), floorMat);
       floor.rotation.x = -Math.PI / 2;
       floor.receiveShadow = true;
       scene.add(floor);
 
-      // Стены
       const walls = [
         [0, h/2, -d/2, 0], [0, h/2, d/2, Math.PI],
         [-w/2, h/2, 0, Math.PI/2], [w/2, h/2, 0, -Math.PI/2]
@@ -102,7 +126,6 @@
         scene.add(wall);
       });
 
-      // Зеркало
       const mirror = new THREE.Mesh(
         new THREE.PlaneGeometry(0.9, 0.6),
         new THREE.MeshStandardMaterial({ map: mirrorTex, metalness: 0.85, roughness: 0.22 })
@@ -110,62 +133,46 @@
       mirror.position.set(0, 1.5, -d/2 + 0.01);
       scene.add(mirror);
 
-      // Сундук
-      const loader = new THREE.GLTFLoader();
-      loader.load('assets/models/chest.glb', gltf => {
-        const chest = gltf.scene;
-        chest.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
-
-        const box = new THREE.Box3().setFromObject(chest);
-        const size = new THREE.Vector3(); box.getSize(size);
-        const center = new THREE.Vector3(); box.getCenter(center);
-        chest.position.sub(center);
-
-        const s = 1.2 / Math.sqrt(size.x**2 + size.y**2 + size.z**2);
-        chest.scale.setScalar(s);
-        chest.position.set(-w/2 + 0.25, 0, 1.4);
-        chest.rotation.y = Math.PI / 2;
-        scene.add(chest);
-      }, undefined, err => {
-        console.warn('Не удалось загрузить модель сундука:', err);
-      });
-
-      // Аудио безопасно
+      // --- Аудио (создаём объекты, без загрузки) ---
       listener = new THREE.AudioListener();
       camera.add(listener);
       sound = new THREE.Audio(listener);
 
-      // Безопасный запуск
-      document.getElementById('start').addEventListener('click', async () => {
-        document.getElementById('overlay').style.display = 'none';
-        try {
-          const ac = listener?.context;
-          if (ac && ac.state === 'suspended') await ac.resume();
-        } catch(e) { console.warn('AudioContext resume error', e); }
+      // --- Загрузка сундука (защищённо) ---
+      try {
+        if (THREE.GLTFLoader) {
+          const loader = new THREE.GLTFLoader();
+          loader.load('assets/models/chest.glb', gltf => {
+            const chest = gltf.scene;
+            chest.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
 
-        try {
-          const audioLoader = new THREE.AudioLoader();
-          audioLoader.load('assets/music/music.mp3', buffer => {
-            sound.setBuffer(buffer);
-            sound.setLoop(true);
-            sound.setVolume(0.35);
-            sound.play();
+            const box = new THREE.Box3().setFromObject(chest);
+            const size = new THREE.Vector3(); box.getSize(size);
+            const center = new THREE.Vector3(); box.getCenter(center);
+            chest.position.sub(center);
+
+            const s = 1.2 / Math.sqrt(size.x**2 + size.y**2 + size.z**2);
+            chest.scale.setScalar(s);
+            chest.position.set(-w/2 + 0.25, 0, 1.4);
+            chest.rotation.y = Math.PI / 2;
+            scene.add(chest);
           }, undefined, err => {
-            console.warn('Музыка не найдена — продолжаем без неё');
+            console.warn('Не удалось загрузить модель сундука:', err);
           });
-        } catch(e) {
-          console.warn('Audio load error:', e);
+        } else {
+          console.warn('GLTFLoader не найден: проверь путь assets/js/GLTFLoader.js');
         }
-      });
+      } catch (e) {
+        console.warn('Ошибка при инициализации GLTFLoader:', e);
+      }
 
-      // Resize
+      // --- Resize/Loop ---
       window.addEventListener('resize', () => {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
       });
 
-      // Анимация
       const animate = () => {
         requestAnimationFrame(animate);
         controls.update();
