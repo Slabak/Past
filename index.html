@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Комната — портал, 360° камера, сундук и бочки</title>
+  <title>Комната — портал, 360° камера, сундук, бочки и балки</title>
   <style>
     html, body { height:100%; margin:0; overflow:hidden; background:#000; }
     #overlay, #loading-screen {
@@ -79,6 +79,12 @@
     const BARRELS_WALLOFFSET_X  = 0.45; // отступ от левой стены
     const BARRELS_Z             = -1.10;// ближе к задней стене
     const BARRELS_ROT_LEFT_90   = true; // повернуть вдоль стены
+
+    // БАЛКИ (plank.glb)
+    const BEAM_THICKNESS   = 0.12; // толщина/ширина балки (м) ~ 12 см
+    const BEAM_INSET_WALL  = 0.03; // отступ от стен (чтобы не пересекалось)
+    const BEAM_INSET_CEIL  = 0.02; // зазор от потолка
+    const POST_FLOOR_GAP   = 0.00; // приподнять стойки от пола при надобности
 
     let scene, camera, renderer;
     let orbitControls = null;
@@ -333,7 +339,70 @@
       });
     }
 
-    // Загрузка: текстуры, комната, сундук, бочки
+    // ======= Вспомогательные функции для балок (plank.glb) =======
+    function preparePlankUnit(plankScene) {
+      // центрируем
+      const box = new THREE.Box3().setFromObject(plankScene);
+      plankScene.position.sub(box.getCenter(new THREE.Vector3()));
+
+      // определить «длинную ось»
+      const size = box.getSize(new THREE.Vector3());
+      let maxAxis = 'y';
+      if (size.x >= size.y && size.x >= size.z) maxAxis = 'x';
+      else if (size.z >= size.y && size.z >= size.x) maxAxis = 'z';
+
+      // Повернуть так, чтобы длина шла по +Y
+      if (maxAxis === 'x') plankScene.rotation.set(0, 0, Math.PI/2);
+      else if (maxAxis === 'z') plankScene.rotation.set(-Math.PI/2, 0, 0);
+
+      // Нормировка длины до 1м
+      const box2 = new THREE.Box3().setFromObject(plankScene);
+      const size2 = box2.getSize(new THREE.Vector3());
+      const lengthY = Math.max(size2.y, 1e-6);
+      const scaleToUnit = 1 / lengthY;
+      plankScene.scale.multiplyScalar(scaleToUnit);
+
+      // Базовые поперечники после нормировки
+      const baseBox = new THREE.Box3().setFromObject(plankScene);
+      const baseSize = baseBox.getSize(new THREE.Vector3());
+      const baseCrossX = Math.max(baseSize.x, 1e-6);
+      const baseCrossZ = Math.max(baseSize.z, 1e-6);
+
+      const unit = new THREE.Group();
+      unit.add(plankScene);
+
+      function spawnBeamBetween(start, end, thickness = BEAM_THICKNESS) {
+        const clone = unit.clone(true);
+        const dir = new THREE.Vector3().subVectors(end, start);
+        const len = dir.length();
+        if (len < 1e-6) return null;
+        const mid = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
+
+        // масштаб: по Y — длина, по X/Z — толщина
+        const sx = thickness / baseCrossX;
+        const sy = len;
+        const sz = thickness / baseCrossZ;
+        clone.scale.set(sx, sy, sz);
+
+        // ориентация: +Y → dir
+        const q = new THREE.QuaternionsetFromUnitVectors
+        ? new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), dir.clone().normalize())
+        : (function(){ const qq=new THREE.Quaternion(); qq.setFromUnitVectors(new THREE.Vector3(0,1,0), dir.clone().normalize()); return qq; })();
+        clone.quaternion.copy(q);
+
+        clone.position.copy(mid);
+
+        clone.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
+        fixMaterials(clone);
+
+        scene.add(clone);
+        return clone;
+      }
+
+      return { spawnBeamBetween };
+    }
+
+    // Загрузка: текстуры, комната, сундук, бочки, балки
     function loadAllAssetsWithProgress(onProgress) {
       return new Promise((resolve) => {
         const manager = new THREE.LoadingManager(
@@ -349,7 +418,7 @@
         const tl = new THREE.TextureLoader(manager);
         const floorTex = tl.load('assets/textures/floor.jpg'); floorTex.colorSpace = THREE.SRGBColorSpace;
         floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping; floorTex.repeat.set(2, 2);
-        const wallTex  = tl.load('assets/textures/wall.jpg?v=14'); wallTex.colorSpace = THREE.SRGBColorSpace;
+        const wallTex  = tl.load('assets/textures/wall.jpg?v=15'); wallTex.colorSpace = THREE.SRGBColorSpace;
         wallTex.wrapS = wallTex.wrapT = THREE.ClampToEdgeWrapping;
         const mirrorTex = tl.load('assets/textures/mirror.jpg'); mirrorTex.colorSpace = THREE.SRGBColorSpace;
         // запасная древесная текстура
@@ -441,6 +510,80 @@
         // быстрая лёгкая версия (если есть), и/или старая
         loadBarrels('assets/models/barrel_light.glb');
         loadBarrels('assets/models/barrel.glb');
+
+        // ---- БАЛКИ: грузим plank.glb и расставляем 4 стойки + 4 ригеля ----
+        gltfLoader.load('assets/models/plank.glb', (gltfPlank) => {
+          const plankRoot = gltfPlank.scene;
+
+          // подготовка юнита
+          const prep = (function preparePlankUnit(plankScene) {
+            // центр
+            const box = new THREE.Box3().setFromObject(plankScene);
+            plankScene.position.sub(box.getCenter(new THREE.Vector3()));
+            // длинная ось
+            const size = box.getSize(new THREE.Vector3());
+            let maxAxis = 'y';
+            if (size.x >= size.y && size.x >= size.z) maxAxis = 'x';
+            else if (size.z >= size.y && size.z >= size.x) maxAxis = 'z';
+            if (maxAxis === 'x') plankScene.rotation.set(0, 0, Math.PI/2);
+            else if (maxAxis === 'z') plankScene.rotation.set(-Math.PI/2, 0, 0);
+            // нормировка длины до 1м
+            const box2 = new THREE.Box3().setFromObject(plankScene);
+            const size2 = box2.getSize(new THREE.Vector3());
+            const lengthY = Math.max(size2.y, 1e-6);
+            plankScene.scale.multiplyScalar(1/lengthY);
+            const baseBox = new THREE.Box3().setFromObject(plankScene);
+            const baseSize = baseBox.getSize(new THREE.Vector3());
+            const baseCrossX = Math.max(baseSize.x, 1e-6);
+            const baseCrossZ = Math.max(baseSize.z, 1e-6);
+
+            const unit = new THREE.Group(); unit.add(plankScene);
+
+            function spawnBetween(start, end, thickness = BEAM_THICKNESS) {
+              const clone = unit.clone(true);
+              const dir = new THREE.Vector3().subVectors(end, start);
+              const len = dir.length(); if (len < 1e-6) return null;
+              const mid = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
+
+              const sx = thickness / baseCrossX;
+              const sy = len;
+              const sz = thickness / baseCrossZ;
+              clone.scale.set(sx, sy, sz);
+
+              const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), dir.clone().normalize());
+              clone.quaternion.copy(q);
+              clone.position.copy(mid);
+
+              clone.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
+              fixMaterials(clone);
+              scene.add(clone);
+              return clone;
+            }
+            return { spawnBetween };
+          })(plankRoot);
+
+          // координаты углов с отступами
+          const xL = -w/2 + BEAM_INSET_WALL;
+          const xR =  w/2 - BEAM_INSET_WALL;
+          const zB = -d/2 + BEAM_INSET_WALL; // back (зеркало)
+          const zF =  d/2 - BEAM_INSET_WALL; // front
+
+          const y0 = 0 + POST_FLOOR_GAP;
+          const yT = h - BEAM_INSET_CEIL;
+          const yH = yT;
+
+          // 4 вертикальные стойки
+          prep.spawnBetween(new THREE.Vector3(xL, y0, zB), new THREE.Vector3(xL, yT, zB));
+          prep.spawnBetween(new THREE.Vector3(xR, y0, zB), new THREE.Vector3(xR, yT, zB));
+          prep.spawnBetween(new THREE.Vector3(xL, y0, zF), new THREE.Vector3(xL, yT, zF));
+          prep.spawnBetween(new THREE.Vector3(xR, y0, zF), new THREE.Vector3(xR, yT, zF));
+
+          // 4 горизонтальные под потолком (обрамление)
+          prep.spawnBetween(new THREE.Vector3(xL, yH, zB), new THREE.Vector3(xR, yH, zB)); // задняя
+          prep.spawnBetween(new THREE.Vector3(xL, yH, zF), new THREE.Vector3(xR, yH, zF)); // передняя
+          prep.spawnBetween(new THREE.Vector3(xL, yH, zB), new THREE.Vector3(xL, yH, zF)); // левая
+          prep.spawnBetween(new THREE.Vector3(xR, yH, zB), new THREE.Vector3(xR, yH, zF)); // правая
+        }, undefined, (err)=>console.warn('Не удалось загрузить assets/models/plank.glb', err));
 
         // страховка от вечного портала
         setTimeout(()=>resolve(), 12000);
