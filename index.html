@@ -25,6 +25,19 @@
     @keyframes spin { to { transform:rotate(360deg); } }
     .fade-out { animation:fadeOut 1s forwards; }
     @keyframes fadeOut { to { opacity:0; visibility:hidden; } }
+
+    /* UI переключения управления */
+    #modeToggle {
+      position: fixed; top: 14px; right: 14px; z-index: 10000;
+      background: rgba(0,0,0,.55); color: #fff; border:1px solid rgba(255,255,255,.2);
+      padding: 10px 12px; border-radius: 10px; font-size: 14px; cursor: pointer;
+      backdrop-filter: blur(6px);
+    }
+    #toast {
+      position: fixed; left: 50%; transform: translateX(-50%);
+      bottom: 16px; padding: 10px 14px; border-radius: 10px; color: #000;
+      background: #ffd48a; z-index: 10000; font-size: 14px; display: none;
+    }
   </style>
 </head>
 <body>
@@ -38,9 +51,15 @@
     </div>
   </div>
 
+  <!-- переключение управления -->
+  <button id="modeToggle" style="display:none;">Управление: ПАЛЕЦ</button>
+  <div id="toast"></div>
+
   <!-- three -->
   <script src="assets/js/three.min.js"></script>
   <script src="assets/js/OrbitControls.js"></script>
+  <!-- DeviceOrientationControls (UMD-версия из examples/js) -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/controls/DeviceOrientationControls.js"></script>
   <script src="assets/js/GLTFLoader.js"></script>
 
   <script>
@@ -50,20 +69,33 @@
      *  Y — вверх.
      */
 
-    // ---- ПАРАМЕТРЫ, КОТОРЫЕ УДОБНО ПРАВИТЬ ----
+    // ---- ПАРАМЕТРЫ (можно править) ----
     // Сундук (как в твоём шаблоне)
     const CHEST_SIZE_MULT     = 1.5;   // множитель размера (целевая диагональ 1.2м * этот множитель)
     const CHEST_WALLOFFSET_X  = 0.45;  // отступ от левой стены
     const CHEST_Z             = 1.10;  // положение вдоль левой стены (к передней = +Z)
 
-    // Бочки (независимо от сундука) — у левого-заднего угла той же стены
-    const BARRELS_TARGET_HEIGHT = 1.30; // желаемая общая высота группы/модели (м)
+    // Бочки (в другом углу левой стены)
+    const BARRELS_TARGET_HEIGHT = 1.30; // желаемая высота (м)
     const BARRELS_WALLOFFSET_X  = 0.45; // отступ от левой стены
-    const BARRELS_Z             = -1.10;// вдоль левой стены (к задней = минус)
+    const BARRELS_Z             = -1.10;// ближе к задней стене
     const BARRELS_ROT_LEFT_90   = true; // повернуть вдоль стены
 
-    let scene, camera, renderer, controls, listener, bgm, portalSound;
+    let scene, camera, renderer;
+    let orbitControls = null;
+    let deviceControls = null;
+    let activeControls = null;
+
+    let listener, bgm, portalSound, fallbackWood = null;
     const w = 4, d = 4, h = 3; // размеры комнаты
+
+    // -------- утилиты UI --------
+    const $ = sel => document.querySelector(sel);
+    function toast(msg, ms=2200) {
+      const el = $('#toast');
+      el.textContent = msg; el.style.display = 'block';
+      clearTimeout(toast._t); toast._t = setTimeout(()=> el.style.display='none', ms);
+    }
 
     // -------- АУДИО --------
     function playPortal() {
@@ -88,17 +120,18 @@
     }
 
     function init() {
-      const overlay = document.getElementById('overlay');
-      const loadingScreen = document.getElementById('loading-screen');
-      const progressText = document.getElementById('progress');
-      const barFill = document.getElementById('bar-fill');
-      const startBtn = document.getElementById('start');
+      const overlay = $('#overlay');
+      const loadingScreen = $('#loading-screen');
+      const progressText = $('#progress');
+      const barFill = $('#bar-fill');
+      const startBtn = $('#start');
+      const modeBtn = $('#modeToggle');
 
       scene = new THREE.Scene();
       scene.background = new THREE.Color(0x100806);
       scene.fog = new THREE.Fog(0x1a0f0a, 5, 12);
 
-      // КАМЕРА: центр комнаты, 360°, инверсия «как скролл»
+      // КАМЕРА: центр комнаты, 360°
       camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 50);
       camera.position.set(0, 1.6, 0);
 
@@ -112,33 +145,19 @@
       renderer.toneMappingExposure = 1.05;
       document.body.appendChild(renderer.domElement);
 
-      controls = new THREE.OrbitControls(camera, renderer.domElement);
-      controls.target.set(0, 1.5, 0);
-      controls.enableZoom = false;
-      controls.enablePan  = false;
-      controls.enableRotate = true;
-      controls.minAzimuthAngle = -Infinity;
-      controls.maxAzimuthAngle =  Infinity;
-      controls.minPolarAngle = THREE.MathUtils.degToRad(2);
-      controls.maxPolarAngle = THREE.MathUtils.degToRad(178);
-      controls.enableDamping = true;
-      controls.dampingFactor = 0.12;
-      controls.rotateSpeed   = -0.8; // МИНУС = инверсия жеста
-      controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
-
-      // свет
+      // LIGHT
       const hemi = new THREE.HemisphereLight(0xffd9b0, 0x1a0f0a, 0.35); scene.add(hemi);
-      const ambient = new THREE.AmbientLight(0xffd7aa, 0.22); scene.add(ambient); // чуть ярче
+      const ambient = new THREE.AmbientLight(0xffd7aa, 0.22); scene.add(ambient);
       const dir = new THREE.DirectionalLight(0xffb366, 1.35);
       dir.position.set(-2.5, 3.5, 1.5);
       dir.castShadow = true; dir.shadow.mapSize.set(2048, 2048); dir.shadow.radius = 6;
       scene.add(dir);
       const fire = new THREE.PointLight(0xffa860, 0.6, 6); fire.position.set(-1.5, 1.2, 1.2); scene.add(fire);
 
-      // listener
+      // AUDIO LISTENER
       listener = new THREE.AudioListener(); camera.add(listener);
 
-      // кнопка -> портал
+      // КНОПКА СТАРТА -> ПОРТАЛ/ЗАГРУЗКА
       startBtn.addEventListener('click', () => {
         overlay.style.display = 'none';
         loadingScreen.style.display = 'grid';
@@ -149,9 +168,33 @@
         }).then(() => {
           playPortal();
           loadingScreen.classList.add('fade-out');
-          setTimeout(() => { loadingScreen.remove(); startBGM(); }, 1000);
+          setTimeout(() => {
+            loadingScreen.remove();
+            startBGM();
+            // показать кнопку переключения управления
+            modeBtn.style.display = 'block';
+            // включаем по умолчанию ПАЛЕЦ (орбита)
+            enableOrbitControls();
+          }, 1000);
         });
       }, { once: true });
+
+      // ПЕРЕКЛЮЧЕНИЕ РЕЖИМОВ
+      modeBtn.addEventListener('click', async () => {
+        if (activeControls === deviceControls) {
+          enableOrbitControls();
+          modeBtn.textContent = 'Управление: ПАЛЕЦ';
+          toast('Режим: палец (свайп-инверсия)');
+        } else {
+          const ok = await tryEnableDeviceControls();
+          if (ok) {
+            modeBtn.textContent = 'Управление: ТЕЛЕФОН';
+            toast('Режим: телефоном (гироскоп)');
+          } else {
+            toast('Доступ к датчикам отклонён — остаётся режим пальцем');
+          }
+        }
+      });
 
       // ресайз + анимация
       window.addEventListener('resize', () => {
@@ -159,16 +202,62 @@
         camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
       });
+
       (function animate(){
         requestAnimationFrame(animate);
         fire.intensity = 0.55 + Math.sin(performance.now() * 0.003) * 0.15;
-        controls.update();
+        if (activeControls && activeControls.update) activeControls.update();
         renderer.render(scene, camera);
       })();
     }
 
+    // ---- включение/выключение контролов ----
+    function enableOrbitControls() {
+      // уничтожаем device
+      if (deviceControls) { deviceControls.disconnect(); deviceControls = null; }
+      // создаём/настраиваем orbit
+      if (!orbitControls) {
+        orbitControls = new THREE.OrbitControls(camera, renderer.domElement);
+        orbitControls.target.set(0, 1.5, 0);
+        orbitControls.enableZoom = false;
+        orbitControls.enablePan  = false;
+        orbitControls.enableRotate = true;
+        orbitControls.minAzimuthAngle = -Infinity;
+        orbitControls.maxAzimuthAngle =  Infinity;
+        orbitControls.minPolarAngle = THREE.MathUtils.degToRad(2);
+        orbitControls.maxPolarAngle = THREE.MathUtils.degToRad(178);
+        orbitControls.enableDamping = true;
+        orbitControls.dampingFactor = 0.12;
+        orbitControls.rotateSpeed   = -0.8; // инверсия "как скролл"
+        orbitControls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
+      }
+      activeControls = orbitControls;
+    }
+
+    async function tryEnableDeviceControls() {
+      // iOS 13+: нужно разрешение
+      try {
+        if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') {
+          const perm = await DeviceOrientationEvent.requestPermission();
+          if (perm !== 'granted') return false;
+        }
+      } catch (e) {
+        console.warn(e);
+        return false;
+      }
+      // создаём device-controls
+      if (!deviceControls) {
+        deviceControls = new THREE.DeviceOrientationControls(camera);
+      } else {
+        deviceControls.connect();
+      }
+      // выключаем orbit
+      if (orbitControls) { orbitControls.dispose(); orbitControls = null; }
+      activeControls = deviceControls;
+      return true;
+    }
+
     // ---- Утилита починки материалов/текстур ----
-    let fallbackWood = null;
     function fixMaterials(root) {
       root.traverse(obj => {
         if (!obj.isMesh) return;
@@ -179,9 +268,14 @@
             mat.map.anisotropy = renderer.capabilities.getMaxAnisotropy?.() || 8;
           } else if (fallbackWood) {
             mat.map = fallbackWood; mat.color?.set?.(0xffffff);
+          } else {
+            // чисто коричневый, если даже запасной текстуры нет
+            mat.color?.set?.(0x8a5a3a);
           }
           if (mat.roughness === undefined) mat.roughness = 0.85;
           if (mat.metalness === undefined) mat.metalness = 0.0;
+          // иногда чёрнота из-за vertex colors
+          if ('vertexColors' in mat) mat.vertexColors = false;
           mat.needsUpdate = true;
         };
         if (Array.isArray(obj.material)) obj.material.forEach(apply);
@@ -206,7 +300,7 @@
         const tl = new THREE.TextureLoader(manager);
         const floorTex = tl.load('assets/textures/floor.jpg'); floorTex.colorSpace = THREE.SRGBColorSpace;
         floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping; floorTex.repeat.set(2, 2);
-        const wallTex  = tl.load('assets/textures/wall.jpg?v=12'); wallTex.colorSpace = THREE.SRGBColorSpace;
+        const wallTex  = tl.load('assets/textures/wall.jpg?v=13'); wallTex.colorSpace = THREE.SRGBColorSpace;
         wallTex.wrapS = wallTex.wrapT = THREE.ClampToEdgeWrapping;
         const mirrorTex = tl.load('assets/textures/mirror.jpg'); mirrorTex.colorSpace = THREE.SRGBColorSpace;
         // запасная древесная текстура (на случай отсутствия карт в GLB)
@@ -241,7 +335,7 @@
         // MODELS
         const gltfLoader = new THREE.GLTFLoader(manager);
 
-        // ---- СУНДУК (как в твоём образце) ----
+        // ---- СУНДУК (по твоему образцу) ----
         gltfLoader.load('assets/models/chest.glb', (gltf) => {
           const chest = gltf.scene;
 
@@ -270,8 +364,7 @@
           scene.add(chest);
         }, undefined, (err)=>console.warn('Ошибка загрузки chest.glb', err));
 
-        // ---- БОЧКИ (независимо, в другом углу той же стены) ----
-        // Попытаемся сначала лёгкую, если нет — возьмём старую.
+        // ---- БОЧКИ (в другом углу той же стены) ----
         const loadBarrels = (url) => gltfLoader.load(url, (gltf2) => {
           const barrels = gltf2.scene;
 
@@ -296,14 +389,16 @@
           scene.add(barrels);
         }, undefined, (err)=>console.warn('Ошибка загрузки', url, err));
 
-        loadBarrels('assets/models/barrel_light.glb'); // если есть лёгкая версия
-        loadBarrels('assets/models/barrel.glb');       // и/или старая тяжёлая — догрузится, заменив предыдущую
+        // быстрая лёгкая версия (если есть), и/или старая
+        loadBarrels('assets/models/barrel_light.glb');
+        loadBarrels('assets/models/barrel.glb');
 
         // страховка от вечного портала
         setTimeout(()=>resolve(), 12000);
       });
     }
 
+    // старт
     window.addEventListener('load', init);
   </script>
 </body>
