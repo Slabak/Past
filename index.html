@@ -24,7 +24,7 @@
 
   <script>
     let scene, camera, renderer, controls, listener, sound;
-    const w = 4, d = 4, h = 3; // размеры комнаты
+    const w = 4, d = 4, h = 3;
 
     function safeStartAudio() {
       try {
@@ -76,8 +76,7 @@
       dir.castShadow = true; dir.shadow.mapSize.set(2048, 2048); dir.shadow.radius = 6;
       scene.add(dir);
       const fire = new THREE.PointLight(0xffa860, 0.6, 6);
-      fire.position.set(-1.5, 1.2, 1.2);
-      scene.add(fire);
+      fire.position.set(-1.5, 1.2, 1.2); scene.add(fire);
 
       // текстуры
       const tl = new THREE.TextureLoader();
@@ -86,14 +85,13 @@
       floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
       floorTex.repeat.set(2, 2);
 
-      const wallTex  = tl.load('assets/textures/wall.jpg?v=4');
+      const wallTex  = tl.load('assets/textures/wall.jpg?v=3');
       wallTex.colorSpace = THREE.SRGBColorSpace;
       wallTex.wrapS = wallTex.wrapT = THREE.ClampToEdgeWrapping;
 
       const mirrorTex = tl.load('assets/textures/mirror.jpg');
       mirrorTex.colorSpace = THREE.SRGBColorSpace;
 
-      // геометрия комнаты
       const floor = new THREE.Mesh(
         new THREE.PlaneGeometry(w, d),
         new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.9, metalness: 0.0 })
@@ -118,10 +116,9 @@
       listener = new THREE.AudioListener(); camera.add(listener);
       sound = new THREE.Audio(listener);
 
-      // === СУНДУК И БОЧКА ===
+      // === СУНДУК и БОЧКА ===
       try {
         const loader = new THREE.GLTFLoader();
-
         loader.load('assets/models/chest.glb', (gltf) => {
           const chest = gltf.scene;
           chest.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
@@ -138,15 +135,16 @@
           const box1 = new THREE.Box3().setFromObject(chest);
           chest.position.y -= box1.min.y;
 
-          const wallOffset = 0.65;
+          // новая позиция сундука
+          const wallOffset = 0.45;
           const x = -w/2 + wallOffset;
-          const z = -1.50;
+          const z = 1.10;
           chest.position.x = x;
           chest.position.z = z;
-          chest.rotation.y = Math.PI / 2;
+          chest.rotation.y = Math.PI / 1;
           scene.add(chest);
 
-          // --- бочка ---
+          // теперь добавим бочку справа от сундука
           const barrelLoader = new THREE.GLTFLoader();
           barrelLoader.load('assets/models/barrel.glb', (gltf2) => {
             const barrel = gltf2.scene;
@@ -158,20 +156,19 @@
             const chestBox = new THREE.Box3().setFromObject(chest);
             const chestSize = chestBox.getSize(new THREE.Vector3()).length();
             const barrelSize = bBox.getSize(new THREE.Vector3()).length();
-            const relScale = (chestSize / barrelSize) * 1.2; // чуть больше сундука
+            const relScale = (chestSize / barrelSize) * 1.25; // немного больше сундука
             barrel.scale.setScalar(relScale);
 
             const bBox2 = new THREE.Box3().setFromObject(barrel);
             barrel.position.y -= bBox2.min.y;
 
-            // поставить справа от сундука
+            // ставим бочку справа от сундука, вдоль той же стены
             barrel.position.x = chest.position.x;
-            barrel.position.z = chest.position.z + 1.0; // ближе/дальше
-            barrel.rotation.y = Math.PI / 2;
+            barrel.position.z = chest.position.z - 1.0; // -1.0 = чуть позади сундука
+            barrel.rotation.y = Math.PI / 1;
 
             scene.add(barrel);
           }, undefined, err => console.warn('Не удалось загрузить бочку:', err));
-
         }, undefined, err => console.warn('Не удалось загрузить сундук:', err));
       } catch (e) {
         console.warn('GLTFLoader error:', e);
