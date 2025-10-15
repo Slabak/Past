@@ -133,7 +133,7 @@
         const x = -w/2 + wallOffset;
         const z = 1.4;           // как было (передний сектор)
         chest.position.set(x, 0, z);
-        chest.rotation.y = Math.PI / 0; // вдоль стены, «лицом» в комнату
+        chest.rotation.y = Math.PI; // вдоль стены, «лицом» в комнату
         scene.add(chest);
       }, undefined, err => console.warn('Не удалось загрузить сундук:', err));
     } catch (e) {
