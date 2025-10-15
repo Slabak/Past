@@ -278,7 +278,68 @@
         },undefined,(e)=>console.warn('Ошибка',url,e));
         loadBarrels('assets/models/barrel_light.glb');
         loadBarrels('assets/models/barrel.glb');
-        
+
+        // БАЛКИ — plank.glb
+        gltfLoader.load('assets/models/plank.glb',(g)=>{
+          const root=g.scene;
+
+          function prepareUnit(src){
+            const box=new THREE.Box3().setFromObject(src);
+            src.position.sub(box.getCenter(new THREE.Vector3()));
+            const s=box.getSize(new THREE.Vector3());
+            let axis='y'; if(s.x>=s.y && s.x>=s.z) axis='x'; else if(s.z>=s.y && s.z>=s.x) axis='z';
+            if(axis==='x') src.rotation.set(0,0,Math.PI/2); else if(axis==='z') src.rotation.set(-Math.PI/2,0,0);
+
+            const box2=new THREE.Box3().setFromObject(src), lenY=Math.max(box2.getSize(new THREE.Vector3()).y,1e-6);
+            src.scale.multiplyScalar(1/lenY);
+
+            const base=new THREE.Box3().setFromObject(src).getSize(new THREE.Vector3());
+            const baseX=Math.max(base.x,1e-6), baseZ=Math.max(base.z,1e-6);
+
+            const unit=new THREE.Group(); unit.add(src);
+
+            function spawnBetween(a,b,th=BEAM_THICKNESS){
+              const clone=unit.clone(true);
+              const dir=new THREE.Vector3().subVectors(b,a), len=dir.length(); if(len<1e-6) return null;
+              const mid=new THREE.Vector3().addVectors(a,b).multiplyScalar(0.5);
+
+              clone.scale.set(th/baseX, len + BEAM_MITER_OVERLAP*2, th/baseZ);
+              const q=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), dir.clone().normalize());
+              clone.quaternion.copy(q);
+              clone.position.copy(mid);
+
+              clone.traverse(o=>{ if(o.isMesh){ o.castShadow=o.receiveShadow=true; } });
+              fixMaterials(clone); scene.add(clone); return clone;
+            }
+            return {spawnBetween};
+          }
+
+          const {spawnBetween}=prepareUnit(root);
+
+          const half = BEAM_THICKNESS * 0.5;
+          const xL = -w/2 + BEAM_INSET_WALL + half;
+          const xR =  w/2 - BEAM_INSET_WALL - half;
+          const zB = -d/2 + BEAM_INSET_WALL + half; // задняя
+          const zF =  d/2 - BEAM_INSET_WALL - half; // передняя
+
+          const y0 = 0 + POST_FLOOR_GAP + half;           // низ стоек (центр)
+          const yT = h - BEAM_INSET_CEIL - half;          // верх стоек (центр)
+          const yH = yT - half;                           // центр горизонтальных (общий)
+
+          // 4 вертикальные стойки
+          spawnBetween(new THREE.Vector3(xL,y0,zB), new THREE.Vector3(xL,yT,zB));
+          spawnBetween(new THREE.Vector3(xR,y0,zB), new THREE.Vector3(xR,yT,zB));
+          spawnBetween(new THREE.Vector3(xL,y0,zF), new THREE.Vector3(xL,yT,zF));
+          spawnBetween(new THREE.Vector3(xR,y0,zF), new THREE.Vector3(xR,yT,zF));
+
+          // Горизонтальные (с поправкой на высоту для передней и задней)
+          const yH_back = yH + BACK_BEAM_RAISE;
+          spawnBetween(new THREE.Vector3(xL-BEAM_MITER_OVERLAP,yH_back,zB), new THREE.Vector3(xR+BEAM_MITER_OVERLAP,yH_back,zB)); // задняя
+          spawnBetween(new THREE.Vector3(xL-BEAM_MITER_OVERLAP,yH,zF),      new THREE.Vector3(xR+BEAM_MITER_OVERLAP,yH,zF));      // передняя
+          spawnBetween(new THREE.Vector3(xL,yH,zB-BEAM_MITER_OVERLAP),      new THREE.Vector3(xL,yH,zF+BEAM_MITER_OVERLAP));      // левая
+          spawnBetween(new THREE.Vector3(xR,yH,zB-BEAM_MITER_OVERLAP),      new THREE.Vector3(xR,yH,zF+BEAM_MITER_OVERLAP));      // правая
+        },undefined,(e)=>console.warn('Ошибка plank.glb',e));
+
         setTimeout(()=>resolve(),12000);
       });
     }
