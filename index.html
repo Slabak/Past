@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Комната — каменные стены (без тайлинга) + сундук</title>
+  <title>Комната — сундук и бочка</title>
   <style>
     html, body { height: 100%; margin: 0; overflow: hidden; background: #000; }
     #overlay {
@@ -18,18 +18,14 @@
 <body>
   <div id="overlay"><button id="start">Войти в комнату</button></div>
 
-  <!-- three.js -->
   <script src="assets/js/three.min.js"></script>
   <script src="assets/js/OrbitControls.js"></script>
   <script src="assets/js/GLTFLoader.js"></script>
 
   <script>
     let scene, camera, renderer, controls, listener, sound;
+    const w = 4, d = 4, h = 3; // размеры комнаты
 
-    // размеры комнаты, м
-    const w = 4, d = 4, h = 3;
-
-    // безопасный запуск музыки (не блокирует сцену, если файла нет)
     function safeStartAudio() {
       try {
         const ac = listener?.context;
@@ -45,14 +41,12 @@
     }
 
     function init() {
-      // кнопка — всегда работает
       const overlay = document.getElementById('overlay');
       document.getElementById('start').addEventListener('click', () => {
         overlay.style.display = 'none';
         safeStartAudio();
       }, { once: true });
 
-      // сцена/камера/рендер
       scene = new THREE.Scene();
       scene.background = new THREE.Color(0x100806);
       scene.fog = new THREE.Fog(0x1a0f0a, 5, 12);
@@ -74,34 +68,32 @@
       controls.target.set(0, 1.2, 0);
       controls.enableDamping = true;
 
-      // свет — тёплый мягкий
+      // свет
       const hemi = new THREE.HemisphereLight(0xffd9b0, 0x1a0f0a, 0.35); scene.add(hemi);
       const ambient = new THREE.AmbientLight(0xffd7aa, 0.15); scene.add(ambient);
       const dir = new THREE.DirectionalLight(0xffb366, 1.25);
       dir.position.set(-2.5, 3.5, 1.5);
       dir.castShadow = true; dir.shadow.mapSize.set(2048, 2048); dir.shadow.radius = 6;
       scene.add(dir);
-      const fire = new THREE.PointLight(0xffa860, 0.6, 6); // лёгкое «дыхание» огня
-      fire.position.set(-1.5, 1.2, 1.2); scene.add(fire);
+      const fire = new THREE.PointLight(0xffa860, 0.6, 6);
+      fire.position.set(-1.5, 1.2, 1.2);
+      scene.add(fire);
 
       // текстуры
       const tl = new THREE.TextureLoader();
-      // пол: тайлим как раньше
       const floorTex = tl.load('assets/textures/floor.jpg');
       floorTex.colorSpace = THREE.SRGBColorSpace;
       floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
       floorTex.repeat.set(2, 2);
 
-      // стены: РАСТЯГИВАЕМ на всю плоскость (без тайлинга)
-      const wallTex  = tl.load('assets/textures/wall.jpg?v=3'); // v=3 — обойти кэш
+      const wallTex  = tl.load('assets/textures/wall.jpg?v=4');
       wallTex.colorSpace = THREE.SRGBColorSpace;
-      wallTex.wrapS = wallTex.wrapT = THREE.ClampToEdgeWrapping; // ключевой момент
-      // wallTex.repeat.set(1,1); // по умолчанию и так 1×1
+      wallTex.wrapS = wallTex.wrapT = THREE.ClampToEdgeWrapping;
 
       const mirrorTex = tl.load('assets/textures/mirror.jpg');
       mirrorTex.colorSpace = THREE.SRGBColorSpace;
 
-      // геометрия
+      // геометрия комнаты
       const floor = new THREE.Mesh(
         new THREE.PlaneGeometry(w, d),
         new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.9, metalness: 0.0 })
@@ -109,8 +101,6 @@
       floor.rotation.x = -Math.PI/2; floor.receiveShadow = true; scene.add(floor);
 
       const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, roughness: 1.0, metalness: 0.0 });
-
-      // 4 стены (каждая получает wallTex один раз на всю площадь)
       const back  = new THREE.Mesh(new THREE.PlaneGeometry(w, h), wallMat); back.position.set(0, h/2, -d/2);
       const front = new THREE.Mesh(new THREE.PlaneGeometry(w, h), wallMat); front.position.set(0, h/2,  d/2); front.rotation.y = Math.PI;
       const left  = new THREE.Mesh(new THREE.PlaneGeometry(d, h), wallMat); left.position.set(-w/2, h/2, 0); left.rotation.y  =  Math.PI/2;
@@ -118,7 +108,6 @@
       [back, front, left, right].forEach(wl => wl.receiveShadow = true);
       scene.add(back, front, left, right);
 
-      // «зеркало» на задней стене
       const mirror = new THREE.Mesh(
         new THREE.PlaneGeometry(0.9, 0.6),
         new THREE.MeshStandardMaterial({ map: mirrorTex, metalness: 0.85, roughness: 0.22 })
@@ -126,50 +115,68 @@
       mirror.position.set(0, 1.5, -d/2 + 0.01);
       scene.add(mirror);
 
-      // аудио-объекты
       listener = new THREE.AudioListener(); camera.add(listener);
       sound = new THREE.Audio(listener);
 
-      // СУНДУК (центр -> масштаб -> поставить на пол -> позиция -> поворот)
+      // === СУНДУК И БОЧКА ===
       try {
-      const loader = new THREE.GLTFLoader();
-      loader.load('assets/models/chest.glb', (gltf) => {
-        const chest = gltf.scene;
-        chest.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
+        const loader = new THREE.GLTFLoader();
 
-        // 1) Центрируем модель вокруг (0,0,0)
-        const box0 = new THREE.Box3().setFromObject(chest);
-        chest.position.sub(box0.getCenter(new THREE.Vector3()));
+        loader.load('assets/models/chest.glb', (gltf) => {
+          const chest = gltf.scene;
+          chest.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
 
-        // 2) МАСШТАБ — правь тут:
-        //    базовая «целевая диагональ» 1.2 м, дополнительно множитель SIZE_MULT.
-        const SIZE_MULT = 1.5;                 // ← увеличить/уменьшить размер сундука
-        const targetDiag = 1.2 * SIZE_MULT;    // ← целевая диагональ в метрах
-        const diag0 = box0.getSize(new THREE.Vector3()).length();
-        const s = diag0 > 0 ? targetDiag / diag0 : 1;
-        chest.scale.setScalar(s);
+          const box0 = new THREE.Box3().setFromObject(chest);
+          chest.position.sub(box0.getCenter(new THREE.Vector3()));
 
-        // 3) Поднять на пол (y = 0)
-        const box1 = new THREE.Box3().setFromObject(chest);
-        chest.position.y -= box1.min.y; // основание теперь стоит на полу
+          const SIZE_MULT = 1.5;
+          const targetDiag = 1.2 * SIZE_MULT;
+          const diag0 = box0.getSize(new THREE.Vector3()).length();
+          const s = diag0 > 0 ? targetDiag / diag0 : 1;
+          chest.scale.setScalar(s);
 
-        // 4) ПОЗИЦИЯ — правь тут:
-        const wallOffset = 0.45;           // ← отступ от левой стены (м). Больше — правее.
-        const x = -w/2 + wallOffset;       // -2 + 0.65 = -1.35
-        const z = 1.10;                    // ← вперёд-назад. Больше — ближе к передней стене.
-        chest.position.x = x;
-        chest.position.z = z;
+          const box1 = new THREE.Box3().setFromObject(chest);
+          chest.position.y -= box1.min.y;
 
-        // 5) ПОВОРОТ — правь тут:
-        chest.rotation.y = Math.PI / 1;    // ← вдоль левой стены. 45°: Math.PI/4, 180°: Math.PI
+          const wallOffset = 0.65;
+          const x = -w/2 + wallOffset;
+          const z = -1.50;
+          chest.position.x = x;
+          chest.position.z = z;
+          chest.rotation.y = Math.PI / 2;
+          scene.add(chest);
 
-        scene.add(chest);
-      }, undefined, err => console.warn('Не удалось загрузить сундук:', err));
-    } catch (e) {
-      console.warn('GLTFLoader error:', e);
-    }
+          // --- бочка ---
+          const barrelLoader = new THREE.GLTFLoader();
+          barrelLoader.load('assets/models/barrel.glb', (gltf2) => {
+            const barrel = gltf2.scene;
+            barrel.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
 
-      // resize + анимация
+            const bBox = new THREE.Box3().setFromObject(barrel);
+            barrel.position.sub(bBox.getCenter(new THREE.Vector3()));
+
+            const chestBox = new THREE.Box3().setFromObject(chest);
+            const chestSize = chestBox.getSize(new THREE.Vector3()).length();
+            const barrelSize = bBox.getSize(new THREE.Vector3()).length();
+            const relScale = (chestSize / barrelSize) * 1.2; // чуть больше сундука
+            barrel.scale.setScalar(relScale);
+
+            const bBox2 = new THREE.Box3().setFromObject(barrel);
+            barrel.position.y -= bBox2.min.y;
+
+            // поставить справа от сундука
+            barrel.position.x = chest.position.x;
+            barrel.position.z = chest.position.z + 1.0; // ближе/дальше
+            barrel.rotation.y = Math.PI / 2;
+
+            scene.add(barrel);
+          }, undefined, err => console.warn('Не удалось загрузить бочку:', err));
+
+        }, undefined, err => console.warn('Не удалось загрузить сундук:', err));
+      } catch (e) {
+        console.warn('GLTFLoader error:', e);
+      }
+
       window.addEventListener('resize', () => {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
@@ -178,7 +185,6 @@
 
       function animate(){
         requestAnimationFrame(animate);
-        // лёгкое «дыхание» огня
         fire.intensity = 0.55 + Math.sin(performance.now() * 0.003) * 0.15;
         controls.update();
         renderer.render(scene, camera);
