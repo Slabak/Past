@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Комната прошлого — 4x4x3 + сундук</title>
+  <title>Комната прошлого — сундук у левой стены</title>
   <style>
     html, body { height: 100%; margin: 0; overflow: hidden; background: #000; }
     #overlay {
@@ -34,9 +34,11 @@
 
       const w = 4, d = 4, h = 3;
 
-      camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.05, 50);
+      // Камера
+      camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 50);
       camera.position.set(0, 1.6, 2.6);
 
+      // Рендер
       renderer = new THREE.WebGLRenderer({ antialias: true });
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       renderer.setSize(window.innerWidth, window.innerHeight);
@@ -47,6 +49,7 @@
       renderer.toneMappingExposure = 0.95;
       document.body.appendChild(renderer.domElement);
 
+      // Контролы
       controls = new THREE.OrbitControls(camera, renderer.domElement);
       controls.target.set(0, 1.2, 0);
       controls.enableDamping = true;
@@ -55,8 +58,11 @@
       controls.maxDistance = 5;
       controls.maxPolarAngle = Math.PI * 0.49;
 
-      const hemi = new THREE.HemisphereLight(0xffe2c5, 0x1a0f0a, 0.25); scene.add(hemi);
-      const ambient = new THREE.AmbientLight(0xfff2df, 0.10); scene.add(ambient);
+      // Свет
+      const hemi = new THREE.HemisphereLight(0xffe2c5, 0x1a0f0a, 0.25);
+      scene.add(hemi);
+      const ambient = new THREE.AmbientLight(0xfff2df, 0.10);
+      scene.add(ambient);
       const dir = new THREE.DirectionalLight(0xffd0a0, 1.1);
       dir.position.set(-1.8, 3.2, 1.4);
       dir.castShadow = true;
@@ -64,6 +70,7 @@
       dir.shadow.radius = 4;
       scene.add(dir);
 
+      // Текстуры
       const tl = new THREE.TextureLoader();
       const floorTex = tl.load('assets/textures/floor.jpg');
       const wallTex  = tl.load('assets/textures/wall.jpg');
@@ -73,66 +80,67 @@
       floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping; floorTex.repeat.set(2, 2);
       wallTex.wrapS = wallTex.wrapT = THREE.RepeatWrapping; wallTex.repeat.set(2, 1.5);
 
-      const floorMat = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.95, metalness: 0.0 });
-      const wallMat  = new THREE.MeshStandardMaterial({ map: wallTex,  roughness: 1.00, metalness: 0.0 });
+      const floorMat = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.95 });
+      const wallMat  = new THREE.MeshStandardMaterial({ map: wallTex, roughness: 1.00 });
 
+      // Пол
       const floor = new THREE.Mesh(new THREE.PlaneGeometry(w, d), floorMat);
-      floor.rotation.x = -Math.PI/2; floor.receiveShadow = true; scene.add(floor);
+      floor.rotation.x = -Math.PI / 2;
+      floor.receiveShadow = true;
+      scene.add(floor);
 
+      // Стены
       const walls = [
         [0, h/2, -d/2, 0], [0, h/2, d/2, Math.PI],
-        [-w/2, h/2, 0,  Math.PI/2], [w/2, h/2, 0, -Math.PI/2]
+        [-w/2, h/2, 0, Math.PI/2], [w/2, h/2, 0, -Math.PI/2]
       ];
-      walls.forEach(([x,y,z,rot])=>{
-        const wall = new THREE.Mesh(new THREE.PlaneGeometry(rot?d:w, h), wallMat);
-        wall.position.set(x,y,z); if(rot) wall.rotation.y = rot; wall.receiveShadow = true; scene.add(wall);
+      walls.forEach(([x, y, z, rot]) => {
+        const wall = new THREE.Mesh(new THREE.PlaneGeometry(rot ? d : w, h), wallMat);
+        wall.position.set(x, y, z);
+        if (rot) wall.rotation.y = rot;
+        wall.receiveShadow = true;
+        scene.add(wall);
       });
 
+      // Зеркало
       const mirror = new THREE.Mesh(
         new THREE.PlaneGeometry(0.9, 0.6),
         new THREE.MeshStandardMaterial({ map: mirrorTex, metalness: 0.85, roughness: 0.22 })
       );
-      mirror.position.set(0, 1.5, -d/2 + 0.01); scene.add(mirror);
-
-      const loader = new THREE.GLTFLoader();
-
-      // Верстак
-      loader.load('assets/models/workbench.glb', gltf=>{
-        const model = gltf.scene;
-        model.traverse(o=>{ if(o.isMesh){ o.castShadow = o.receiveShadow = true; }});
-        const box = new THREE.Box3().setFromObject(model);
-        const size = new THREE.Vector3(); box.getSize(size);
-        const center = new THREE.Vector3(); box.getCenter(center);
-        model.position.sub(center);
-        const s = 1.6 / Math.sqrt(size.x**2 + size.y**2 + size.z**2);
-        model.scale.setScalar(s);
-        model.position.set(w/2 - 0.35, 0, 0);
-        model.rotation.y = -Math.PI/2;
-        scene.add(model);
-      });
+      mirror.position.set(0, 1.5, -d/2 + 0.01);
+      scene.add(mirror);
 
       // Сундук
-      loader.load('assets/models/chest.glb', gltf=>{
+      const loader = new THREE.GLTFLoader();
+      loader.load('assets/models/chest.glb', gltf => {
         const chest = gltf.scene;
-        chest.traverse(o=>{ if(o.isMesh){ o.castShadow = o.receiveShadow = true; }});
+        chest.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
+
         const box = new THREE.Box3().setFromObject(chest);
         const size = new THREE.Vector3(); box.getSize(size);
         const center = new THREE.Vector3(); box.getCenter(center);
         chest.position.sub(center);
+
         const s = 1.2 / Math.sqrt(size.x**2 + size.y**2 + size.z**2);
         chest.scale.setScalar(s);
         chest.position.set(-w/2 + 0.25, 0, 1.4);
-        chest.rotation.y = Math.PI/2;
+        chest.rotation.y = Math.PI / 2;
         scene.add(chest);
       });
 
-      window.addEventListener('resize', ()=>{
+      // Resize
+      window.addEventListener('resize', () => {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
       });
 
-      const animate = ()=>{ requestAnimationFrame(animate); controls.update(); renderer.render(scene, camera); };
+      // Анимация
+      const animate = () => {
+        requestAnimationFrame(animate);
+        controls.update();
+        renderer.render(scene, camera);
+      };
       animate();
     };
 
