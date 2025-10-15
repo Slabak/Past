@@ -332,7 +332,7 @@
           spawnBetween(new THREE.Vector3(xL,y0,zF), new THREE.Vector3(xL,yT,zF));
           spawnBetween(new THREE.Vector3(xR,y0,zF), new THREE.Vector3(xR,yT,zF));
 
-          // Горизонтальные
+          // Горизонтальные (с поправкой на высоту для передней и задней)
           const yH_back = yH + BACK_BEAM_RAISE;
           spawnBetween(new THREE.Vector3(xL-BEAM_MITER_OVERLAP,yH_back,zB), new THREE.Vector3(xR+BEAM_MITER_OVERLAP,yH_back,zB)); // задняя
           spawnBetween(new THREE.Vector3(xL-BEAM_MITER_OVERLAP,yH,zF),      new THREE.Vector3(xR+BEAM_MITER_OVERLAP,yH,zF));      // передняя
