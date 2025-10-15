@@ -124,16 +124,16 @@
         chest.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
         // центрируем
         const box = new THREE.Box3().setFromObject(chest);
-        const s = 1.5 * (1.2 / box.getSize(new THREE.Vector3()).length()); // тот же ×1.5
+        const s = 2 * (1.2 / box.getSize(new THREE.Vector3()).length()); // тот же ×1.5
         // позиция: левую стену держим, но отодвигаем от нее + «правее» к центру
         chest.scale.setScalar(s);
         const center = box.getCenter(new THREE.Vector3());
         chest.position.sub(center);
-        const wallOffset = 0.45; // 45 см от левой стены (больше зазор = нет пересечения)
+        const wallOffset = 0.65; // 45 см от левой стены (больше зазор = нет пересечения)
         const x = -w/2 + wallOffset;
         const z = 1.4;           // как было (передний сектор)
         chest.position.set(x, 0, z);
-        chest.rotation.y = Math.PI / 2; // вдоль стены, «лицом» в комнату
+        chest.rotation.y = Math.PI / 0; // вдоль стены, «лицом» в комнату
         scene.add(chest);
       }, undefined, err => console.warn('Не удалось загрузить сундук:', err));
     } catch (e) {
