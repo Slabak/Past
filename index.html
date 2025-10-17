@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Комната — VR, музыка, цитата, загадка</title>
+<title>Комната — VR, музыка, цитата, загадка (фикс материалов балок)</title>
 <style>
   html,body{height:100%;margin:0;overflow:hidden;background:#000}
   #overlay,#loading-screen{position:fixed;inset:0;display:grid;place-items:center;background:radial-gradient(circle at center,rgba(0,0,0,.85),#000);color:#fff;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;z-index:9999}
@@ -73,12 +73,12 @@
   let scene,camera,renderer,listener,roomGroup,orbitControls,activeControls;
   let bgm, sfxClose;
   const raycaster=new THREE.Raycaster(), pointer=new THREE.Vector2();
-  const interactables=new Set();   // кликабельные корни (стол/бочки)
-  const pickables=[];              // кнопки виртуальной клавиатуры
+  const interactables=new Set();
+  const pickables=[];
   let controller0,controller1,tempMatrix=new THREE.Matrix4();
 
   let inputPanel,inputTextMesh,inputValue='';
-  let tableRef=null, barrelsRef=null, globeRef=null;
+  let tableRef=null, barrelsRef=null, globeRef=null, globeLight=null;
 
   const $=s=>document.querySelector(s);
   function toast(msg,ms=1800){const t=$('#toast');t.textContent=msg;t.style.display='block';setTimeout(()=>t.style.display='none',ms);}
@@ -91,20 +91,19 @@
       bgm=new THREE.Audio(listener);
       loader.load('assets/music/music.mp3',buf=>{bgm.setBuffer(buf); bgm.setLoop(true); bgm.setVolume(0.35); bgm.play();},
         undefined,()=>console.warn('music.mp3 не найден — продолжаем без музыки'));
-      // звук закрытия
       sfxClose=new THREE.Audio(listener);
       loader.load('assets/sfx/close.mp3',buf=>{sfxClose.setBuffer(buf); sfxClose.setLoop(false); sfxClose.setVolume(0.9);},
-        undefined,()=>{/* ок, без эффекта */});
+        undefined,()=>{/* ok */});
     }catch(e){console.warn('Audio error:',e)}
   }
 
-  // ---------- ТЕКСТУРЫ/МАТЕРИАЛЫ ----------
+  // ---------- МАТЕРИАЛЫ ----------
   function fixMaterials(root){
     root.traverse(o=>{
       if(!o.isMesh) return;
       const apply=m=>{
         if(!m) return;
-        if(m.map){m.map.colorSpace=THREE.SRGBColorSpace; m.map.anisotropy=renderer.capabilities.getMaxAnisotropy?.()||8;}
+        if(m.map){ m.map.colorSpace=THREE.SRGBColorSpace; m.map.anisotropy=renderer.capabilities.getMaxAnisotropy?.()||8; }
         if(m.roughness===undefined) m.roughness=.82;
         if(m.metalness===undefined) m.metalness=.05;
         m.needsUpdate=true;
@@ -113,14 +112,24 @@
       o.castShadow=true; o.receiveShadow=true;
     });
   }
+
+  // ★ ИСПРАВЛЕНО: больше не обращаемся к m.map.color
   function tweakBeamMaterials(root){
     const TINT=new THREE.Color(0xE0B889);
     root.traverse(o=>{
       if(!o.isMesh) return;
+      // балки без теней
       o.castShadow=false; o.receiveShadow=false;
-      const apply=m=>{if(!m)return;
-        if(m.map){m.map.color.set(TINT); m.map.needsUpdate=true}else m.color?.set?.(TINT);
-        m.roughness=.75; m.metalness=0; m.needsUpdate=true;
+      const apply=m=>{
+        if(!m) return;
+        // мягко подтонируем сам материал (если поддерживает color)
+        if(m.color && m.color.isColor){ m.color.copy(TINT); }
+        // лёгкая «тёплая» подсветка, если есть эмиссия
+        if(m.emissive && m.emissive.isColor){ m.emissive.setRGB(0.25,0.18,0.10); m.emissiveIntensity=0.25; }
+        // физика попроще
+        if(m.roughness!==undefined) m.roughness=.75;
+        if(m.metalness!==undefined) m.metalness=0.0;
+        m.needsUpdate=true;
       };
       if(Array.isArray(o.material)) o.material.forEach(apply); else apply(o.material);
     });
@@ -148,24 +157,18 @@
     inputTextMesh=createLabel(' ',{fontSize:72,bg:'#2a1a10',color:'#ffe8c6',pad:16}); 
     inputTextMesh.position.set(0,.18,0); g.add(inputTextMesh);
 
-    const rows=[
-      'ЙЦУКЕНГШЩЗХЪ',
-      'ФЫВАПРОЛДЖЭ',
-      'ЯЧСМИТЬБЮ'
-    ];
+    const rows=['ЙЦУКЕНГШЩЗХЪ','ФЫВАПРОЛДЖЭ','ЯЧСМИТЬБЮ'];
     let y=.06;
-    rows.forEach((row,ri)=>{
-      const total=row.length; 
+    rows.forEach(row=>{
+      const total=row.length;
       for(let i=0;i<total;i++){
         const k=row[i];
         const m=createLabel(k,{fontSize:52,bg:'#ffb366',color:'#000',pad:18});
-        const spacing=.085;
-        const start=-(total-1)*spacing*0.5;
+        const spacing=.085, start=-(total-1)*spacing*0.5;
         m.position.set(start+i*spacing, y, 0); m.userData.key=k; g.add(m); pickables.push(m);
       }
       y-=.10;
     });
-    // нижний ряд: ← и OK
     const back=createLabel('←',{fontSize:52,bg:'#ffb366',color:'#000',pad:18}); back.position.set(-.28, y, 0); back.userData.key='←'; g.add(back); pickables.push(back);
     const ok=createLabel('OK',{fontSize:52,bg:'#ffb366',color:'#000',pad:18}); ok.position.set(.28, y, 0); ok.userData.key='OK'; g.add(ok); pickables.push(ok);
 
@@ -175,7 +178,6 @@
   function updateInputMesh(){ inputPanel.remove(inputTextMesh); inputTextMesh=createLabel(inputValue.length?inputValue:' ',{fontSize:72,bg:'#2a1a10',color:'#ffe8c6',pad:16}); inputTextMesh.position.set(0,.18,0); inputPanel.add(inputTextMesh); }
   function handleKey(k){ if(k==='←'){ inputValue=inputValue.slice(0,-1); updateInputMesh(); return; } if(k==='OK'){ if(inputValue.toUpperCase()===SECRET){ closePortal(); } else { toast('Неверно. Подсказка в комнате…'); } inputPanel.visible=false; return; } inputValue+=k; updateInputMesh(); }
 
-  // ---------- ПОСЛЕ УСПЕХА ----------
   function closePortal(){
     if(sfxClose?.isPlaying) sfxClose.stop();
     sfxClose?.play?.();
@@ -186,21 +188,19 @@
       const k=Math.min(1,(t-start)/dur);
       const s=THREE.MathUtils.lerp(s0,0.001,k);
       roomGroup.scale.setScalar(s);
-      if(k<1) requestAnimationFrame(tick);
-      else { $('#final-note').style.display='grid'; }
+      if(k<1) requestAnimationFrame(tick); else { $('#final-note').style.display='grid'; }
     };
     requestAnimationFrame(tick);
   }
 
   // ---------- ЗАГРУЗКА СЦЕНЫ ----------
-  let globeLight=null;
   function loadAll(onProgress){
     return new Promise(resolve=>{
       const mng=new THREE.LoadingManager(()=>resolve(),(u,l,t)=>onProgress?.(Math.min(100,Math.floor(l/t*100))));
       const tl=new THREE.TextureLoader(mng);
 
       const floorTex=tl.load('assets/textures/floor.jpg'); floorTex.colorSpace=THREE.SRGBColorSpace; floorTex.wrapS=floorTex.wrapT=THREE.RepeatWrapping; floorTex.repeat.set(2,2);
-      const wallTex=tl.load('assets/textures/wall.jpg?v=29'); wallTex.colorSpace=THREE.SRGBColorSpace; wallTex.wrapS=wallTex.wrapT=THREE.ClampToEdgeWrapping;
+      const wallTex=tl.load('assets/textures/wall.jpg?v=30'); wallTex.colorSpace=THREE.SRGBColorSpace; wallTex.wrapS=wallTex.wrapT=THREE.ClampToEdgeWrapping;
       const mirrorTex=tl.load('assets/textures/mirror.jpg'); mirrorTex.colorSpace=THREE.SRGBColorSpace;
       const ceilTex=tl.load('assets/textures/potolok.jpg'); ceilTex.colorSpace=THREE.SRGBColorSpace;
 
@@ -223,7 +223,7 @@
       const gltf=new THREE.GLTFLoader(mng);
 
       // сундук
-      gltf.load('assets/models/chest.glb',g=>{
+      gltf.load('assets/models/chest.glb?v=2',g=>{
         const chest=g.scene, b0=new THREE.Box3().setFromObject(chest); chest.position.sub(b0.getCenter(new THREE.Vector3()));
         const target=1.2*CHEST_SIZE_MULT, diag=b0.getSize(new THREE.Vector3()).length(); chest.scale.setScalar(diag>0?target/diag:1);
         const b1=new THREE.Box3().setFromObject(chest); chest.position.y-=b1.min.y;
@@ -231,7 +231,7 @@
       });
 
       // бочки
-      gltf.load('assets/models/barrel.glb?v=1',g=>{
+      gltf.load('assets/models/barrel.glb?v=2',g=>{
         barrelsRef=g.scene;
         const b0=new THREE.Box3().setFromObject(barrelsRef); barrelsRef.position.sub(b0.getCenter(new THREE.Vector3()));
         const H=b0.getSize(new THREE.Vector3()).y||1; barrelsRef.scale.setScalar(BARRELS_TARGET_HEIGHT/H);
@@ -244,8 +244,8 @@
         interactables.add(barrelsRef);
       });
 
-      // стол — под «зеркалом» на задней стене
-      gltf.load('assets/models/table.glb?v=1',g=>{
+      // стол (под зеркалом)
+      gltf.load('assets/models/table.glb?v=2',g=>{
         tableRef=g.scene; const b0=new THREE.Box3().setFromObject(tableRef), c0=b0.getCenter(new THREE.Vector3()); tableRef.position.sub(c0);
         const s=(b0.getSize(new THREE.Vector3()).y>0)? 0.78 / b0.getSize(new THREE.Vector3()).y : 1; tableRef.scale.setScalar(s);
         const b1=new THREE.Box3().setFromObject(tableRef); tableRef.position.y-=b1.min.y;
@@ -257,8 +257,8 @@
         interactables.add(tableRef);
       });
 
-      // глобус — справа у правой стены
-      gltf.load('assets/models/globus.glb?v=1',g=>{
+      // глобус — справа
+      gltf.load('assets/models/globus.glb?v=2',g=>{
         globeRef=g.scene;
         const b0=new THREE.Box3().setFromObject(globeRef); globeRef.position.sub(b0.getCenter(new THREE.Vector3()));
         const H=b0.getSize(new THREE.Vector3()).y||1; globeRef.scale.setScalar(0.8/H);
@@ -270,13 +270,12 @@
         fixMaterials(globeRef);
         roomGroup.add(globeRef);
 
-        // локальный мягкий свет над глобусом
         globeLight=new THREE.PointLight(0xffc78a,0.55,2.8);
         globeLight.position.set(x-0.25, 1.5, z);
         roomGroup.add(globeLight);
       });
 
-      // дверь — утоплена во фронтальную стену
+      // дверь — утоплена
       gltf.load('assets/models/door.glb?v=2',g=>{
         const door=g.scene;
         let box=new THREE.Box3().setFromObject(door);
@@ -296,8 +295,8 @@
         roomGroup.add(door);
       });
 
-      // балки (plank.glb)
-      gltf.load('assets/models/plank.glb?v=3',g=>{
+      // балки — БЕЗОПАСНЫЙ ТОН И БЕЗ ТЕНЕЙ
+      gltf.load('assets/models/plank.glb?v=4',g=>{
         const root=g.scene;
         function prepareUnit(src){
           const box=new THREE.Box3().setFromObject(src); src.position.sub(box.getCenter(new THREE.Vector3()));
@@ -343,7 +342,7 @@
     oc.target.set(0,1.5,0); oc.enableZoom=false; oc.enablePan=false; oc.enableRotate=true;
     oc.minAzimuthAngle=-Infinity; oc.maxAzimuthAngle=Infinity;
     oc.minPolarAngle=THREE.MathUtils.degToRad(2); oc.maxPolarAngle=THREE.MathUtils.degToRad(178);
-    oc.enableDamping=true; oc.dampingFactor=.12; oc.rotateSpeed=-0.8; // инверсия жеста — как «прокрутка»
+    oc.enableDamping=true; oc.dampingFactor=.12; oc.rotateSpeed=-0.8;
     orbitControls=oc; activeControls=oc;
   }
 
