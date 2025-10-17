@@ -74,12 +74,12 @@
     const BARRELS_ROT_LEFT_90   = true;
 
     // БАЛКИ (plank.glb)
-    const BEAM_THICKNESS     = 0.24;                // 24 см — визуально вкусно
-    const BEAM_INSET_WALL    = 0.000;               // зазор от стены по X/Z
-    const BEAM_INSET_CEIL    = 0.000;               // зазор от потолка по Y
-    const POST_FLOOR_GAP     = 0.000;               // зазор от пола для стоек
-    const BEAM_MITER_OVERLAP = BEAM_THICKNESS * 1.3;// лёгкий нахлёст в стыках
-    const BACK_BEAM_RAISE    = 0.04;                // поднятие задней (над зеркалом), чтобы не было щели
+    const BEAM_THICKNESS     = 0.24;
+    const BEAM_INSET_WALL    = 0.000;
+    const BEAM_INSET_CEIL    = 0.000;
+    const POST_FLOOR_GAP     = 0.000;
+    const BEAM_MITER_OVERLAP = BEAM_THICKNESS * 1.3;
+    const BACK_BEAM_RAISE    = 0.04;
 
     // ---- Глобальные ----
     let scene, camera, renderer;
@@ -209,7 +209,7 @@
       activeControls=deviceControls; return true;
     }
 
-    // Материалы для импортированных моделей
+    // Общая правка материалов (для сундука/бочек/стола)
     function fixMaterials(root){
       root.traverse(obj=>{
         if(!obj.isMesh) return;
@@ -228,6 +228,30 @@
       });
     }
 
+    // Специальная правка материалов для БАЛОК — без теней и светлее
+    function tweakBeamMaterials(root){
+      const TINT = new THREE.Color(0xE0B889); // светло-тёплый древесный
+      root.traverse(obj=>{
+        if(!obj.isMesh) return;
+        obj.castShadow = false;
+        obj.receiveShadow = false;
+        const apply=mat=>{
+          if(!mat) return;
+          if(mat.map){
+            mat.map.colorSpace = THREE.SRGBColorSpace;
+            // подмешаем светлый оттенок через цвет материала
+            mat.color = TINT.clone();
+          } else {
+            mat.color?.set?.(TINT);
+          }
+          mat.roughness = 0.75; // немного «пожирнее» бликов
+          mat.metalness = 0.0;
+          mat.needsUpdate = true;
+        };
+        if(Array.isArray(obj.material)) obj.material.forEach(apply); else apply(obj.material);
+      });
+    }
+
     // Загрузка ассетов с прогрессом
     function loadAllAssetsWithProgress(onProgress){
       return new Promise((resolve)=>{
@@ -240,7 +264,7 @@
         // Текстуры
         const tl=new THREE.TextureLoader(manager);
         const floorTex  = tl.load('assets/textures/floor.jpg'); floorTex.colorSpace=THREE.SRGBColorSpace; floorTex.wrapS=floorTex.wrapT=THREE.RepeatWrapping; floorTex.repeat.set(2,2);
-        const wallTex   = tl.load('assets/textures/wall.jpg?v=23'); wallTex.colorSpace=THREE.SRGBColorSpace; wallTex.wrapS=wallTex.wrapT=THREE.ClampToEdgeWrapping;
+        const wallTex   = tl.load('assets/textures/wall.jpg?v=24'); wallTex.colorSpace=THREE.SRGBColorSpace; wallTex.wrapS=wallTex.wrapT=THREE.ClampToEdgeWrapping;
         const mirrorTex = tl.load('assets/textures/mirror.jpg'); mirrorTex.colorSpace=THREE.SRGBColorSpace;
         const ceilTex   = tl.load('assets/textures/potolok.jpg'); ceilTex.colorSpace=THREE.SRGBColorSpace;
         fallbackWood    = tl.load('assets/textures/wood.jpg', t=>{t.colorSpace=THREE.SRGBColorSpace; t.anisotropy=renderer.capabilities.getMaxAnisotropy?.()||8;});
@@ -326,12 +350,12 @@
           scene.add(table);
         }, undefined, e=>console.warn('Не удалось загрузить стол:', e));
 
-        // БАЛКИ — plank.glb
+        // БАЛКИ — plank.glb (без теней + светлее)
         gltfLoader.load('assets/models/plank.glb',(g)=>{
           const root=g.scene;
 
           function prepareUnit(src){
-            // центрируем plank и определяем «длинную» ось, чтобы нормализовать по Y
+            // центрируем plank и нормализуем длину по оси Y
             const box=new THREE.Box3().setFromObject(src);
             src.position.sub(box.getCenter(new THREE.Vector3()));
             const s=box.getSize(new THREE.Vector3());
@@ -356,15 +380,15 @@
               const len=dir.length(); if(len<1e-6) return null;
               const mid=new THREE.Vector3().addVectors(a,b).multiplyScalar(0.5);
 
-              // scale.y = длина, x/z = толщина
               clone.scale.set(th/baseX, len + BEAM_MITER_OVERLAP*2, th/baseZ);
 
               const q=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), dir.clone().normalize());
               clone.quaternion.copy(q);
               clone.position.copy(mid);
 
-              clone.traverse(o=>{ if(o.isMesh){ o.castShadow=o.receiveShadow=true; } });
-              fixMaterials(clone);
+              // Сразу осветляем материалы балок и выключаем тени
+              tweakBeamMaterials(clone);
+
               scene.add(clone);
               return clone;
             }
@@ -382,6 +406,7 @@
           const y0 = 0 + POST_FLOOR_GAP + half;    // низ стоек (центр)
           const yT = h - BEAM_INSET_CEIL - half;   // верх стоек (центр)
           const yH = yT - half;                    // центр горизонтальных (общий)
+          const yH_back = yH + BACK_BEAM_RAISE;    // задняя (над зеркалом) — чуть выше
 
           // 4 вертикальные стойки (углы)
           spawnBetween(new THREE.Vector3(xL,y0,zB), new THREE.Vector3(xL,yT,zB));
@@ -390,8 +415,7 @@
           spawnBetween(new THREE.Vector3(xR,y0,zF), new THREE.Vector3(xR,yT,zF));
 
           // Горизонтальные под потолком
-          const yH_back = yH + BACK_BEAM_RAISE; // над зеркалом — чуть выше
-          // задняя (над зеркалом)
+          // задняя
           spawnBetween(
             new THREE.Vector3(xL-BEAM_MITER_OVERLAP,yH_back,zB),
             new THREE.Vector3(xR+BEAM_MITER_OVERLAP,yH_back,zB)
@@ -413,7 +437,7 @@
           );
         },undefined,(e)=>console.warn('Ошибка plank.glb',e));
 
-        // safety-resolve (если какие-то ассеты висят, всё равно закроем портал)
+        // safety-resolve
         setTimeout(()=>resolve(), 12000);
       });
     }
