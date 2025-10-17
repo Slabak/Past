@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Комната — дверь, балки, стол, глобус</title>
+<title>Комната — тёплый свет + дверь вплотную</title>
 <style>
   html,body{height:100%;margin:0;overflow:hidden;background:#000}
   #overlay,#loading-screen{position:fixed;inset:0;display:grid;place-items:center;background:radial-gradient(circle at center,rgba(0,0,0,.85),#000);color:#fff;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;z-index:9999}
@@ -52,7 +52,7 @@
   // глобус
   const GLOBUS_TARGET_HEIGHT=0.90, GLOBUS_WALLOFFSET_X=0.45, GLOBUS_Z=-1.10, GLOBUS_ROT_RIGHT_WALL=-Math.PI/2;
   // дверь (передняя стена, по центру)
-  const DOOR_TARGET_HEIGHT=2.10, DOOR_WALL_EPS=0.02, DOOR_ROT_Y=Math.PI; // повернём к комнате
+  const DOOR_TARGET_HEIGHT=2.10, DOOR_WALL_EPS=-0.005; // отрицательное значение — слегка утопить в стену
   // балки
   const BEAM_THICKNESS=0.24, BEAM_INSET_WALL=0.0, BEAM_INSET_CEIL=0.0, POST_FLOOR_GAP=0.0;
   const BEAM_MITER_OVERLAP=BEAM_THICKNESS*1.3;
@@ -108,7 +108,7 @@
   }
 
   function tweakBeamMaterials(root){
-    const TINT = new THREE.Color(0xE0B889);
+    const TINT = new THREE.Color(0xE0B889); // светлее
     root.traverse(o=>{
       if(!o.isMesh) return;
       o.castShadow=false; o.receiveShadow=false;
@@ -178,75 +178,52 @@
         const s=(b0.getSize(new THREE.Vector3()).y>0)? GLOBUS_TARGET_HEIGHT / b0.getSize(new THREE.Vector3()).y : 1; globus.scale.setScalar(s);
         const b1=new THREE.Box3().setFromObject(globus); globus.position.y-=b1.min.y;
         globus.position.set(w/2-GLOBUS_WALLOFFSET_X, globus.position.y, GLOBUS_Z); globus.rotation.y=GLOBUS_ROT_RIGHT_WALL; fixMaterials(globus); scene.add(globus);
-        const globeLight=new THREE.PointLight(0xffc98a,.9,2.2); globeLight.castShadow=false; globeLight.position.set(.15,1.25,.12); globus.add(globeLight);
+        const globeLight=new THREE.PointLight(0xffc98a,.85,2.1); globeLight.castShadow=false; globeLight.position.set(.15,1.25,.12); globus.add(globeLight);
       });
 
-      // ДВЕРЬ — передняя стена (против зеркала), по центру
-gltf.load('assets/models/door.glb', g=>{
-  const door = g.scene;
+      // ДВЕРЬ — передняя стена, по центру, вплотную
+      gltf.load('assets/models/door.glb', g=>{
+        const door = g.scene;
 
-  // центрируем вокруг (0,0,0)
-  let box = new THREE.Box3().setFromObject(door);
-  door.position.sub(box.getCenter(new THREE.Vector3()));
+        // центрируем и определяем «тонкую ось»
+        let box = new THREE.Box3().setFromObject(door);
+        door.position.sub(box.getCenter(new THREE.Vector3()));
+        const size = box.getSize(new THREE.Vector3());
+        const minAxis = (size.x <= size.y && size.x <= size.z) ? 'x'
+                      : (size.y <= size.x && size.y <= size.z) ? 'y' : 'z';
+        door.rotation.set(0,0,0);
+        if (minAxis === 'x')      door.rotateY(Math.PI/2);
+        else if (minAxis === 'y') door.rotateX(-Math.PI/2);
 
-  // ориентация: делаем так, чтобы САМЫЙ ТОНКИЙ размер стал глубиной (ось Z)
-  const size = box.getSize(new THREE.Vector3());
-  // какая ось — «толщина»?
-  const minAxis = (size.x <= size.y && size.x <= size.z) ? 'x'
-                  : (size.y <= size.x && size.y <= size.z) ? 'y' : 'z';
+        // повторная центровка
+        box = new THREE.Box3().setFromObject(door);
+        door.position.sub(box.getCenter(new THREE.Vector3()));
 
-  // выровняем «толщину» вдоль мировой Z
-  door.rotation.set(0,0,0);
-  if (minAxis === 'x') {
-    // толщина была по X -> поворачиваем, чтобы X стал Z
-    door.rotateY(Math.PI / 2);
-  } else if (minAxis === 'y') {
-    // толщина была по Y (редко для двери) -> положим на бок и довернём
-    door.rotateX(-Math.PI / 2);
-  }
-  // после поворота заново центрируем, потому что bounds изменились
-  box = new THREE.Box3().setFromObject(door);
-  door.position.sub(box.getCenter(new THREE.Vector3()));
+        // масштаб по высоте
+        const H = box.getSize(new THREE.Vector3()).y || 1;
+        const s = DOOR_TARGET_HEIGHT / H;
+        door.scale.setScalar(s);
+        box = new THREE.Box3().setFromObject(door);
 
-  // масштаб до целевой высоты
-  const targetH = 2.10;             // м
-  const H = box.getSize(new THREE.Vector3()).y || 1;
-  const s = targetH / H;
-  door.scale.setScalar(s);
+        // поставить на пол
+        door.position.y -= box.min.y;
 
-  // снова бокс после масштаба
-  box = new THREE.Box3().setFromObject(door);
+        // вплотную к передней стене (чуть утоплено)
+        const depth = box.getSize(new THREE.Vector3()).z || 0.04;
+        door.position.set(0, door.position.y, d/2 - depth/2 + DOOR_WALL_EPS);
 
-  // поставить на пол
-  door.position.y -= box.min.y;
-
-  // прижать к ПЕРЕДНЕЙ стене (противоположной зеркалу)
-  const depth = box.getSize(new THREE.Vector3()).z || 0.04;
-  const EPS = 0.01;
-  door.position.set(0, door.position.y, d/2 - depth/2 - EPS);
-
-  // «лицом» в комнату (на случай, если текстура/ручка важны)
-  // здесь плоскость двери уже параллельна стене; этого поворота обычно не нужно,
-  // но оставим на 0. Измени на Math.PI при необходимости.
-  // door.rotation.y += Math.PI;
-
-  // материалы/тени
-  door.traverse(o=>{
-    if (o.isMesh) {
-      o.castShadow = true;
-      o.receiveShadow = true;
-      const m = o.material;
-      if (m?.map) {
-        m.map.colorSpace = THREE.SRGBColorSpace;
-        m.map.anisotropy = renderer.capabilities.getMaxAnisotropy?.()||8;
-      }
-      if (m && m.roughness === undefined) m.roughness = 0.85;
-      if (m && m.metalness === undefined) m.metalness = 0.05;
-    }
-  });
-
-  scene.add(door);
-}, undefined, e=>console.warn('Не удалось загрузить дверь:', e));
+        // материалы
+        door.traverse(o=>{
+          if (o.isMesh) {
+            o.castShadow = true; o.receiveShadow = true;
+            const m=o.material;
+            if(m?.map){ m.map.colorSpace=THREE.SRGBColorSpace; m.map.anisotropy=renderer.capabilities.getMaxAnisotropy?.()||8; }
+            if(m && m.roughness===undefined) m.roughness = 0.85;
+            if(m && m.metalness===undefined) m.metalness = 0.05;
+          }
+        });
+        scene.add(door);
+      }, undefined, e=>console.warn('Не удалось загрузить дверь:', e));
 
       // балки
       gltf.load('assets/models/plank.glb',g=>{
@@ -263,7 +240,9 @@ gltf.load('assets/models/door.glb', g=>{
             const clone=unit.clone(true); const dir=new THREE.Vector3().subVectors(b,a); const len=dir.length(); if(len<1e-6) return null;
             const mid=new THREE.Vector3().addVectors(a,b).multiplyScalar(.5);
             clone.scale.set(th/baseX, len + BEAM_MITER_OVERLAP*2, th/baseZ);
-            const q=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), dir.clone().normalize());
+            const q=new THREE.Quaternion().setFromUnitVectors(new THREE.VectorVector3(0,1,0), dir.clone().normalize());
+            // ↑↑↑ если вдруг у тебя старая версия файла — тут была опечатка. Должно быть Vector3:
+            // const q=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), dir.clone().normalize());
             clone.quaternion.copy(q); clone.position.copy(mid); tweakBeamMaterials(clone); scene.add(clone); return clone;
           }
           return {spawnBetween};
@@ -300,16 +279,40 @@ gltf.load('assets/models/door.glb', g=>{
   function init(){
     const overlay=$('#overlay'), loading=$('#loading-screen'), startBtn=$('#start'), progress=$('#progress'), barFill=$('#bar-fill'), modeBtn=$('#modeToggle');
 
-    scene=new THREE.Scene(); scene.background=new THREE.Color(0x100806); scene.fog=new THREE.Fog(0x1a0f0a,5,12);
-    camera=new THREE.PerspectiveCamera(70, innerWidth/innerHeight,.05,50); camera.position.set(0,1.6,0);
-    renderer=new THREE.WebGLRenderer({antialias:true}); renderer.setPixelRatio(Math.min(devicePixelRatio,2)); renderer.setSize(innerWidth,innerHeight);
-    renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap; renderer.outputColorSpace=THREE.SRGBColorSpace; renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.05;
+    scene=new THREE.Scene();
+    scene.background=new THREE.Color(0x0e0806);            // темнее фон
+    scene.fog=new THREE.Fog(0x160c08,6,13);                // тёплый туман
+
+    camera=new THREE.PerspectiveCamera(70, innerWidth/innerHeight,.05,50);
+    camera.position.set(0,1.6,0);
+
+    renderer=new THREE.WebGLRenderer({antialias:true});
+    renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+    renderer.setSize(innerWidth,innerHeight);
+    renderer.shadowMap.enabled=true;
+    renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+    renderer.outputColorSpace=THREE.SRGBColorSpace;
+    renderer.toneMapping=THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure=1.18; // чуть насыщеннее/теплее
+
     document.body.appendChild(renderer.domElement);
 
-    const hemi=new THREE.HemisphereLight(0xffd9b0,0x1a0f0a,0.35); scene.add(hemi);
-    const ambient=new THREE.AmbientLight(0xffd7aa,0.22); scene.add(ambient);
-    const dir=new THREE.DirectionalLight(0xffb366,1.35); dir.position.set(-2.5,3.5,1.5); dir.castShadow=true; dir.shadow.mapSize.set(2048,2048); dir.shadow.radius=6; scene.add(dir);
-    const fire=new THREE.PointLight(0xffa860,0.6,6); fire.position.set(-1.5,1.2,1.2); scene.add(fire);
+    // БАЗОВЫЙ СВЕТ — тёплый
+    const hemi=new THREE.HemisphereLight(0xffe0bb,0x120804,0.32); scene.add(hemi);
+    const ambient=new THREE.AmbientLight(0xffcf9a,0.22); scene.add(ambient);
+
+    // «солнечный»/лунный тёплый
+    const dir=new THREE.DirectionalLight(0xffb366,1.25);
+    dir.position.set(-2.5,3.5,1.5);
+    dir.castShadow=true; dir.shadow.mapSize.set(2048,2048); dir.shadow.radius=6;
+    scene.add(dir);
+
+    // «огонь» слева
+    const fire=new THREE.PointLight(0xffa860,0.55,6); fire.position.set(-1.5,1.2,1.2); scene.add(fire);
+
+    // ДОП. ТЁПЛЫЕ «БОУНСЫ» (мягкость и насыщенность)
+    const bounce1=new THREE.PointLight(0xffb07a,0.22,7); bounce1.position.set( 1.6,2.6, 1.2); scene.add(bounce1);
+    const bounce2=new THREE.PointLight(0xffc28a,0.18,7); bounce2.position.set(-1.6,2.6,-1.2); scene.add(bounce2);
 
     listener=new THREE.AudioListener(); camera.add(listener);
 
@@ -334,7 +337,13 @@ gltf.load('assets/models/door.glb', g=>{
     });
 
     addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight);});
-    (function loop(){ requestAnimationFrame(loop); fire.intensity=0.55+Math.sin(performance.now()*0.003)*0.15; activeControls?.update?.(); renderer.render(scene,camera); })();
+    (function loop(){ requestAnimationFrame(loop); // лёгкое «дышание» огня
+      const t=performance.now()*0.003;
+      const base=0.52, amp=0.15;
+      const s = base + Math.sin(t)*amp*0.6 + Math.sin(t*2.2)*amp*0.4;
+      fire.intensity = s;
+      activeControls?.update?.(); renderer.render(scene,camera);
+    })();
   }
 
   addEventListener('load',init);
