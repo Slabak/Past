@@ -150,45 +150,60 @@
         const lamp=new THREE.PointLight(0xffc98a,.85,2.1); lamp.castShadow=false; lamp.position.set(.15,1.25,.12); glob.add(lamp);
       });
 
-      // ДВЕРЬ — строго вплотную к передней стене
-      gltf.load('assets/models/door.glb',g=>{
-        const door=g.scene;
+      // ДВЕРЬ — строго вплотную к ПЕРЕДНЕЙ стене
+gltf.load('assets/models/door.glb', g => {
+  const door = g.scene;
 
-        // центр + определить «тонкую» ось (толщину)
-        let box=new THREE.Box3().setFromObject(door);
-        door.position.sub(box.getCenter(new THREE.Vector3()));
-        const sz=box.getSize(new THREE.Vector3());
-        const thin=(sz.x<=sz.y && sz.x<=sz.z)?'x':(sz.y<=sz.x && sz.y<=sz.z)?'y':'z';
-        door.rotation.set(0,0,0);
-        if(thin==='x') door.rotateY(Math.PI/2);
-        else if(thin==='y') door.rotateX(-Math.PI/2);
+  // 1) Центрируем и выравниваем «тонкую» ось двери как глубину (ось Z)
+  let box = new THREE.Box3().setFromObject(door);
+  door.position.sub(box.getCenter(new THREE.Vector3()));
 
-        // повторно центрируем
-        box=new THREE.Box3().setFromObject(door);
-        door.position.sub(box.getCenter(new THREE.Vector3()));
+  const size = box.getSize(new THREE.Vector3());
+  const thin = (size.x <= size.y && size.x <= size.z) ? 'x'
+             : (size.y <= size.x && size.y <= size.z) ? 'y' : 'z';
 
-        // масштаб по высоте
-        const H=box.getSize(new THREE.Vector3()).y||1; door.scale.setScalar(DOOR_TARGET_HEIGHT/H);
+  door.rotation.set(0, 0, 0);
+  if (thin === 'x')      door.rotateY(Math.PI / 2);
+  else if (thin === 'y') door.rotateX(-Math.PI / 2);
 
-        // обновить бокс
-        box=new THREE.Box3().setFromObject(door);
+  // 2) Снова центр и масштаб по высоте
+  box = new THREE.Box3().setFromObject(door);
+  door.position.sub(box.getCenter(new THREE.Vector3()));
+  const targetH = 2.10;                             // высота двери
+  const H = box.getSize(new THREE.Vector3()).y || 1;
+  door.scale.setScalar(targetH / H);
 
-        // поставить на пол
-        door.position.y -= box.min.y;
+  // 3) Обновили bbox после масштаба
+  box = new THREE.Box3().setFromObject(door);
 
-        // глубина двери после всех преобразований
-        const depth=box.getSize(new THREE.Vector3()).z || 0.04;
+  // 4) Поставить на пол
+  door.position.y -= box.min.y;
 
-        // точно прижать к ПЕРЕДНЕЙ стене: центр Z = d/2 - depth/2 - DOOR_SINK
-        // (DOOR_SINK > 0 — утопить внутрь стены на пару см)
-        door.position.z = d/2 - depth/2 - DOOR_SINK;
+  // 5) Прижать вплотную к ПЕРЕДНЕЙ стене:
+  // делаем так, чтобы МАКСИМАЛЬНАЯ по Z грань была ровно в плоскости стены.
+  const SINK = 0.02; // утопить внутрь стены на 2 см (поставь 0 для вровень)
+  const localMaxZ = box.max.z; // сейчас door.position.z = 0, поэтому это «физическая» дальняя грань
+  door.position.z = d/2 - localMaxZ - SINK;
 
-        // лицевой стороной внутрь комнаты (если надо — можно убрать)
-        // door.rotation.y += Math.PI;
+  // (опционально) развернуть «лицом» внутрь комнаты:
+  // door.rotation.y += Math.PI;
 
-        fixMaterials(door);
-        scene.add(door);
-      });
+  // материалы/тени
+  door.traverse(o => {
+    if (o.isMesh) {
+      o.castShadow = true; o.receiveShadow = true;
+      const m = o.material;
+      if (m?.map) {
+        m.map.colorSpace = THREE.SRGBColorSpace;
+        m.map.anisotropy = renderer.capabilities.getMaxAnisotropy?.() || 8;
+      }
+      if (m && m.roughness === undefined) m.roughness = 0.85;
+      if (m && m.metalness === undefined) m.metalness = 0.05;
+    }
+  });
+
+  scene.add(door);
+}, undefined, e => console.warn('Не удалось загрузить дверь:', e));
 
       // БАЛКИ — plank.glb
       gltf.load('assets/models/plank.glb',g=>{
