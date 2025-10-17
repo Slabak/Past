@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Комната — портал, камера, реквизит, балки и интеракции</title>
+  <title>Комната — портал, камера, реквизит, балки, интеракции и глобус</title>
   <style>
     html, body { height:100%; margin:0; overflow:hidden; background:#000; }
     #overlay, #loading-screen {
@@ -66,7 +66,7 @@
       padding: 10px 12px; cursor:pointer; font-size: 14px;
     }
 
-    canvas { cursor: default; } /* станет pointer при наведении на стол */
+    canvas { cursor: default; }
   </style>
 </head>
 <body>
@@ -111,6 +111,12 @@
     const BARRELS_Z             = -1.10;
     const BARRELS_ROT_LEFT_90   = true;
 
+    // Глобус (правая стена)
+    const GLOBUS_TARGET_HEIGHT  = 0.90;  // ~90 см в высоту
+    const GLOBUS_WALLOFFSET_X   = 0.45;  // отступ от правой стены
+    const GLOBUS_Z              = -1.10; // ближе к задней половине
+    const GLOBUS_ROT_RIGHT_WALL = -Math.PI/2; // вдоль правой стены (не критично для круглого)
+
     // БАЛКИ (plank.glb)
     const BEAM_THICKNESS     = 0.24;
     const BEAM_INSET_WALL    = 0.000;
@@ -127,7 +133,7 @@
     // интеракции
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
-    const interactables = []; // сюда положим стол
+    const interactables = []; // стол
     let canvasEl = null;
 
     const $ = s => document.querySelector(s);
@@ -236,7 +242,7 @@
         oc.enableZoom=false; oc.enablePan=false; oc.enableRotate=true;
         oc.minAzimuthAngle=-Infinity; oc.maxAzimuthAngle=Infinity;
         oc.minPolarAngle=THREE.MathUtils.degToRad(2); oc.maxPolarAngle=THREE.MathUtils.degToRad(178);
-        oc.enableDamping=true; oc.dampingFactor=0.12; oc.rotateSpeed=-0.8;
+        oc.enableDamping=true; oc.dampingFactor=0.12; oc.rotateSpeed=-0.8; // инверсия — «скролл» пальцем
         oc.touches={ONE:THREE.TOUCH.ROTATE, TWO:THREE.TOUCH.DOLLY_PAN};
         orbitControls=oc;
       }
@@ -254,7 +260,7 @@
       activeControls=deviceControls; return true;
     }
 
-    // Общая правка материалов (для сундука/бочек/стола)
+    // Общая правка материалов (для сундука/бочек/стола/глобуса)
     function fixMaterials(root){
       root.traverse(obj=>{
         if(!obj.isMesh) return;
@@ -391,10 +397,51 @@
           table.rotation.y = 0;
 
           fixMaterials(table);
-          table.userData.interactive = true;         // помечаем как кликабельный
-          interactables.push(table);                 // добавляем в список тестов на клик
+          table.userData.interactive = true;
+          interactables.push(table);
           scene.add(table);
         }, undefined, e=>console.warn('Не удалось загрузить стол:', e));
+
+        // ГЛОБУС — правая стена, ближе к задней части
+        gltfLoader.load('assets/models/globus.glb', (g)=>{
+          const globus = g.scene;
+
+          globus.traverse(o=>{
+            if(o.isMesh){
+              o.castShadow = true; o.receiveShadow = true;
+              const m=o.material;
+              if(m && m.map){
+                m.map.colorSpace = THREE.SRGBColorSpace;
+                m.map.anisotropy = renderer.capabilities.getMaxAnisotropy?.()||8;
+              }
+              if(m && m.roughness===undefined) m.roughness=0.85;
+              if(m && m.metalness===undefined) m.metalness=0.0;
+            }
+          });
+
+          // центрируем
+          const b0 = new THREE.Box3().setFromObject(globus);
+          const c0 = b0.getCenter(new THREE.Vector3());
+          globus.position.sub(c0);
+
+          // масштаб до целевой высоты
+          const size0 = b0.getSize(new THREE.Vector3());
+          const s = (size0.y>0) ? GLOBUS_TARGET_HEIGHT / size0.y : 1;
+          globus.scale.setScalar(s);
+
+          // поставить на пол
+          const b1 = new THREE.Box3().setFromObject(globus);
+          globus.position.y -= b1.min.y;
+
+          // позиция у правой стены
+          const x =  w/2 - GLOBUS_WALLOFFSET_X; // +X (правая)
+          const z =  GLOBUS_Z;                  // ближе к задней половине
+          globus.position.set(x, globus.position.y, z);
+          globus.rotation.y = GLOBUS_ROT_RIGHT_WALL;
+
+          fixMaterials(globus);
+          scene.add(globus);
+        }, undefined, e=>console.warn('Не удалось загрузить глобус:', e));
 
         // БАЛКИ — plank.glb (без теней + светлее)
         gltfLoader.load('assets/models/plank.glb',(g)=>{
@@ -494,12 +541,8 @@
       const quote = $('#quote-backdrop');
       const closeBtn = $('#quote-close');
 
-      function showQuote(){
-        quote.style.display = 'grid';
-      }
-      function hideQuote(){
-        quote.style.display = 'none';
-      }
+      function showQuote(){ quote.style.display = 'grid'; }
+      function hideQuote(){ quote.style.display = 'none'; }
       closeBtn.addEventListener('click', hideQuote);
       quote.addEventListener('click', (e)=>{ if(e.target === quote) hideQuote(); });
 
@@ -514,16 +557,11 @@
       function pick(){
         raycaster.setFromCamera(pointer, camera);
         const objs = [];
-        // собираем все меши интерактивных объектов (например, стол целиком)
         interactables.forEach(root => root.traverse(o=>{ if(o.isMesh) objs.push(o); }));
         const hits = raycaster.intersectObjects(objs, true);
-        if(hits.length){
-          // нашли что-то из interactables → показать цитату
-          showQuote();
-        }
+        if(hits.length){ showQuote(); }
       }
 
-      // курсор-подсветка при наведении мышью
       function onMove(ev){
         setPointerFromEvent(ev);
         raycaster.setFromCamera(pointer, camera);
@@ -533,7 +571,6 @@
         canvasEl.style.cursor = hits.length ? 'pointer' : 'default';
       }
 
-      // события
       canvasEl.addEventListener('mousemove', onMove, {passive:true});
       canvasEl.addEventListener('click', (ev)=>{ setPointerFromEvent(ev); pick(); });
       canvasEl.addEventListener('touchstart', (ev)=>{ setPointerFromEvent(ev); pick(); }, {passive:true});
