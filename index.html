@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Комната — дверь вплотную + балки</title>
+<title>Комната — дверь утоплена в стену</title>
 <style>
   html,body{height:100%;margin:0;overflow:hidden;background:#000}
   #overlay,#loading-screen{position:fixed;inset:0;display:grid;place-items:center;background:radial-gradient(circle at center,rgba(0,0,0,.85),#000);color:#fff;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;z-index:9999}
@@ -42,39 +42,33 @@
   <script src="assets/js/OrbitControls.js"></script>
   <script src="assets/js/GLTFLoader.js"></script>
   <script>
-  // ---- геометрия комнаты
+  // --- размеры комнаты
   const w=4,d=4,h=3;
 
-  // двери/объекты
-  const DOOR_TARGET_HEIGHT=2.10;
-  const DOOR_SINK=0.025; // на сколько СИЛЬНО утопить дверь в стену (м). 0.025 ≈ 2.5 см
-
+  // объекты
   const CHEST_SIZE_MULT=1.5, CHEST_WALLOFFSET_X=0.45, CHEST_Z=1.10;
   const BARRELS_TARGET_HEIGHT=1.30, BARRELS_WALLOFFSET_X=0.45, BARRELS_Z=-1.10, BARRELS_ROT_LEFT_90=true;
   const GLOBUS_TARGET_HEIGHT=0.90, GLOBUS_WALLOFFSET_X=0.45, GLOBUS_Z=-1.10, GLOBUS_ROT_RIGHT_WALL=-Math.PI/2;
 
+  // дверь
+  const DOOR_TARGET_HEIGHT=2.10;
+  const DOOR_SINK=0.08; // ← на сколько «утопить» дверь внутрь стены (м). 0.08 ≈ 8 см
+
   // балки
   const BEAM_THICKNESS=0.24, BEAM_INSET_WALL=0.0, BEAM_INSET_CEIL=0.0, POST_FLOOR_GAP=0.0;
-  const BEAM_MITER_OVERLAP=BEAM_THICKNESS*1.3;
-  const BACK_BEAM_RAISE=0.00;
+  const BEAM_MITER_OVERLAP=BEAM_THICKNESS*1.3, BACK_BEAM_RAISE=0.00;
 
-  let scene,camera,renderer,listener,bgm,fallbackWood=null;
-  let orbitControls=null, activeControls=null;
+  let scene,camera,renderer,listener,activeControls;
+  let orbitControls;
   const raycaster=new THREE.Raycaster(), pointer=new THREE.Vector2(), interactables=[];
   const $=s=>document.querySelector(s);
 
   function fixMaterials(root){
     root.traverse(o=>{
       if(!o.isMesh) return;
-      const apply=m=>{
-        if(!m) return;
-        if(m.map){ m.map.colorSpace=THREE.SRGBColorSpace; m.map.anisotropy=renderer.capabilities.getMaxAnisotropy?.()||8; }
-        else if(fallbackWood){ m.map=fallbackWood; m.color?.set?.(0xffffff); }
-        if(m.roughness===undefined) m.roughness=.82;
-        if(m.metalness===undefined) m.metalness=.05;
-        m.needsUpdate=true;
-      };
-      if(Array.isArray(o.material)) o.material.forEach(apply); else apply(o.material);
+      const m=o.material;
+      if(Array.isArray(m)) m.forEach(mm=>{if(mm.map){mm.map.colorSpace=THREE.SRGBColorSpace;mm.map.anisotropy=8;}}); 
+      else if(m?.map){ m.map.colorSpace=THREE.SRGBColorSpace; m.map.anisotropy=8; }
       o.castShadow=true; o.receiveShadow=true;
     });
   }
@@ -83,8 +77,9 @@
     root.traverse(o=>{
       if(!o.isMesh) return;
       o.castShadow=false; o.receiveShadow=false;
-      const apply=m=>{ if(!m) return; if(m.map){ m.map.colorSpace=THREE.SRGBColorSpace; m.color=TINT.clone(); } else m.color?.set?.(TINT); m.roughness=.75; m.metalness=0; m.needsUpdate=true; };
-      if(Array.isArray(o.material)) o.material.forEach(apply); else apply(o.material);
+      const m=o.material;
+      if(Array.isArray(m)) m.forEach(mm=>{mm.color=TINT.clone(); mm.roughness=.75; mm.metalness=0;});
+      else if(m){ m.color=TINT.clone(); m.roughness=.75; m.metalness=0; }
     });
   }
 
@@ -93,10 +88,9 @@
       const mng=new THREE.LoadingManager(()=>resolve(),(u,l,t)=>onProgress?.(Math.min(100,Math.floor(l/t*100))));
       const tl=new THREE.TextureLoader(mng);
       const floorTex=tl.load('assets/textures/floor.jpg'); floorTex.colorSpace=THREE.SRGBColorSpace; floorTex.wrapS=floorTex.wrapT=THREE.RepeatWrapping; floorTex.repeat.set(2,2);
-      const wallTex =tl.load('assets/textures/wall.jpg?v=25'); wallTex.colorSpace=THREE.SRGBColorSpace; wallTex.wrapS=wallTex.wrapT=THREE.ClampToEdgeWrapping;
+      const wallTex =tl.load('assets/textures/wall.jpg?v=26'); wallTex.colorSpace=THREE.SRGBColorSpace; wallTex.wrapS=wallTex.wrapT=THREE.ClampToEdgeWrapping;
       const mirrorTex=tl.load('assets/textures/mirror.jpg'); mirrorTex.colorSpace=THREE.SRGBColorSpace;
       const ceilTex  =tl.load('assets/textures/potolok.jpg'); ceilTex.colorSpace=THREE.SRGBColorSpace;
-      fallbackWood   =tl.load('assets/textures/wood.jpg');
 
       // пол/стены/потолок
       const floor=new THREE.Mesh(new THREE.PlaneGeometry(w,d),new THREE.MeshStandardMaterial({map:floorTex,roughness:.9}));
@@ -130,7 +124,7 @@
       });
       loadBarrels('assets/models/barrel_light.glb'); loadBarrels('assets/models/barrel.glb');
 
-      // стол (кликается)
+      // стол
       gltf.load('assets/models/table.glb',g=>{
         const table=g.scene; const b0=new THREE.Box3().setFromObject(table), c0=b0.getCenter(new THREE.Vector3()); table.position.sub(c0);
         const s=(b0.getSize(new THREE.Vector3()).y>0)? 0.78 / b0.getSize(new THREE.Vector3()).y : 1; table.scale.setScalar(s);
@@ -140,7 +134,7 @@
         fixMaterials(table); table.userData.interactive=true; interactables.push(table); scene.add(table);
       });
 
-      // глобус + локальный огонёк
+      // глобус
       gltf.load('assets/models/globus.glb',g=>{
         const glob=g.scene; const b0=new THREE.Box3().setFromObject(glob), c0=b0.getCenter(new THREE.Vector3()); glob.position.sub(c0);
         const s=(b0.getSize(new THREE.Vector3()).y>0)? GLOBUS_TARGET_HEIGHT/b0.getSize(new THREE.Vector3()).y : 1; glob.scale.setScalar(s);
@@ -150,77 +144,58 @@
         const lamp=new THREE.PointLight(0xffc98a,.85,2.1); lamp.castShadow=false; lamp.position.set(.15,1.25,.12); glob.add(lamp);
       });
 
-      // ДВЕРЬ — строго вплотную к ПЕРЕДНЕЙ стене
-gltf.load('assets/models/door.glb', g => {
-  const door = g.scene;
+      // ───────── ДВЕРЬ: утоплена в ПЕРЕДНЮЮ стену ─────────
+      gltf.load('assets/models/door.glb',g=>{
+        const door=g.scene;
 
-  // 1) Центрируем и выравниваем «тонкую» ось двери как глубину (ось Z)
-  let box = new THREE.Box3().setFromObject(door);
-  door.position.sub(box.getCenter(new THREE.Vector3()));
+        // центр + выровнять «тонкую» ось как глубину (ось Z)
+        let box=new THREE.Box3().setFromObject(door);
+        door.position.sub(box.getCenter(new THREE.Vector3()));
 
-  const size = box.getSize(new THREE.Vector3());
-  const thin = (size.x <= size.y && size.x <= size.z) ? 'x'
-             : (size.y <= size.x && size.y <= size.z) ? 'y' : 'z';
+        const size=box.getSize(new THREE.Vector3());
+        const thin=(size.x<=size.y && size.x<=size.z)?'x':(size.y<=size.x && size.y<=size.z)?'y':'z';
+        door.rotation.set(0,0,0);
+        if(thin==='x') door.rotateY(Math.PI/2);
+        else if(thin==='y') door.rotateX(-Math.PI/2);
 
-  door.rotation.set(0, 0, 0);
-  if (thin === 'x')      door.rotateY(Math.PI / 2);
-  else if (thin === 'y') door.rotateX(-Math.PI / 2);
+        // повторная центровка и масштаб по высоте
+        box=new THREE.Box3().setFromObject(door);
+        door.position.sub(box.getCenter(new THREE.Vector3()));
+        const H=box.getSize(new THREE.Vector3()).y||1; door.scale.setScalar(DOOR_TARGET_HEIGHT/H);
 
-  // 2) Снова центр и масштаб по высоте
-  box = new THREE.Box3().setFromObject(door);
-  door.position.sub(box.getCenter(new THREE.Vector3()));
-  const targetH = 2.10;                             // высота двери
-  const H = box.getSize(new THREE.Vector3()).y || 1;
-  door.scale.setScalar(targetH / H);
+        // обновить bbox после масштаба
+        box=new THREE.Box3().setFromObject(door);
 
-  // 3) Обновили bbox после масштаба
-  box = new THREE.Box3().setFromObject(door);
+        // поставить на пол
+        door.position.y -= box.min.y;
 
-  // 4) Поставить на пол
-  door.position.y -= box.min.y;
+        // глубина двери (толщина) после всех трансформаций
+        const depth = box.getSize(new THREE.Vector3()).z || 0.04;
 
-  // 5) Прижать вплотную к ПЕРЕДНЕЙ стене:
-  // делаем так, чтобы МАКСИМАЛЬНАЯ по Z грань была ровно в плоскости стены.
-  const SINK = 0.02; // утопить внутрь стены на 2 см (поставь 0 для вровень)
-  const localMaxZ = box.max.z; // сейчас door.position.z = 0, поэтому это «физическая» дальняя грань
-  door.position.z = d/2 - localMaxZ - SINK;
+        // прижать и УТОПИТЬ: максимальная грань по Z войдёт в плоскость z=d/2 на DOOR_SINK внутрь
+        // центр двери по Z:
+        // z_center = d/2 - (depth/2 + DOOR_SINK)
+        door.position.z = d/2 - (depth/2 + DOOR_SINK);
 
-  // (опционально) развернуть «лицом» внутрь комнаты:
-  // door.rotation.y += Math.PI;
+        fixMaterials(door);
+        scene.add(door);
+      });
 
-  // материалы/тени
-  door.traverse(o => {
-    if (o.isMesh) {
-      o.castShadow = true; o.receiveShadow = true;
-      const m = o.material;
-      if (m?.map) {
-        m.map.colorSpace = THREE.SRGBColorSpace;
-        m.map.anisotropy = renderer.capabilities.getMaxAnisotropy?.() || 8;
-      }
-      if (m && m.roughness === undefined) m.roughness = 0.85;
-      if (m && m.metalness === undefined) m.metalness = 0.05;
-    }
-  });
-
-  scene.add(door);
-}, undefined, e => console.warn('Не удалось загрузить дверь:', e));
-
-      // БАЛКИ — plank.glb
+      // балки — plank.glb
       gltf.load('assets/models/plank.glb',g=>{
         const root=g.scene;
         function prepareUnit(src){
           const box=new THREE.Box3().setFromObject(src); src.position.sub(box.getCenter(new THREE.Vector3()));
           const s=box.getSize(new THREE.Vector3()); let axis='y';
           if(s.x>=s.y && s.x>=s.z) axis='x'; else if(s.z>=s.y && s.z>=s.x) axis='z';
-          if(axis==='x') src.rotation.set(0,0,Math.PI/2);
-          else if(axis==='z') src.rotation.set(-Math.PI/2,0,0);
+          if(axis==='x') src.rotation.set(0,0,Math.PI/2); else if(axis==='z') src.rotation.set(-Math.PI/2,0,0);
           const box2=new THREE.Box3().setFromObject(src); const lenY=Math.max(box2.getSize(new THREE.Vector3()).y,1e-6); src.scale.multiplyScalar(1/lenY);
           const base=new THREE.Box3().setFromObject(src).getSize(new THREE.Vector3()); const baseX=Math.max(base.x,1e-6), baseZ=Math.max(base.z,1e-6);
           const unit=new THREE.Group(); unit.add(src);
           function spawnBetween(a,b,th=BEAM_THICKNESS){
             const clone=unit.clone(true);
             const dir=new THREE.Vector3().subVectors(b,a); const len=dir.length(); if(len<1e-6) return null;
-            const mid=new THREE.Vector3().addVectors(a,b).multiplyScalar(0.5);
+            const mid=new THREE.Vector3().addVectors(a,b).multiplyScalar(.5);
             clone.scale.set(th/baseX, len + BEAM_MITER_OVERLAP*2, th/baseZ);
             const q=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), dir.clone().normalize());
             clone.quaternion.copy(q); clone.position.copy(mid);
@@ -229,24 +204,31 @@ gltf.load('assets/models/door.glb', g => {
           return {spawnBetween};
         }
         const {spawnBetween}=prepareUnit(root);
-        const half=BEAM_THICKNESS*0.5;
+        const half=BEAM_THICKNESS*.5;
         const xL=-w/2+BEAM_INSET_WALL+half, xR=w/2-BEAM_INSET_WALL-half;
         const zB=-d/2+BEAM_INSET_WALL+half, zF=d/2-BEAM_INSET_WALL-half;
         const y0=0+POST_FLOOR_GAP+half, yT=h-BEAM_INSET_CEIL-half, yH=yT-half, yH_back=yH+BACK_BEAM_RAISE;
-
-        // 4 вертикальные стойки
+        // вертикальные
         spawnBetween(new THREE.Vector3(xL,y0,zB), new THREE.Vector3(xL,yT,zB));
         spawnBetween(new THREE.Vector3(xR,y0,zB), new THREE.Vector3(xR,yT,zB));
         spawnBetween(new THREE.Vector3(xL,y0,zF), new THREE.Vector3(xL,yT,zF));
         spawnBetween(new THREE.Vector3(xR,y0,zF), new THREE.Vector3(xR,yT,zF));
-
-        // 4 горизонтальные
-        spawnBetween(new THREE.Vector3(xL-BEAM_MITER_OVERLAP,yH_back,zB), new THREE.Vector3(xR+BEAM_MITER_OVERLAP,yH_back,zB)); // задняя
-        spawnBetween(new THREE.Vector3(xL-BEAM_MITER_OVERLAP,yH,zF),      new THREE.Vector3(xR+BEAM_MITER_OVERLAP,yH,zF));      // передняя
-        spawnBetween(new THREE.Vector3(xL,yH,zB-BEAM_MITER_OVERLAP),      new THREE.Vector3(xL,yH,zF+BEAM_MITER_OVERLAP));      // левая
-        spawnBetween(new THREE.Vector3(xR,yH,zB-BEAM_MITER_OVERLAP),      new THREE.Vector3(xR,yH,zF+BEAM_MITER_OVERLAP));      // правая
+        // горизонтальные
+        spawnBetween(new THREE.Vector3(xL-BEAM_MITER_OVERLAP,yH_back,zB), new THREE.Vector3(xR+BEAM_MITER_OVERLAP,yH_back,zB));
+        spawnBetween(new THREE.Vector3(xL-BEAM_MITER_OVERLAP,yH,zF),      new THREE.Vector3(xR+BEAM_MITER_OVERLAP,yH,zF));
+        spawnBetween(new THREE.Vector3(xL,yH,zB-BEAM_MITER_OVERLAP),      new THREE.Vector3(xL,yH,zF+BEAM_MITER_OVERLAP));
+        spawnBetween(new THREE.Vector3(xR,yH,zB-BEAM_MITER_OVERLAP),      new THREE.Vector3(xR,yH,zF+BEAM_MITER_OVERLAP));
       });
     });
+  }
+
+  function enableOrbit(){
+    const oc=new THREE.OrbitControls(camera, renderer.domElement);
+    oc.target.set(0,1.5,0); oc.enableZoom=false; oc.enablePan=false; oc.enableRotate=true;
+    oc.minAzimuthAngle=-Infinity; oc.maxAzimuthAngle=Infinity;
+    oc.minPolarAngle=THREE.MathUtils.degToRad(2); oc.maxPolarAngle=THREE.MathUtils.degToRad(178);
+    oc.enableDamping=true; oc.dampingFactor=.12; oc.rotateSpeed=-0.8;
+    orbitControls=oc; activeControls=oc;
   }
 
   function initUI(){
@@ -258,15 +240,6 @@ gltf.load('assets/models/door.glb', g => {
     canvas.addEventListener('mousemove',e=>{setPointer(e); raycaster.setFromCamera(pointer,camera); const objs=[]; interactables.forEach(r=>r.traverse(o=>{if(o.isMesh)objs.push(o);})); const h=raycaster.intersectObjects(objs,true); canvas.style.cursor=h.length?'pointer':'default';},{passive:true});
     canvas.addEventListener('click',e=>{setPointer(e); pick();});
     canvas.addEventListener('touchstart',e=>{setPointer(e); pick();},{passive:true});
-  }
-
-  function enableOrbit(){
-    const oc=new THREE.OrbitControls(camera, renderer.domElement);
-    oc.target.set(0,1.5,0); oc.enableZoom=false; oc.enablePan=false; oc.enableRotate=true;
-    oc.minAzimuthAngle=-Infinity; oc.maxAzimuthAngle=Infinity;
-    oc.minPolarAngle=THREE.MathUtils.degToRad(2); oc.maxPolarAngle=THREE.MathUtils.degToRad(178);
-    oc.enableDamping=true; oc.dampingFactor=.12; oc.rotateSpeed=-0.8; // инверсия свайпа
-    orbitControls=oc; activeControls=oc;
   }
 
   function init(){
