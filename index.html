@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Комната — портал, камера, сундук, бочки, стол, балки и потолок</title>
+  <title>Комната — портал, камера, реквизит, балки и интеракции</title>
   <style>
     html, body { height:100%; margin:0; overflow:hidden; background:#000; }
     #overlay, #loading-screen {
@@ -37,6 +37,36 @@
       bottom: 16px; padding: 10px 14px; border-radius: 10px; color: #000;
       background: #ffd48a; z-index: 10000; font-size: 14px; display: none;
     }
+
+    /* Модалка с цитатой */
+    #quote-backdrop {
+      position: fixed; inset: 0; display: none; place-items: center;
+      background: rgba(0,0,0,0.5); z-index: 10001;
+    }
+    #quote-box {
+      max-width: min(92vw, 720px);
+      background: #1a120c;
+      color: #ffe8c6;
+      border: 1px solid rgba(255, 214, 170, 0.28);
+      box-shadow: 0 10px 40px rgba(0,0,0,.45);
+      border-radius: 14px;
+      padding: 18px 18px 12px;
+      position: relative;
+    }
+    #quote-text {
+      font-size: clamp(16px, 2.1vw, 20px);
+      line-height: 1.45;
+      text-align: center;
+      font-family: Georgia, 'Times New Roman', serif;
+    }
+    #quote-close {
+      margin-top: 12px;
+      width: 100%;
+      background: #ffb366; color:#000; border:none; border-radius: 10px;
+      padding: 10px 12px; cursor:pointer; font-size: 14px;
+    }
+
+    canvas { cursor: default; } /* станет pointer при наведении на стол */
   </style>
 </head>
 <body>
@@ -52,6 +82,14 @@
 
   <button id="modeToggle">Управление: ПАЛЕЦ</button>
   <div id="toast"></div>
+
+  <!-- Модалка “цитата” -->
+  <div id="quote-backdrop">
+    <div id="quote-box">
+      <div id="quote-text">В словах прошлого хранится свет, который ведет и вдохновляет тех, кто ищет путь</div>
+      <button id="quote-close">Продолжить</button>
+    </div>
+  </div>
 
   <!-- libs -->
   <script src="assets/js/three.min.js"></script>
@@ -85,6 +123,12 @@
     let scene, camera, renderer;
     let orbitControls = null, deviceControls = null, activeControls = null;
     let listener, bgm, portalSound, fallbackWood = null;
+
+    // интеракции
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
+    const interactables = []; // сюда положим стол
+    let canvasEl = null;
 
     const $ = s => document.querySelector(s);
     const toast = (m,ms=2200)=>{const t=$('#toast'); t.textContent=m;t.style.display='block';clearTimeout(toast._t);toast._t=setTimeout(()=>t.style.display='none',ms);};
@@ -140,6 +184,7 @@
       renderer.toneMapping=THREE.ACESFilmicToneMapping;
       renderer.toneMappingExposure=1.05;
       document.body.appendChild(renderer.domElement);
+      canvasEl = renderer.domElement;
 
       // Свет
       const hemi=new THREE.HemisphereLight(0xffd9b0,0x1a0f0a,0.35); scene.add(hemi);
@@ -156,7 +201,7 @@
         overlay.style.display='none'; loading.style.display='grid';
         loadAllAssetsWithProgress(p=>{progressText.textContent=`${p}%`; barFill.style.width=`${p}%`;})
         .then(()=>{ playPortal(); loading.classList.add('fade-out');
-          setTimeout(()=>{ loading.remove(); startBGM(); modeBtn.style.display='block'; enableOrbitControls(); },1000);
+          setTimeout(()=>{ loading.remove(); startBGM(); modeBtn.style.display='block'; enableOrbitControls(); initInteractions(); },1000);
         });
       }, {once:true});
 
@@ -230,7 +275,7 @@
 
     // Специальная правка материалов для БАЛОК — без теней и светлее
     function tweakBeamMaterials(root){
-      const TINT = new THREE.Color(0xE0B889); // светло-тёплый древесный
+      const TINT = new THREE.Color(0xE0B889);
       root.traverse(obj=>{
         if(!obj.isMesh) return;
         obj.castShadow = false;
@@ -239,12 +284,11 @@
           if(!mat) return;
           if(mat.map){
             mat.map.colorSpace = THREE.SRGBColorSpace;
-            // подмешаем светлый оттенок через цвет материала
             mat.color = TINT.clone();
           } else {
             mat.color?.set?.(TINT);
           }
-          mat.roughness = 0.75; // немного «пожирнее» бликов
+          mat.roughness = 0.75;
           mat.metalness = 0.0;
           mat.needsUpdate = true;
         };
@@ -312,7 +356,7 @@
         loadBarrels('assets/models/barrel_light.glb');
         loadBarrels('assets/models/barrel.glb');
 
-        // СТОЛ — под зеркалом у задней стены, по центру
+        // СТОЛ — под зеркалом у задней стены, по центру (и интерактивный)
         gltfLoader.load('assets/models/table.glb', (g)=>{
           const table = g.scene;
           table.traverse(o=>{
@@ -347,6 +391,8 @@
           table.rotation.y = 0;
 
           fixMaterials(table);
+          table.userData.interactive = true;         // помечаем как кликабельный
+          interactables.push(table);                 // добавляем в список тестов на клик
           scene.add(table);
         }, undefined, e=>console.warn('Не удалось загрузить стол:', e));
 
@@ -386,7 +432,7 @@
               clone.quaternion.copy(q);
               clone.position.copy(mid);
 
-              // Сразу осветляем материалы балок и выключаем тени
+              // Балки — светлее, без теней
               tweakBeamMaterials(clone);
 
               scene.add(clone);
@@ -440,6 +486,57 @@
         // safety-resolve
         setTimeout(()=>resolve(), 12000);
       });
+    }
+
+    // ====== ИНТЕРАКЦИИ: клик по столу → показываем цитату ======
+    function initInteractions(){
+      if(!canvasEl) return;
+      const quote = $('#quote-backdrop');
+      const closeBtn = $('#quote-close');
+
+      function showQuote(){
+        quote.style.display = 'grid';
+      }
+      function hideQuote(){
+        quote.style.display = 'none';
+      }
+      closeBtn.addEventListener('click', hideQuote);
+      quote.addEventListener('click', (e)=>{ if(e.target === quote) hideQuote(); });
+
+      function setPointerFromEvent(ev){
+        const rect = canvasEl.getBoundingClientRect();
+        const x = ('clientX' in ev)? ev.clientX : ev.touches?.[0]?.clientX;
+        const y = ('clientY' in ev)? ev.clientY : ev.touches?.[0]?.clientY;
+        pointer.x = ((x - rect.left) / rect.width) * 2 - 1;
+        pointer.y = -((y - rect.top) / rect.height) * 2 + 1;
+      }
+
+      function pick(){
+        raycaster.setFromCamera(pointer, camera);
+        const objs = [];
+        // собираем все меши интерактивных объектов (например, стол целиком)
+        interactables.forEach(root => root.traverse(o=>{ if(o.isMesh) objs.push(o); }));
+        const hits = raycaster.intersectObjects(objs, true);
+        if(hits.length){
+          // нашли что-то из interactables → показать цитату
+          showQuote();
+        }
+      }
+
+      // курсор-подсветка при наведении мышью
+      function onMove(ev){
+        setPointerFromEvent(ev);
+        raycaster.setFromCamera(pointer, camera);
+        const objs = [];
+        interactables.forEach(root => root.traverse(o=>{ if(o.isMesh) objs.push(o); }));
+        const hits = raycaster.intersectObjects(objs, true);
+        canvasEl.style.cursor = hits.length ? 'pointer' : 'default';
+      }
+
+      // события
+      canvasEl.addEventListener('mousemove', onMove, {passive:true});
+      canvasEl.addEventListener('click', (ev)=>{ setPointerFromEvent(ev); pick(); });
+      canvasEl.addEventListener('touchstart', (ev)=>{ setPointerFromEvent(ev); pick(); }, {passive:true});
     }
 
     window.addEventListener('load', init);
