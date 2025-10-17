@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Комната — VR + ввод пароля</title>
+<title>Комната — VR + объекты (barrel/globus)</title>
 <style>
   html,body{height:100%;margin:0;overflow:hidden;background:#000}
   #overlay,#loading-screen{position:fixed;inset:0;display:grid;place-items:center;background:radial-gradient(circle at center,rgba(0,0,0,.85),#000);color:#fff;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;z-index:9999}
@@ -42,76 +42,53 @@
 
   <div id="screen-fade"></div>
 
+  <!-- three.js -->
   <script src="assets/js/three.min.js"></script>
   <script src="assets/js/OrbitControls.js"></script>
   <script src="assets/js/GLTFLoader.js"></script>
 
-  <!-- Минимальный VRButton без CDN -->
+  <!-- Локальный VRButton (без CDN) -->
   <script>
-  const VRButton = {
-    createButton: function ( renderer ) {
-      const btn = document.createElement('button');
-      function notSupported(){ btn.textContent='WebXR not supported'; btn.disabled=true; }
-      if ( 'xr' in navigator ) {
-        navigator.xr.isSessionSupported('immersive-vr').then( ok => {
-          if (!ok){ notSupported(); return; }
-          btn.textContent='Войти в VR';
-          btn.addEventListener('click', async ()=>{
-            try{
-              const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor','bounded-floor','hand-tracking'] });
-              renderer.xr.enabled = true;
-              await renderer.xr.setSession(session);
-              btn.textContent='Выйти из VR';
-              session.addEventListener('end', ()=>{ btn.textContent='Войти в VR'; });
-            }catch(e){ console.warn(e); }
-          });
-        }).catch(notSupported);
-      } else notSupported();
-      return btn;
-    }
-  };
+  const VRButton={createButton(r){const b=document.createElement('button');function no(){b.textContent='WebXR not supported';b.disabled=true}
+  if('xr'in navigator){navigator.xr.isSessionSupported('immersive-vr').then(ok=>{if(!ok){no();return}
+  b.textContent='Войти в VR';b.addEventListener('click',async()=>{try{r.xr.enabled=true;r.xr.setReferenceSpaceType?.('local-floor');const s=await navigator.xr.requestSession('immersive-vr',{optionalFeatures:['local-floor','bounded-floor','hand-tracking']});await r.xr.setSession(s);b.textContent='Выйти из VR';s.addEventListener('end',()=>{b.textContent='Войти в VR'})}catch(e){console.warn(e)}})}) .catch(no)}else no();return b}}
   </script>
 
   <script>
-  // ====== Константы сцены ======
+  // -------- ПАРАМЕТРЫ СЦЕНЫ --------
   const w=4,d=4,h=3;
+  const SECRET='ВЕРА';
 
-  // дверь (утоплена внутрь стены)
-  const DOOR_TARGET_HEIGHT=2.10;
-  const DOOR_SINK=0.08; // 8 см внутрь передней стены
+  // дверь
+  const DOOR_TARGET_HEIGHT=2.10, DOOR_SINK=0.08;
 
-  // объекты
+  // сундук
   const CHEST_SIZE_MULT=1.5, CHEST_WALLOFFSET_X=0.45, CHEST_Z=1.10;
+
+  // бочки (легкая модель — barrel.glb)
   const BARRELS_TARGET_HEIGHT=1.30, BARRELS_WALLOFFSET_X=0.45, BARRELS_Z=-1.10, BARRELS_ROT_LEFT_90=true;
 
   // балки
   const BEAM_THICKNESS=0.24, BEAM_INSET_WALL=0.0, BEAM_INSET_CEIL=0.0, POST_FLOOR_GAP=0.0;
   const BEAM_MITER_OVERLAP=BEAM_THICKNESS*1.3, BACK_BEAM_RAISE=0.00;
 
-  // VR-ввод
-  const SECRET = 'ВЕРА';
+  // -------- ГЛОБАЛЬНЫЕ --------
+  let scene,camera,renderer,listener,roomGroup,orbitControls,activeControls,bgm;
+  const raycaster=new THREE.Raycaster(), pointer=new THREE.Vector2();
+  const interactables=new Set(); // корни кликабельных объектов
+  let controller0,controller1,tempMatrix=new THREE.Matrix4(),pickables=[];
+  let inputPanel,inputTextMesh,inputValue='';
+  let tableRef=null, barrelsRef=null, globeRef=null;
 
-  // ====== Глобальные ======
-  let scene, camera, renderer, listener, activeControls, orbitControls;
-  let roomGroup; // вся комната (для «схлопывания»)
-  let bgm; // музыка (если есть)
-  const raycaster = new THREE.Raycaster(), pointer = new THREE.Vector2();
-  const interactables = new Set(); // кликабельные объекты
-  let tableRef = null, barrelsRef = null;
+  const $=s=>document.querySelector(s);
+  function toast(msg,ms=1800){const t=$('#toast');t.textContent=msg;t.style.display='block';setTimeout(()=>t.style.display='none',ms);}
 
-  // VR контроллеры
-  let controller0, controller1, tempMatrix = new THREE.Matrix4(), pickables = [];
-
-  const $ = s => document.querySelector(s);
-
-  function toast(msg, ms=1800){ const t=$('#toast'); t.textContent=msg; t.style.display='block'; setTimeout(()=>t.style.display='none',ms); }
-
-  // материалы
+  // --- материалы/текстуры ---
   function fixMaterials(root){
     root.traverse(o=>{
       if(!o.isMesh) return;
-      const apply=(m)=>{ if(!m) return;
-        if(m.map){ m.map.colorSpace=THREE.SRGBColorSpace; m.map.anisotropy=renderer.capabilities.getMaxAnisotropy?.()||8; }
+      const apply=m=>{if(!m)return;
+        if(m.map){m.map.colorSpace=THREE.SRGBColorSpace; m.map.anisotropy=renderer.capabilities.getMaxAnisotropy?.()||8;}
         if(m.roughness===undefined) m.roughness=.82;
         if(m.metalness===undefined) m.metalness=.05;
         m.needsUpdate=true;
@@ -125,139 +102,80 @@
     root.traverse(o=>{
       if(!o.isMesh) return;
       o.castShadow=false; o.receiveShadow=false;
-      const apply=m=>{if(!m)return; if(m.map){m.map.colorSpace=THREE.SRGBColorSpace; m.color=TINT.clone();} else m.color?.set?.(TINT); m.roughness=.75; m.metalness=0; m.needsUpdate=true;};
+      const apply=m=>{if(!m)return;
+        if(m.map){m.map.color.set(TINT); m.map.needsUpdate=true}else m.color?.set?.(TINT);
+        m.roughness=.75; m.metalness=0; m.needsUpdate=true;
+      };
       if(Array.isArray(o.material)) o.material.forEach(apply); else apply(o.material);
     });
   }
 
-  function createLabel(text, opts={}){
-    const pad = opts.pad ?? 12, fs = opts.fontSize ?? 64, color = opts.color ?? '#000', bg = opts.bg ?? '#ffb366';
-    const canvas = document.createElement('canvas'), ctx = canvas.getContext('2d');
-    ctx.font = `bold ${fs}px system-ui, -apple-system, Segoe UI, Roboto`;
-    const tw = ctx.measureText(text).width;
-    canvas.width = Math.ceil(tw + pad*2);
-    canvas.height = Math.ceil(fs*1.6 + pad*2);
-    ctx.fillStyle = bg; ctx.fillRect(0,0,canvas.width,canvas.height);
-    ctx.fillStyle = color; ctx.textBaseline = 'middle'; ctx.font = `bold ${fs}px system-ui, -apple-system, Segoe UI, Roboto`;
-    ctx.fillText(text, pad, canvas.height/2);
-    const tex = new THREE.CanvasTexture(canvas); tex.colorSpace = THREE.SRGBColorSpace;
-    const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
-    const geo = new THREE.PlaneGeometry(canvas.width/1000, canvas.height/1000);
-    return new THREE.Mesh(geo, mat);
+  // --- канвас-лейблы для кнопок/текста ---
+  function createLabel(text,{pad=12,fontSize=64,color='#000',bg='#ffb366'}={}){
+    const c=document.createElement('canvas'),ctx=c.getContext('2d');
+    ctx.font=`bold ${fontSize}px system-ui,-apple-system,Segoe UI,Roboto`;
+    const tw=ctx.measureText(text).width;
+    c.width=Math.ceil(tw+pad*2); c.height=Math.ceil(fontSize*1.6+pad*2);
+    ctx.fillStyle=bg; ctx.fillRect(0,0,c.width,c.height);
+    ctx.fillStyle=color; ctx.textBaseline='middle'; ctx.font=`bold ${fontSize}px system-ui,-apple-system,Segoe UI,Roboto`;
+    ctx.fillText(text,pad,c.height/2);
+    const tex=new THREE.CanvasTexture(c); tex.colorSpace=THREE.SRGBColorSpace;
+    return new THREE.Mesh(new THREE.PlaneGeometry(c.width/1000,c.height/1000), new THREE.MeshBasicMaterial({map:tex,transparent:true}));
   }
 
-  // 3D панель ввода (для VR и обычного режима)
-  let inputPanel, inputTextMesh, inputValue='';
+  // --- панель ввода (для бочек) ---
   function buildInputPanel(){
-    const group = new THREE.Group(); group.visible = false;
-    // фон
-    const bgGeo = new THREE.PlaneGeometry(0.8, 0.42);
-    const bgMat = new THREE.MeshBasicMaterial({ color: 0x1a120c, transparent:true, opacity:0.9 });
-    const bg = new THREE.Mesh(bgGeo, bgMat); bg.position.z = -0.01; group.add(bg);
-
-    // поле ввода (текущий текст)
-    inputTextMesh = createLabel(' ', { fontSize: 72, bg: '#2a1a10', color:'#ffe8c6', pad:16 });
-    inputTextMesh.position.set(0, 0.11, 0);
-    group.add(inputTextMesh);
-
-    // кнопки
-    const keys = ['В','Е','Р','А','←','OK'];
-    const row = new THREE.Group(); group.add(row);
-    let x=-0.34;
-    keys.forEach((k,i)=>{
-      const m = createLabel(k, { fontSize: 56, bg:'#ffb366', color:'#000', pad:20 });
-      m.position.set(x + (i*0.14), -0.11, 0);
-      m.userData.key = k;
-      row.add(m);
-      pickables.push(m); // сделать кликабельным
-    });
-
-    group.userData.type='panel';
-    inputPanel = group; scene.add(group);
+    const g=new THREE.Group(); g.visible=false;
+    const bg=new THREE.Mesh(new THREE.PlaneGeometry(0.8,0.42), new THREE.MeshBasicMaterial({color:0x1a120c,transparent:true,opacity:.9}));
+    bg.position.z=-.01; g.add(bg);
+    inputTextMesh=createLabel(' ',{fontSize:72,bg:'#2a1a10',color:'#ffe8c6',pad:16}); inputTextMesh.position.set(0,.11,0); g.add(inputTextMesh);
+    const keys=['В','Е','Р','А','←','OK']; let x=-.34; keys.forEach((k,i)=>{const m=createLabel(k,{fontSize:56,bg:'#ffb366',color:'#000',pad:20}); m.position.set(x+i*.14,-.11,0); m.userData.key=k; g.add(m); pickables.push(m);});
+    g.userData.type='panel'; inputPanel=g; scene.add(g);
   }
-  function showInputPanelInFrontOfCamera(){
-    inputValue=''; updateInputMesh();
-    const dir = new THREE.Vector3(); camera.getWorldDirection(dir);
-    inputPanel.position.copy(camera.position).addScaledVector(dir, 0.8);
-    inputPanel.quaternion.copy(camera.quaternion);
-    inputPanel.visible = true;
-  }
-  function updateInputMesh(){
-    scene.remove(inputTextMesh);
-    const t = inputValue.length? inputValue : ' ';
-    const m = createLabel(t, { fontSize: 72, bg: '#2a1a10', color:'#ffe8c6', pad:16 });
-    m.position.copy(inputTextMesh.position);
-    inputPanel.add(m);
-    inputTextMesh = m;
-  }
-  function handleKey(k){
-    if(k==='←'){ inputValue = inputValue.slice(0,-1); updateInputMesh(); return; }
-    if(k==='OK'){
-      if(inputValue.toUpperCase() === SECRET){
-        closePortal();
-      }else{
-        toast('Неверно. Подсказка в комнате…');
-      }
-      inputPanel.visible=false;
-      return;
-    }
-    inputValue += k;
-    updateInputMesh();
-  }
+  function showInputPanelInFrontOfCamera(){ inputValue=''; updateInputMesh(); const dir=new THREE.Vector3(); camera.getWorldDirection(dir); inputPanel.position.copy(camera.position).addScaledVector(dir,.8); inputPanel.quaternion.copy(camera.quaternion); inputPanel.visible=true; }
+  function updateInputMesh(){ inputPanel.remove(inputTextMesh); inputTextMesh=createLabel(inputValue.length?inputValue:' ',{fontSize:72,bg:'#2a1a10',color:'#ffe8c6',pad:16}); inputTextMesh.position.set(0,.11,0); inputPanel.add(inputTextMesh); }
+  function handleKey(k){ if(k==='←'){ inputValue=inputValue.slice(0,-1); updateInputMesh(); return; } if(k==='OK'){ if(inputValue.toUpperCase()===SECRET) closePortal(); else toast('Неверно. Подсказка в комнате…'); inputPanel.visible=false; return; } inputValue+=k; updateInputMesh(); }
+  function closePortal(){ const fade=$('#screen-fade'); fade.style.opacity='1'; const start=performance.now(),dur=900; const s0=roomGroup.scale.x||1; const tick=t=>{const k=Math.min(1,(t-start)/dur); const s=THREE.MathUtils.lerp(s0,0.001,k); roomGroup.scale.setScalar(s); if(k<1) requestAnimationFrame(tick)}; requestAnimationFrame(tick); }
 
-  function closePortal(){
-    // затемнение + «схлопывание» комнаты
-    const fade = $('#screen-fade'); fade.style.opacity='1';
-    if (bgm?.isPlaying) bgm.setVolume(0);
-    const start = performance.now();
-    const dur = 900;
-    const startScale = 1;
-    function anim(t){
-      const k = Math.min(1,(t-start)/dur);
-      const s = THREE.MathUtils.lerp(startScale, 0.001, k);
-      roomGroup.scale.setScalar(s);
-      if(k<1) requestAnimationFrame(anim);
-    }
-    requestAnimationFrame(anim);
-  }
-
-  // загрузка ассетов + построение сцены
+  // --- загрузка ассетов ---
   function loadAll(onProgress){
     return new Promise(resolve=>{
       const mng=new THREE.LoadingManager(()=>resolve(),(u,l,t)=>onProgress?.(Math.min(100,Math.floor(l/t*100))));
       const tl=new THREE.TextureLoader(mng);
-      const floorTex=tl.load('assets/textures/floor.jpg'); floorTex.colorSpace=THREE.SRGBColorSpace; floorTex.wrapS=floorTex.wrapT=THREE.RepeatWrapping; floorTex.repeat.set(2,2);
-      const wallTex =tl.load('assets/textures/wall.jpg?v=27'); wallTex.colorSpace=THREE.SRGBColorSpace; wallTex.wrapS=wallTex.wrapT=THREE.ClampToEdgeWrapping;
+      const floorTex=tl.load('assets/textures/floor.jpg');
+      floorTex.colorSpace=THREE.SRGBColorSpace; floorTex.wrapS=floorTex.wrapT=THREE.RepeatWrapping; floorTex.repeat.set(2,2);
+      const wallTex=tl.load('assets/textures/wall.jpg?v=29'); wallTex.colorSpace=THREE.SRGBColorSpace; wallTex.wrapS=wallTex.wrapT=THREE.ClampToEdgeWrapping;
       const mirrorTex=tl.load('assets/textures/mirror.jpg'); mirrorTex.colorSpace=THREE.SRGBColorSpace;
-      const ceilTex  =tl.load('assets/textures/potolok.jpg'); ceilTex.colorSpace=THREE.SRGBColorSpace;
+      const ceilTex=tl.load('assets/textures/potolok.jpg'); ceilTex.colorSpace=THREE.SRGBColorSpace;
 
-      // Группа комнаты, чтобы потом скейлить
-      roomGroup = new THREE.Group(); scene.add(roomGroup);
+      roomGroup=new THREE.Group(); scene.add(roomGroup);
 
-      // пол/стены/потолок
       const floor=new THREE.Mesh(new THREE.PlaneGeometry(w,d),new THREE.MeshStandardMaterial({map:floorTex,roughness:.9}));
       floor.rotation.x=-Math.PI/2; floor.position.y=0.0005; floor.receiveShadow=true; roomGroup.add(floor);
+
       const wallMat=new THREE.MeshStandardMaterial({map:wallTex,roughness:1});
       [[0,h/2-0.01,-d/2,0],[0,h/2-0.01,d/2,Math.PI],[-w/2,h/2-0.01,0,Math.PI/2],[w/2,h/2-0.01,0,-Math.PI/2]].forEach(([x,y,z,ry])=>{
         const mesh=new THREE.Mesh(new THREE.PlaneGeometry(ry?d:w,h+0.02),wallMat); mesh.position.set(x,y,z); if(ry) mesh.rotation.y=ry; mesh.receiveShadow=true; roomGroup.add(mesh);
       });
+
       const ceil=new THREE.Mesh(new THREE.PlaneGeometry(w,d),new THREE.MeshStandardMaterial({map:ceilTex,roughness:.9}));
       ceil.rotation.x=Math.PI/2; ceil.position.set(0,h-0.001,0); ceil.receiveShadow=true; roomGroup.add(ceil);
+
       const mirror=new THREE.Mesh(new THREE.PlaneGeometry(.9,.6),new THREE.MeshStandardMaterial({map:mirrorTex,metalness:.85,roughness:.22}));
       mirror.position.set(0,1.5,-d/2+.01); roomGroup.add(mirror);
 
       const gltf=new THREE.GLTFLoader(mng);
 
-      // сундук (кликабелен? — сейчас нет; при желании добавим)
+      // сундук
       gltf.load('assets/models/chest.glb',g=>{
-        const chest=g.scene; const b0=new THREE.Box3().setFromObject(chest); chest.position.sub(b0.getCenter(new THREE.Vector3()));
+        const chest=g.scene, b0=new THREE.Box3().setFromObject(chest); chest.position.sub(b0.getCenter(new THREE.Vector3()));
         const target=1.2*CHEST_SIZE_MULT, diag=b0.getSize(new THREE.Vector3()).length(); chest.scale.setScalar(diag>0?target/diag:1);
         const b1=new THREE.Box3().setFromObject(chest); chest.position.y-=b1.min.y;
         chest.position.set(-w/2+CHEST_WALLOFFSET_X, chest.position.y, CHEST_Z); chest.rotation.y=Math.PI; fixMaterials(chest); roomGroup.add(chest);
       });
 
-      // бочки (по левой стене, отдельная группа — сделаем кликабельной)
-      gltf.load('assets/models/barrel_light.glb',g=>{
+      // бочки — ЛЕГКАЯ модель barrel.glb
+      gltf.load('assets/models/barrel.glb?v=1',g=>{
         barrelsRef=g.scene;
         const b0=new THREE.Box3().setFromObject(barrelsRef); barrelsRef.position.sub(b0.getCenter(new THREE.Vector3()));
         const H=b0.getSize(new THREE.Vector3()).y||1; barrelsRef.scale.setScalar(BARRELS_TARGET_HEIGHT/H);
@@ -270,8 +188,8 @@
         interactables.add(barrelsRef);
       });
 
-      // стол (кликабелен — показывает цитату)
-      gltf.load('assets/models/table.glb',g=>{
+      // стол (интерактив под зеркалом на задней стене)
+      gltf.load('assets/models/table.glb?v=1',g=>{
         tableRef=g.scene; const b0=new THREE.Box3().setFromObject(tableRef), c0=b0.getCenter(new THREE.Vector3()); tableRef.position.sub(c0);
         const s=(b0.getSize(new THREE.Vector3()).y>0)? 0.78 / b0.getSize(new THREE.Vector3()).y : 1; tableRef.scale.setScalar(s);
         const b1=new THREE.Box3().setFromObject(tableRef); tableRef.position.y-=b1.min.y;
@@ -283,29 +201,49 @@
         interactables.add(tableRef);
       });
 
-      // дверь (утоплена во фронтальную стену)
-      gltf.load('assets/models/door.glb',g=>{
+      // ГЛОБУС — справа от стола у правой стены
+      gltf.load('assets/models/globus.glb?v=1',g=>{
+        globeRef=g.scene;
+        const b0=new THREE.Box3().setFromObject(globeRef); globeRef.position.sub(b0.getCenter(new THREE.Vector3()));
+        // целевая высота ~0.8 м
+        const H=b0.getSize(new THREE.Vector3()).y||1; globeRef.scale.setScalar(0.8/H);
+        const b1=new THREE.Box3().setFromObject(globeRef); globeRef.position.y-=b1.min.y;
+        // поставить к правой стене, по Z — рядом со столом
+        const x =  w/2 - 0.42;                 // прижать к стене
+        const z = (-d/2 + (b1.getSize(new THREE.Vector3()).z/2) + .02) + 0.65; // чуть правее стола
+        globeRef.position.set(x,globeRef.position.y,z);
+        globeRef.rotation.y = -Math.PI/2;
+        fixMaterials(globeRef);
+        roomGroup.add(globeRef);
+
+        // локальный мягкий свет над глобусом
+        const globeLight=new THREE.PointLight(0xffc78a,0.5,2.8);
+        globeLight.position.set(x-0.25, 1.5, z);
+        roomGroup.add(globeLight);
+      });
+
+      // дверь — утоплена во фронтальную стену (переднюю)
+      gltf.load('assets/models/door.glb?v=2',g=>{
         const door=g.scene;
         let box=new THREE.Box3().setFromObject(door);
         door.position.sub(box.getCenter(new THREE.Vector3()));
         const size=box.getSize(new THREE.Vector3());
         const thin=(size.x<=size.y && size.x<=size.z)?'x':(size.y<=size.x && size.y<=size.z)?'y':'z';
         door.rotation.set(0,0,0);
-        if(thin==='x') door.rotateY(Math.PI/2);
-        else if(thin==='y') door.rotateX(-Math.PI/2);
+        if(thin==='x') door.rotateY(Math.PI/2); else if(thin==='y') door.rotateX(-Math.PI/2);
         box=new THREE.Box3().setFromObject(door);
         door.position.sub(box.getCenter(new THREE.Vector3()));
         const H=box.getSize(new THREE.Vector3()).y||1; door.scale.setScalar(DOOR_TARGET_HEIGHT/H);
         box=new THREE.Box3().setFromObject(door);
         door.position.y -= box.min.y;
-        const depth = box.getSize(new THREE.Vector3()).z || 0.04;
-        door.position.z = d/2 - (depth/2 + DOOR_SINK);
+        const depth=box.getSize(new THREE.Vector3()).z || 0.04;
+        door.position.z = d/2 - (depth/2 + DOOR_SINK); // вплотную/утоплена
         fixMaterials(door);
         roomGroup.add(door);
       });
 
-      // балки
-      gltf.load('assets/models/plank.glb',g=>{
+      // БАЛКИ — plank.glb
+      gltf.load('assets/models/plank.glb?v=3',g=>{
         const root=g.scene;
         function prepareUnit(src){
           const box=new THREE.Box3().setFromObject(src); src.position.sub(box.getCenter(new THREE.Vector3()));
@@ -341,85 +279,69 @@
         spawnBetween(new THREE.Vector3(xR,yH,zB-BEAM_MITER_OVERLAP),      new THREE.Vector3(xR,yH,zF+BEAM_MITER_OVERLAP));
       });
 
-      // Панель ввода
       buildInputPanel();
     });
   }
 
+  // --- управление мышь/тач + VR ---
   function enableOrbit(){
     const oc=new THREE.OrbitControls(camera, renderer.domElement);
     oc.target.set(0,1.5,0); oc.enableZoom=false; oc.enablePan=false; oc.enableRotate=true;
     oc.minAzimuthAngle=-Infinity; oc.maxAzimuthAngle=Infinity;
     oc.minPolarAngle=THREE.MathUtils.degToRad(2); oc.maxPolarAngle=THREE.MathUtils.degToRad(178);
-    oc.enableDamping=true; oc.dampingFactor=.12; oc.rotateSpeed=-0.8; // инверсия свайпа
+    oc.enableDamping=true; oc.dampingFactor=.12; oc.rotateSpeed=-0.8;
     orbitControls=oc; activeControls=oc;
   }
-
-  // Всплывающее окно (стол)
   function initQuoteUI(){
     const canvas=renderer.domElement, backdrop=$('#quote-backdrop'), close=$('#quote-close');
     const show=()=>backdrop.style.display='grid', hide=()=>backdrop.style.display='none';
-    close.addEventListener('click',hide);
-    backdrop.addEventListener('click',e=>{ if(e.target===backdrop) hide(); });
-    function setPointer(ev){ const r=canvas.getBoundingClientRect(),x=('clientX'in ev)?ev.clientX:ev.touches?.[0]?.clientX,y=('clientY'in ev)?ev.clientY:ev.touches?.[0]?.clientY; pointer.x=((x-r.left)/r.width)*2-1; pointer.y=-((y-r.top)/r.height)*2+1; }
-    function pick2D(){ raycaster.setFromCamera(pointer,camera); const objs=[]; interactables.forEach(root=>root.traverse(o=>{if(o.isMesh)objs.push(o);})); const hits=raycaster.intersectObjects(objs,true); if(hits.length){ const root=findRootInteractive(hits[0].object); if(root?.userData.interactive==='table') show(); if(root?.userData.interactive==='barrels') showInputPanelInFrontOfCamera(); } }
-    canvas.addEventListener('mousemove',e=>{ setPointer(e); raycaster.setFromCamera(pointer,camera); const objs=[]; interactables.forEach(r=>r.traverse(o=>{if(o.isMesh)objs.push(o);})); const h=raycaster.intersectObjects(objs,true); canvas.style.cursor=h.length?'pointer':'default'; },{passive:true});
-    canvas.addEventListener('click',e=>{ setPointer(e); pick2D(); });
-    canvas.addEventListener('touchstart',e=>{ setPointer(e); pick2D(); },{passive:true});
+    close.addEventListener('click',hide); backdrop.addEventListener('click',e=>{if(e.target===backdrop) hide();});
+    function setPointer(ev){const r=canvas.getBoundingClientRect(),x=('clientX'in ev)?ev.clientX:ev.touches?.[0]?.clientX,y=('clientY'in ev)?ev.clientY:ev.touches?.[0]?.clientY; pointer.x=((x-r.left)/r.width)*2-1; pointer.y=-((y-r.top)/r.height)*2+1;}
+    function pick2D(){ raycaster.setFromCamera(pointer,camera);
+      const objs=[]; interactables.forEach(root=>root.traverse(o=>{if(o.isMesh)objs.push(o);})); const hits=raycaster.intersectObjects(objs,true);
+      if(hits.length){ const root=findRoot(hits[0].object);
+        if(root?.userData.interactive==='table') show();
+        if(root?.userData.interactive==='barrels') showInputPanelInFrontOfCamera();
+      }
+    }
+    function findRoot(o){ let p=o; while(p){ if(interactables.has(p)) return p; p=p.parent; } return null; }
+    canvas.addEventListener('mousemove',e=>{ setPointer(e);
+      raycaster.setFromCamera(pointer,camera);
+      const objs=[]; interactables.forEach(r=>r.traverse(o=>{if(o.isMesh)objs.push(o);})); const h=raycaster.intersectObjects(objs,true);
+      canvas.style.cursor=h.length?'pointer':'default';
+    },{passive:true});
+    canvas.addEventListener('click',e=>{ setPointer(e); pick2D();});
+    canvas.addEventListener('touchstart',e=>{ setPointer(e); pick2D();},{passive:true});
   }
-
-  function findRootInteractive(obj){
-    let p=obj;
-    while(p){ if(interactables.has(p)) return p; p=p.parent; }
-    return null;
-  }
-
-  // VR контроллеры + лучи
   function setupVRControllers(){
-    controller0 = renderer.xr.getController(0);
-    controller1 = renderer.xr.getController(1);
-    [controller0, controller1].forEach(c=>{
-      const geo=new THREE.BufferGeometry().setFromPoints([ new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1) ]);
-      const mat=new THREE.LineBasicMaterial({ color: 0xffb366 });
-      const line=new THREE.Line(geo,mat); line.name='ray'; line.scale.z=2.0; c.add(line);
+    controller0=renderer.xr.getController(0);
+    controller1=renderer.xr.getController(1);
+    [controller0,controller1].forEach(c=>{
+      const geo=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0),new THREE.Vector3(0,0,-1)]);
+      const line=new THREE.Line(geo,new THREE.LineBasicMaterial({color:0xffb366})); line.name='ray'; line.scale.z=2.0; c.add(line);
       c.addEventListener('selectstart', onSelectStart);
     });
     scene.add(controller0); scene.add(controller1);
   }
-
   function intersectController(controller){
     tempMatrix.identity().extractRotation(controller.matrixWorld);
-    const rayOrigin = new THREE.Vector3().setFromMatrixPosition(controller.matrixWorld);
-    const rayDir = new THREE.Vector3(0,0,-1).applyMatrix4(tempMatrix);
-    raycaster.set(rayOrigin, rayDir);
-    const objs=[]; // интерактивы (и кнопки панели)
-    interactables.forEach(root=>root.traverse(o=>{ if(o.isMesh) objs.push(o); }));
-    pickables.forEach(o=>objs.push(o));
+    const origin=new THREE.Vector3().setFromMatrixPosition(controller.matrixWorld);
+    const dir=new THREE.Vector3(0,0,-1).applyMatrix4(tempMatrix);
+    raycaster.set(origin,dir);
+    const objs=[]; interactables.forEach(root=>root.traverse(o=>{if(o.isMesh)objs.push(o);})); pickables.forEach(o=>objs.push(o));
     return raycaster.intersectObjects(objs,true);
   }
-
   function onSelectStart(e){
-    const controller=e.target;
-    const hits=intersectController(controller);
-    if(!hits.length) return;
+    const hits=intersectController(e.target); if(!hits.length) return;
     const obj=hits[0].object;
-
-    // клик по кнопкам панели
-    if(obj.userData.key){
-      handleKey(obj.userData.key);
-      return;
-    }
-
-    const root=findRootInteractive(obj);
-    if(!root) return;
-    if(root.userData.interactive==='table'){
-      $('#quote-backdrop').style.display='grid';
-    }else if(root.userData.interactive==='barrels'){
-      showInputPanelInFrontOfCamera();
-    }
+    if(obj.userData.key){ handleKey(obj.userData.key); return; }
+    let p=obj; while(p){ if(interactables.has(p)) break; p=p.parent; }
+    if(!p) return;
+    if(p.userData.interactive==='table'){ $('#quote-backdrop').style.display='grid'; }
+    if(p.userData.interactive==='barrels'){ showInputPanelInFrontOfCamera(); }
   }
 
-  // Инициализация
+  // --- инициализация/рендер ---
   function init(){
     const overlay=$('#overlay'), loading=$('#loading-screen'), startBtn=document.getElementById('start');
     const progress=document.getElementById('progress'), fill=document.getElementById('bar-fill');
@@ -441,7 +363,7 @@
     renderer.toneMappingExposure=1.18;
     document.body.appendChild(renderer.domElement);
 
-    // Свет
+    // свет
     const hemi=new THREE.HemisphereLight(0xffe0bb,0x120804,0.32); scene.add(hemi);
     const ambient=new THREE.AmbientLight(0xffcf9a,0.22); scene.add(ambient);
     const dir=new THREE.DirectionalLight(0xffb366,1.25); dir.position.set(-2.5,3.5,1.5); dir.castShadow=true; dir.shadow.mapSize.set(2048,2048); dir.shadow.radius=6; scene.add(dir);
@@ -451,27 +373,22 @@
 
     listener=new THREE.AudioListener(); camera.add(listener);
 
-    // Кнопка VR
-    const v = VRButton.createButton(renderer); document.getElementById('vrButton').appendChild(v);
+    // VR
+    const v=VRButton.createButton(renderer); document.getElementById('vrButton').appendChild(v);
     setupVRControllers();
 
     startBtn.addEventListener('click',()=>{
       overlay.style.display='none'; loading.style.display='grid';
       loadAll(p=>{progress.textContent=p+'%'; fill.style.width=p+'%';}).then(()=>{
         loading.classList.add('fade-out'); setTimeout(()=>{loading.remove();},900);
-        enableOrbit();
-        initQuoteUI();
+        enableOrbit(); initQuoteUI();
       });
     },{once:true});
 
     window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight);});
 
-    // loop
-    (function loop(){
-      requestAnimationFrame(loop);
-      activeControls?.update?.();
-      renderer.render(scene,camera);
-    })();
+    // единый цикл для 2D и VR
+    renderer.setAnimationLoop(()=>{ activeControls?.update?.(); renderer.render(scene,camera); });
   }
 
   window.addEventListener('load', init);
