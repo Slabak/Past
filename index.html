@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Комната — VR квест (жёсткие фиксы кликов/VR-фейд)</title>
+<title>Комната — VR квест (фикс опечатки в балках)</title>
 <style>
   html,body{height:100%;margin:0;overflow:hidden;background:#000}
   #overlay,#loading-screen{position:fixed;inset:0;display:grid;place-items:center;background:radial-gradient(circle at center,rgba(0,0,0,.85),#000);color:#fff;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;z-index:9999}
@@ -137,7 +137,7 @@
     });
   }
 
-  // ---------- 3D-лейблы / UI, НЕ зависят от света/тумана ----------
+  // ---------- 3D-лейблы / UI ----------
   function makeBasicMatFromCanvas(tex){ const m=new THREE.MeshBasicMaterial({map:tex,transparent:true,depthTest:false,toneMapped:false}); m.fog=false; return m; }
   function createLabel(text,{pad=12,fontSize=64,color='#000',bg='#ffd091',stroke='#000'}={}){
     const c=document.createElement('canvas'),ctx=c.getContext('2d');
@@ -221,7 +221,7 @@
   // ---------- ЗАКРЫТИЕ ПОРТАЛА ----------
   function ensureVRFadeAssets(){
     if(vrFadeSphere) return;
-    const geo=new THREE.SphereGeometry(30,16,12); // большая сфера
+    const geo=new THREE.SphereGeometry(30,16,12);
     const mat=new THREE.MeshBasicMaterial({color:0x000000,side:THREE.BackSide,transparent:true,opacity:0,toneMapped:false});
     mat.fog=false;
     vrFadeSphere=new THREE.Mesh(geo,mat);
@@ -234,16 +234,14 @@
     const m=createBillboard('Ищи следующий портал там, где вода бесконечна.');
     m.position.set(0,0,-1.4);
     m.quaternion.identity();
-    camera.add(m); // привязали к голове
+    camera.add(m);
     vrFinalBoard=m;
   }
 
   function closePortal(){
     if(sfxClose?.isPlaying) sfxClose.stop(); sfxClose?.play?.();
     try{ const sess=renderer.xr.getSession?.(); for(const S of (sess?.inputSources||[])){ S.gamepad?.hapticActuators?.[0]?.pulse?.(0.9,120);} }catch{}
-
     const inXR = renderer.xr.isPresenting === true;
-
     if(inXR){
       ensureVRFadeAssets();
       const start=performance.now(), dur=900;
@@ -277,7 +275,7 @@
       const tl=new THREE.TextureLoader(mng);
 
       const floorTex=tl.load('assets/textures/floor.jpg'); floorTex.colorSpace=THREE.SRGBColorSpace; floorTex.wrapS=floorTex.wrapT=THREE.RepeatWrapping; floorTex.repeat.set(2,2);
-      const wallTex=tl.load('assets/textures/wall.jpg?v=40'); wallTex.colorSpace=THREE.SRGBColorSpace; wallTex.wrapS=wallTex.wrapT=THREE.ClampToEdgeWrapping;
+      const wallTex=tl.load('assets/textures/wall.jpg?v=41'); wallTex.colorSpace=THREE.SRGBColorSpace; wallTex.wrapS=wallTex.wrapT=THREE.ClampToEdgeWrapping;
       const mirrorTex=tl.load('assets/textures/mirror.jpg'); mirrorTex.colorSpace=THREE.SRGBColorSpace;
       const ceilTex=tl.load('assets/textures/potolok.jpg'); ceilTex.colorSpace=THREE.SRGBColorSpace;
 
@@ -300,7 +298,7 @@
       const gltf=new THREE.GLTFLoader(mng);
 
       // сундук
-      gltf.load('assets/models/chest.glb?v=5',g=>{
+      gltf.load('assets/models/chest.glb?v=6',g=>{
         const chest=g.scene, b0=new THREE.Box3().setFromObject(chest); chest.position.sub(b0.getCenter(new THREE.Vector3()));
         const target=1.2*CHEST_SIZE_MULT, diag=b0.getSize(new THREE.Vector3()).length(); chest.scale.setScalar(diag>0?target/diag:1);
         const b1=new THREE.Box3().setFromObject(chest); chest.position.y-=b1.min.y;
@@ -308,7 +306,7 @@
       });
 
       // бочки (кликабельно)
-      gltf.load('assets/models/barrel.glb?v=5',g=>{
+      gltf.load('assets/models/barrel.glb?v=6',g=>{
         barrelsRef=g.scene;
         const b0=new THREE.Box3().setFromObject(barrelsRef); barrelsRef.position.sub(b0.getCenter(new THREE.Vector3()));
         const H=b0.getSize(new THREE.Vector3()).y||1; barrelsRef.scale.setScalar(BARRELS_TARGET_HEIGHT/H);
@@ -321,8 +319,8 @@
         interactables.add(barrelsRef);
       });
 
-      // стол + БОЛЬШОЙ хитбокс-куб (1.6×1.2×0.5) спереди
-      gltf.load('assets/models/table.glb?v=5',g=>{
+      // стол + хитбокс-куб (1.6×1.2×0.5)
+      gltf.load('assets/models/table.glb?v=6',g=>{
         tableRef=g.scene; const b0=new THREE.Box3().setFromObject(tableRef), c0=b0.getCenter(new THREE.Vector3()); tableRef.position.sub(c0);
         const s=(b0.getSize(new THREE.Vector3()).y>0)? 0.78 / b0.getSize(new THREE.Vector3()).y : 1; tableRef.scale.setScalar(s);
         const b1=new THREE.Box3().setFromObject(tableRef); tableRef.position.y-=b1.min.y;
@@ -343,8 +341,8 @@
         interactables.add(tableHotspot);
       });
 
-      // глобус (увеличен ~×1.5)
-      gltf.load('assets/models/globus.glb?v=5',g=>{
+      // глобус
+      gltf.load('assets/models/globus.glb?v=6',g=>{
         globeRef=g.scene;
         const b0=new THREE.Box3().setFromObject(globeRef); globeRef.position.sub(b0.getCenter(new THREE.Vector3()));
         const H=b0.getSize(new THREE.Vector3()).y||1;
@@ -365,7 +363,7 @@
       });
 
       // дверь — утоплена
-      gltf.load('assets/models/door.glb?v=6',g=>{
+      gltf.load('assets/models/door.glb?v=7',g=>{
         const door=g.scene;
         let box=new THREE.Box3().setFromObject(door);
         door.position.sub(box.getCenter(new THREE.Vector3()));
@@ -384,8 +382,8 @@
         roomGroup.add(door);
       });
 
-      // балки
-      gltf.load('assets/models/plank.glb?v=7',g=>{
+      // БАЛКИ — исправлены все имена BEAM_MITER_OVERLAP
+      gltf.load('assets/models/plank.glb?v=8',g=>{
         const root=g.scene;
         function prepareUnit(src){
           const box=new THREE.Box3().setFromObject(src); src.position.sub(box.getCenter(new THREE.Vector3()));
@@ -415,13 +413,13 @@
         spawnBetween(new THREE.Vector3(xR,y0,zB), new THREE.Vector3(xR,yT,zB));
         spawnBetween(new THREE.Vector3(xL,y0,zF), new THREE.Vector3(xL,yT,zF));
         spawnBetween(new THREE.Vector3(xR,y0,zF), new THREE.Vector3(xR,yT,zF));
-        spawnBetween(new THREE.Vector3(xL-BEAM_MITER_OVERLAP,yH_back,zB), new THREE.Vector3(xR+BEAM_MИТЕР_OVERЛAP,yH_back,zB));
-        spawnBetween(new THREE.Vector3(xL-BEAM_MИТЕР_OVERЛAP,yH,zF),      new THREE.Vector3(xR+BEAM_MИТЕР_OVERЛAP,yH,zF));
-        spawnBetween(new THREE.Vector3(xL,yH,zB-BEAM_MИТЕР_OVERЛAP),      new THREE.Vector3(xL,yH,zF+BEAM_MИТЕР_OVERЛAP));
-        spawnBetween(new THREE.Vector3(xR,yH,zB-BEAM_MИТЕР_OVERЛAP),      new THREE.Vector3(xR,yH,zF+BEAM_MИТЕР_OVERЛAP));
+        spawnBetween(new THREE.Vector3(xL-BEAM_MITER_OVERLAP,yH_back,zB), new THREE.Vector3(xR+BEAM_MITER_OVERLAP,yH_back,zB));
+        spawnBetween(new THREE.Vector3(xL-BEAM_MITER_OVERLAP,yH,zF),      new THREE.Vector3(xR+BEAM_MITER_OVERLAP,yH,zF));
+        spawnBetween(new THREE.Vector3(xL,yH,zB-BEAM_MITER_OVERLAP),      new THREE.Vector3(xL,yH,zF+BEAM_MITER_OVERLAP));
+        spawnBetween(new THREE.Vector3(xR,yH,zB-BEAM_MITER_OVERLAP),      new THREE.Vector3(xR,yH,zF+BEAM_MITER_OVERLAP));
       });
 
-      ensureInputPanel(); // панель точно существует
+      ensureInputPanel();
     });
   }
 
@@ -431,7 +429,7 @@
     oc.target.set(0,1.5,0); oc.enableZoom=false; oc.enablePan=false; oc.enableRotate=true;
     oc.minAzimuthAngle=-Infinity; oc.maxAzimuthAngle=Infinity;
     oc.minPolarAngle=THREE.MathUtils.degToRad(2); oc.maxPolarAngle=THREE.MathUtils.degToRad(178);
-    oc.enableDamping=true; oc.dampingFactor=.12; oc.rotateSpeed=-0.8; // «прокрутка» как в галерее
+    oc.enableDamping=true; oc.dampingFactor=.12; oc.rotateSpeed=-0.8;
     orbitControls=oc; activeControls=oc;
   }
 
@@ -474,7 +472,7 @@
     controller1=renderer.xr.getController(1);
     [controller0,controller1].forEach(c=>{
       const geo=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0),new THREE.Vector3(0,0,-1)]);
-      const line=new THREE.Line(geo,new THREE.LineBasicMaterial({color:0xffb366})); line.name='ray'; line.scale.z=12.0; c.add(line); // ДАЛЬШЕ ЛУЧ
+      const line=new THREE.Line(geo,new THREE.LineBasicMaterial({color:0xffb366})); line.name='ray'; line.scale.z=12.0; c.add(line);
       c.addEventListener('selectstart', onSelectStart);
     });
     scene.add(controller0); scene.add(controller1);
