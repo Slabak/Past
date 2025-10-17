@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Комната — портал, камера, сундук, бочки, балки, потолок и СТОЛ</title>
+  <title>Комната — портал, камера, сундук, бочки, стол, балки и потолок</title>
   <style>
     html, body { height:100%; margin:0; overflow:hidden; background:#000; }
     #overlay, #loading-screen {
@@ -73,6 +73,14 @@
     const BARRELS_Z             = -1.10;
     const BARRELS_ROT_LEFT_90   = true;
 
+    // БАЛКИ (plank.glb)
+    const BEAM_THICKNESS     = 0.24;                // 24 см — визуально вкусно
+    const BEAM_INSET_WALL    = 0.000;               // зазор от стены по X/Z
+    const BEAM_INSET_CEIL    = 0.000;               // зазор от потолка по Y
+    const POST_FLOOR_GAP     = 0.000;               // зазор от пола для стоек
+    const BEAM_MITER_OVERLAP = BEAM_THICKNESS * 1.3;// лёгкий нахлёст в стыках
+    const BACK_BEAM_RAISE    = 0.04;                // поднятие задней (над зеркалом), чтобы не было щели
+
     // ---- Глобальные ----
     let scene, camera, renderer;
     let orbitControls = null, deviceControls = null, activeControls = null;
@@ -119,7 +127,7 @@
       scene.background=new THREE.Color(0x100806);
       scene.fog=new THREE.Fog(0x1a0f0a,5,12);
 
-      // Камера ставим в центр комнаты (игрок на месте, только «вертит головой/пальцем»)
+      // Камера в центре комнаты
       camera=new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, .05, 50);
       camera.position.set(0,1.6,0);
 
@@ -178,14 +186,14 @@
     function enableOrbitControls(){
       if(deviceControls&&deviceControls.disconnect){ deviceControls.disconnect(); deviceControls=null; }
       if(!orbitControls){
-        orbitControls=new THREE.OrbitControls(camera, renderer.domElement);
-        orbitControls.target.set(0,1.5,0);
-        orbitControls.enableZoom=false; orbitControls.enablePan=false; orbitControls.enableRotate=true;
-        // 360° поворот и «скроллинговая» инверсия по пальцу
-        orbitControls.minAzimuthAngle=-Infinity; orbitControls.maxAzimuthAngle=Infinity;
-        orbitControls.minPolarAngle=THREE.MathUtils.degToRad(2); orbitControls.maxPolarAngle=THREE.MathUtils.degToRad(178);
-        orbitControls.enableDamping=true; orbitControls.dampingFactor=0.12; orbitControls.rotateSpeed=-0.8;
-        orbitControls.touches={ONE:THREE.TOUCH.ROTATE, TWO:THREE.TOUCH.DOLLY_PAN};
+        const oc=new THREE.OrbitControls(camera, renderer.domElement);
+        oc.target.set(0,1.5,0);
+        oc.enableZoom=false; oc.enablePan=false; oc.enableRotate=true;
+        oc.minAzimuthAngle=-Infinity; oc.maxAzimuthAngle=Infinity;
+        oc.minPolarAngle=THREE.MathUtils.degToRad(2); oc.maxPolarAngle=THREE.MathUtils.degToRad(178);
+        oc.enableDamping=true; oc.dampingFactor=0.12; oc.rotateSpeed=-0.8;
+        oc.touches={ONE:THREE.TOUCH.ROTATE, TWO:THREE.TOUCH.DOLLY_PAN};
+        orbitControls=oc;
       }
       activeControls=orbitControls;
     }
@@ -268,7 +276,7 @@
           fixMaterials(chest); scene.add(chest);
         }, undefined, e=>console.warn('Не удалось загрузить сундук:', e));
 
-        // Бочки (лёгкие версии; если одной нет — просто пропустится)
+        // Бочки
         const loadBarrels=url=>gltfLoader.load(url,(g)=>{
           const barrels=g.scene;
           const b0=new THREE.Box3().setFromObject(barrels); barrels.position.sub(b0.getCenter(new THREE.Vector3()));
@@ -280,11 +288,9 @@
         loadBarrels('assets/models/barrel_light.glb');
         loadBarrels('assets/models/barrel.glb');
 
-        // СТОЛ — новый объект под зеркалом у задней стены
+        // СТОЛ — под зеркалом у задней стены, по центру
         gltfLoader.load('assets/models/table.glb', (g)=>{
           const table = g.scene;
-
-          // материалы/тени
           table.traverse(o=>{
             if(o.isMesh){
               o.castShadow = true; o.receiveShadow = true;
@@ -298,36 +304,114 @@
             }
           });
 
-          // 1) центрируем
           const b0 = new THREE.Box3().setFromObject(table);
           const c0 = b0.getCenter(new THREE.Vector3());
           table.position.sub(c0);
 
-          // 2) масштаб до нормальной высоты ~0.78 м
           const TARGET_HEIGHT = 0.78;
           const size0 = b0.getSize(new THREE.Vector3());
           const s = (size0.y>0) ? TARGET_HEIGHT / size0.y : 1;
           table.scale.setScalar(s);
 
-          // 3) поставить на пол
           const b1 = new THREE.Box3().setFromObject(table);
           table.position.y -= b1.min.y;
 
-          // 4) подвинуть к задней стене (z = -d/2 + глубина/2 + небольшой зазор)
           const size1 = b1.getSize(new THREE.Vector3());
           const depth = size1.z;
-          const wallZ = -d/2 + (depth/2) + 0.02;   // зазор 2 см, чтобы не «влипало»
-          table.position.z = wallZ;
-
-          // 5) по центру под зеркалом (x = 0), вдоль стены (ось X)
-          table.position.x = 0;
-          table.rotation.y = 0; // вдоль задней стены, длинной стороной по X
+          const wallZ = -d/2 + (depth/2) + 0.02;
+          table.position.set(0, table.position.y, wallZ);
+          table.rotation.y = 0;
 
           fixMaterials(table);
           scene.add(table);
         }, undefined, e=>console.warn('Не удалось загрузить стол:', e));
 
-        // (Балки можно оставить как у тебя в рабочем «старом» index; чтобы ничего не ломать я их тут не трогаю)
+        // БАЛКИ — plank.glb
+        gltfLoader.load('assets/models/plank.glb',(g)=>{
+          const root=g.scene;
+
+          function prepareUnit(src){
+            // центрируем plank и определяем «длинную» ось, чтобы нормализовать по Y
+            const box=new THREE.Box3().setFromObject(src);
+            src.position.sub(box.getCenter(new THREE.Vector3()));
+            const s=box.getSize(new THREE.Vector3());
+            let axis='y';
+            if(s.x>=s.y && s.x>=s.z) axis='x';
+            else if(s.z>=s.y && s.z>=s.x) axis='z';
+            if(axis==='x') src.rotation.set(0,0,Math.PI/2);
+            else if(axis==='z') src.rotation.set(-Math.PI/2,0,0);
+
+            const box2=new THREE.Box3().setFromObject(src);
+            const lenY=Math.max(box2.getSize(new THREE.Vector3()).y,1e-6);
+            src.scale.multiplyScalar(1/lenY); // делаем «1м по Y»
+
+            const base=new THREE.Box3().setFromObject(src).getSize(new THREE.Vector3());
+            const baseX=Math.max(base.x,1e-6), baseZ=Math.max(base.z,1e-6);
+
+            const unit=new THREE.Group(); unit.add(src);
+
+            function spawnBetween(a,b,th=BEAM_THICKNESS){
+              const clone=unit.clone(true);
+              const dir=new THREE.Vector3().subVectors(b,a);
+              const len=dir.length(); if(len<1e-6) return null;
+              const mid=new THREE.Vector3().addVectors(a,b).multiplyScalar(0.5);
+
+              // scale.y = длина, x/z = толщина
+              clone.scale.set(th/baseX, len + BEAM_MITER_OVERLAP*2, th/baseZ);
+
+              const q=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), dir.clone().normalize());
+              clone.quaternion.copy(q);
+              clone.position.copy(mid);
+
+              clone.traverse(o=>{ if(o.isMesh){ o.castShadow=o.receiveShadow=true; } });
+              fixMaterials(clone);
+              scene.add(clone);
+              return clone;
+            }
+            return {spawnBetween};
+          }
+
+          const {spawnBetween}=prepareUnit(root);
+
+          const half = BEAM_THICKNESS * 0.5;
+          const xL = -w/2 + BEAM_INSET_WALL + half;
+          const xR =  w/2 - BEAM_INSET_WALL - half;
+          const zB = -d/2 + BEAM_INSET_WALL + half; // задняя
+          const zF =  d/2 - BEAM_INSET_WALL - half; // передняя
+
+          const y0 = 0 + POST_FLOOR_GAP + half;    // низ стоек (центр)
+          const yT = h - BEAM_INSET_CEIL - half;   // верх стоек (центр)
+          const yH = yT - half;                    // центр горизонтальных (общий)
+
+          // 4 вертикальные стойки (углы)
+          spawnBetween(new THREE.Vector3(xL,y0,zB), new THREE.Vector3(xL,yT,zB));
+          spawnBetween(new THREE.Vector3(xR,y0,zB), new THREE.Vector3(xR,yT,zB));
+          spawnBetween(new THREE.Vector3(xL,y0,zF), new THREE.Vector3(xL,yT,zF));
+          spawnBetween(new THREE.Vector3(xR,y0,zF), new THREE.Vector3(xR,yT,zF));
+
+          // Горизонтальные под потолком
+          const yH_back = yH + BACK_BEAM_RAISE; // над зеркалом — чуть выше
+          // задняя (над зеркалом)
+          spawnBetween(
+            new THREE.Vector3(xL-BEAM_MITER_OVERLAP,yH_back,zB),
+            new THREE.Vector3(xR+BEAM_MITER_OVERLAP,yH_back,zB)
+          );
+          // передняя
+          spawnBetween(
+            new THREE.Vector3(xL-BEAM_MITER_OVERLAP,yH,zF),
+            new THREE.Vector3(xR+BEAM_MITER_OVERLAP,yH,zF)
+          );
+          // левая
+          spawnBetween(
+            new THREE.Vector3(xL,yH,zB-BEAM_MITER_OVERLAP),
+            new THREE.Vector3(xL,yH,zF+BEAM_MITER_OVERLAP)
+          );
+          // правая
+          spawnBetween(
+            new THREE.Vector3(xR,yH,zB-BEAM_MITER_OVERLAP),
+            new THREE.Vector3(xR,yH,zF+BEAM_MITER_OVERLAP)
+          );
+        },undefined,(e)=>console.warn('Ошибка plank.glb',e));
 
         // safety-resolve (если какие-то ассеты висят, всё равно закроем портал)
         setTimeout(()=>resolve(), 12000);
