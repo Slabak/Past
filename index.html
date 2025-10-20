@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Комната — стабильная загрузка, VR, подсказка и клавиатура</title>
+<title>Комната — VR, подсказка и финал</title>
 <style>
   html,body{height:100%;margin:0;overflow:hidden;background:#000}
   #overlay,#loading{position:fixed;inset:0;display:grid;place-items:center;background:radial-gradient(circle at center,rgba(0,0,0,.85),#000);color:#fff;z-index:9999;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
@@ -61,27 +61,23 @@ const raycaster=new THREE.Raycaster(); raycaster.far=50;
 const pointer=new THREE.Vector2();
 const interactables=new Set(), pickables=[];
 let inputPanel=null,inputTextMesh=null,inputValue='';
-let notePanel=null, noteTimer=null;
-let tableHotspot=null, tableSuper=null, tableWallHot=null;
+let notePanel=null,noteMsg=null,noteBg=null,noteHideTimer=null;
+let tableHotspot=null, tableSuper=null;
 
 /* ---------- helpers ---------- */
 const $=s=>document.querySelector(s);
 const toast=(m,ms=1600)=>{const t=$('#toast');t.textContent=m;t.style.display='block';setTimeout(()=>t.style.display='none',ms);};
 function uiMat(opts={}){return new THREE.MeshBasicMaterial({transparent:true,depthTest:false,depthWrite:false,toneMapped:false,side:THREE.DoubleSide, ...opts});}
-function makeCanvasLabel(text,{pad=12,fontSize=64,color='#000',bg='#ffd091',stroke='#000'}={}){
-  const c=document.createElement('canvas'),x=c.getContext('2d');x.font=`bold ${fontSize}px system-ui,-apple-system,Segoe UI,Roboto`;
-  let tw=x.measureText(text).width;c.width=Math.ceil(tw+pad*2);c.height=Math.ceil(fontSize*1.6+pad*2);
+function makeCanvasLabel(text,{pad=14,fontSize=86,color='#ffe8c6',bg='#2a1a10',stroke='#614027'}={}){
+  const c=document.createElement('canvas'),x=c.getContext('2d');
+  x.font=`bold ${fontSize}px system-ui,-apple-system,Segoe UI,Roboto`;
+  let tw=x.measureText(text).width; c.width=Math.ceil(tw+pad*2); c.height=Math.ceil(fontSize*1.35+pad*2);
   x.fillStyle=bg;x.fillRect(0,0,c.width,c.height);
   if(stroke){x.lineWidth=4;x.strokeStyle=stroke;x.strokeRect(2,2,c.width-4,c.height-4);}
   x.fillStyle=color;x.textBaseline='middle';x.textAlign='left';x.fillText(text,pad,c.height/2);
-  const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;
-  const m=new THREE.Mesh(new THREE.PlaneGeometry(c.width/1000,c.height/1000),uiMat({map:tex}));
-  m.renderOrder=2001;m.frustumCulled=false;return m;
-}
-function billboard(text){const g=new THREE.Group();g.renderOrder=2001;g.frustumCulled=false;
-  const bg=new THREE.Mesh(new THREE.PlaneGeometry(1.4,0.5),uiMat({color:0x1a120c,opacity:.65}));bg.position.z=-.01;g.add(bg);
-  const msg=makeCanvasLabel(text,{fontSize:72,bg:'#2a1a10',color:'#ffe8c6',stroke:'#614027',pad:20});g.add(msg);
-  return g;
+  const tex=new THREE.CanvasTexture(c); tex.colorSpace=THREE.SRGBColorSpace;
+  const g=new THREE.Mesh(new THREE.PlaneGeometry(c.width/1200,c.height/1200),uiMat({map:tex,opacity:1}));
+  g.renderOrder=2001; g.frustumCulled=false; return g;
 }
 function fixMaterials(root){
   root.traverse(o=>{
@@ -125,47 +121,58 @@ function safeStartBGM(){
   }catch(e){}
 }
 
-/* ---------- подсказка (singleton) ---------- */
-function showNotePanel(text){
-  if(!notePanel){
-    notePanel=billboard(text);
-    scene.add(notePanel);
-  }else{
-    const old=notePanel.children.find(m=>m.material?.map);
-    if(old){ notePanel.remove(old); }
-    notePanel.add( makeCanvasLabel(text,{fontSize:72,bg:'#2a1a10',color:'#ffe8c6',stroke:'#614027',pad:20}) );
-    notePanel.visible=true;
-  }
-  const dir=new THREE.Vector3();camera.getWorldDirection(dir);
-  notePanel.position.copy(camera.position).addScaledVector(dir,1.1);
+/* ---------- компактная подсказка ---------- */
+function ensureNote(){
+  if(notePanel) return;
+  notePanel=new THREE.Group(); notePanel.renderOrder=2001; notePanel.frustumCulled=false;
+  noteBg = new THREE.Mesh(new THREE.PlaneGeometry(0.95,0.28), uiMat({color:0x1a120c,opacity:.75}));
+  noteBg.position.z=-.01; notePanel.add(noteBg);
+  noteMsg = makeCanvasLabel(' ',{fontSize:86});
+  notePanel.add(noteMsg);
+  scene.add(notePanel);
+}
+function showNote(text){
+  ensureNote();
+  // заменить надпись
+  notePanel.remove(noteMsg);
+  noteMsg = makeCanvasLabel(text,{fontSize:86});
+  notePanel.add(noteMsg);
+  // позиция перед камерой
+  const dir=new THREE.Vector3(); camera.getWorldDirection(dir);
+  notePanel.position.copy(camera.position).addScaledVector(dir,0.95);
   notePanel.quaternion.copy(camera.quaternion);
-  notePanel.renderOrder=2001; notePanel.frustumCulled=false;
-
-  if(noteTimer){ clearTimeout(noteTimer); noteTimer=null; }
-  noteTimer=setTimeout(()=>{
-    if(notePanel){ notePanel.visible=false; }
-  }, 3500);
+  // плавное появление и исчезновение
+  [noteBg.material,noteMsg.material].forEach(m=>m.opacity=1);
+  notePanel.visible=true;
+  if(noteHideTimer){clearTimeout(noteHideTimer);}
+  noteHideTimer=setTimeout(()=>{
+    const t0=performance.now(),dur=400;
+    (function fade(t){
+      const k=Math.min(1,(t-t0)/dur),op=1-k;
+      [noteBg.material,noteMsg.material].forEach(m=>m.opacity=op);
+      if(k<1) requestAnimationFrame(fade); else notePanel.visible=false;
+    })(performance.now());
+  },3000);
 }
 
-/* ---------- клавиатура (singleton) ---------- */
+/* ---------- VR-клавиатура ---------- */
 function ensureInputPanel(){
   if(inputPanel) return;
   const g=new THREE.Group(); g.visible=false; g.renderOrder=2001; g.frustumCulled=false;
-  const bg=new THREE.Mesh(new THREE.PlaneGeometry(1.2,0.7),uiMat({color:0x1a120c,opacity:.6})); bg.position.z=-.01; g.add(bg);
-  inputTextMesh=makeCanvasLabel(' ',{fontSize:72,bg:'#2a1a10',color:'#ffe8c6',stroke:'#614027',pad:16});
-  inputTextMesh.position.set(0,.22,0); g.add(inputTextMesh);
+  const bg=new THREE.Mesh(new THREE.PlaneGeometry(1.2,0.7),uiMat({color:0x1a120c,opacity:.55})); bg.position.z=-.01; g.add(bg);
+  inputTextMesh=makeCanvasLabel(' ',{fontSize:72}); inputTextMesh.position.set(0,.22,0); g.add(inputTextMesh);
 
   const rows=['ЙЦУКЕНГШЩЗХЪ','ФЫВАПРОЛДЖЭ','ЯЧСМИТЬБЮ']; let y=.08;
-  rows.forEach(row=>{const n=row.length;for(let i=0;i<n;i++){const k=row[i],m=makeCanvasLabel(k,{fontSize:52,bg:'#ffd091',color:'#000',stroke:'#000',pad:18});const sp=.085,st=-(n-1)*sp*.5;m.position.set(st+i*sp,y,0);m.userData.key=k;g.add(m);pickables.push(m);} y-=.11;});
-  const back=makeCanvasLabel('←',{fontSize:52,bg:'#ffd091',color:'#000',stroke:'#000',pad:18}); back.position.set(-.33,y,0); back.userData.key='←'; g.add(back); pickables.push(back);
-  const ok  =makeCanvasLabel('OK',{fontSize:52,bg:'#ffd091',color:'#000',stroke:'#000',pad:18}); ok.position.set(.33,y,0);  ok .userData.key='OK'; g.add(ok ); pickables.push(ok );
+  const addKey=(label,xp,yp)=>{const m=makeCanvasLabel(label,{fontSize:52,color:'#000',bg:'#ffd091',stroke:'#000'});m.position.set(xp,yp,0);m.userData.key=label;g.add(m);pickables.push(m);};
+  rows.forEach(row=>{const n=row.length;const sp=.085,st=-(n-1)*sp*.5;for(let i=0;i<n;i++) addKey(row[i],st+i*sp,y); y-=.11;});
+  addKey('←',-.33,y); addKey('OK',.33,y);
 
   inputPanel=g; scene.add(g);
 }
 function updateInputMesh(){
   ensureInputPanel();
   if(inputTextMesh && inputTextMesh.parent) inputPanel.remove(inputTextMesh);
-  inputTextMesh=makeCanvasLabel(inputValue.length?inputValue:' ',{fontSize:72,bg:'#2a1a10',color:'#ffe8c6',stroke:'#614027',pad:16});
+  inputTextMesh=makeCanvasLabel(inputValue.length?inputValue:' ',{fontSize:72});
   inputTextMesh.position.set(0,.22,0); inputPanel.add(inputTextMesh);
 }
 function showInputPanelInFrontOfCamera(){
@@ -182,21 +189,42 @@ function handleKey(k){
   if(k==='←'){ inputValue=inputValue.slice(0,-1); updateInputMesh(); return; }
   if(k==='OK'){
     inputPanel.visible=false;
-    if(norm(inputValue)===norm(SECRET)) closePortal(); else toast('Неверно. Подсказка в комнате…');
+    if(norm(inputValue)===norm(SECRET)) closePortalXR(); else toast('Неверно. Подсказка в комнате…');
     return;
   }
   inputValue+=k; updateInputMesh();
 }
 
-/* ---------- финал ---------- */
-function closePortal(){
+/* ---------- финал в XR ---------- */
+function closePortalXR(){
   try{ if(sfxClose?.isPlaying)sfxClose.stop(); sfxClose?.play?.(); }catch{}
-  try{ const s=renderer.xr.getSession?.(); for(const S of (s?.inputSources||[])){ S.gamepad?.hapticActuators?.[0]?.pulse?.(0.9,120) } }catch{}
-  const t0=performance.now(),dur=900,s0=roomGroup.scale.x||1;
-  const tick=t=>{const k=Math.min(1,(t-t0)/dur),s=THREE.MathUtils.lerp(s0,0.001,k); roomGroup.scale.setScalar(s); if(k<1)requestAnimationFrame(tick); else showFinalCard();};
-  requestAnimationFrame(tick);
+  try{ const s=renderer.xr.getSession?.(); for(const S of (s?.inputSources||[])){ S.gamepad?.hapticActuators?.[0]?.pulse?.(0.9,140) } }catch{}
+
+  // чёрный фейд прямо к глазам (прикрепим к камере)
+  const fade = new THREE.Mesh(new THREE.PlaneGeometry(4,3), uiMat({color:0x000000,opacity:0}));
+  fade.position.set(0,0,-0.8); camera.add(fade);
+
+  const t0=performance.now(),dur=1100,s0=roomGroup.scale.x||1,expo0=renderer.toneMappingExposure;
+  const prevLoop = renderer.getAnimationLoop(); // может быть null
+  renderer.setAnimationLoop((t)=>{
+    const k=Math.min(1,(t-t0)/dur);
+    const s = THREE.MathUtils.lerp(s0,0.001,k);
+    const e = THREE.MathUtils.lerp(expo0,0.85,k);
+    const op= Math.min(1,k*1.2);
+    roomGroup.scale.setScalar(s);
+    renderer.toneMappingExposure = e;
+    fade.material.opacity = op;
+    renderer.render(scene,camera);
+    if(k>=1){
+      renderer.setAnimationLoop(prevLoop||null);
+      // закончить XR-сессию и показать финальную карточку в плоском режиме
+      renderer.xr.getSession()?.end?.();
+      // убрать fade с камеры
+      camera.remove(fade); fade.geometry.dispose(); fade.material.dispose();
+      document.getElementById('final-note').style.display='grid';
+    }
+  });
 }
-function showFinalCard(){ $('#final-note').style.display='grid'; }
 
 /* ---------- загрузка ---------- */
 function makeManager(onDone,onProg){return new THREE.LoadingManager(onDone,(url,loaded,total)=>{ if(total>0){const p=Math.min(100,Math.floor(loaded/total*100)); onProg?.(p);} });}
@@ -231,7 +259,7 @@ function buildRoom(mng){
   mirror.position.set(0,1.5,-d/2+.01); roomGroup.add(mirror);
 }
 
-/* ---------- модели (лениво) ---------- */
+/* ---------- модели ---------- */
 function lazyModels(){
   const gltf=new THREE.GLTFLoader(); gltf.crossOrigin='anonymous';
 
@@ -255,7 +283,7 @@ function lazyModels(){
     fixMaterials(barrels); barrels.userData.interactive='barrels'; roomGroup.add(barrels); interactables.add(barrels);
   });
 
-  // стол: хитбоксы сразу
+  // стол: хитбоксы — ТОЛЬКО у стола
   addTableHotspots();
   withRetry(gltf.load.bind(gltf),'assets/models/table.glb?v=1',(g)=>{
     if(!g) return;
@@ -328,28 +356,21 @@ function lazyModels(){
   });
 }
 
-/* ---------- стол: хитбоксы ---------- */
+/* ---------- стол: хитбоксы только вокруг стола ---------- */
 function addTableHotspots(){
-  const hbGeo=new THREE.BoxGeometry(1.8,1.3,0.6);
+  const hbGeo=new THREE.BoxGeometry(1.6,1.0,0.55);
   const hbMat=uiMat({opacity:0.0});
   tableHotspot=new THREE.Mesh(hbGeo,hbMat);
-  tableHotspot.position.set(0, 1.0, -d/2 + 0.40);
+  tableHotspot.position.set(0, 1.0, -d/2 + 0.42);
   tableHotspot.userData.interactive='table';
   roomGroup.add(tableHotspot); interactables.add(tableHotspot);
 
-  const superGeo=new THREE.BoxGeometry(2.4,1.4,0.25);
+  const superGeo=new THREE.BoxGeometry(2.0,1.1,0.25);
   const superMat=uiMat({opacity:0.0});
   tableSuper=new THREE.Mesh(superGeo,superMat);
-  tableSuper.position.set(0, 1.0, -d/2 + 0.20);
+  tableSuper.position.set(0, 1.0, -d/2 + 0.25);
   tableSuper.userData.interactive='table';
   roomGroup.add(tableSuper); interactables.add(tableSuper);
-
-  const wallGeo=new THREE.PlaneGeometry(w*0.92, h*0.85);
-  const wallMatHot=uiMat({opacity:0.0});
-  tableWallHot=new THREE.Mesh(wallGeo, wallMatHot);
-  tableWallHot.position.set(0, h*0.55, -d/2 + 0.05);
-  tableWallHot.userData.interactive='table';
-  roomGroup.add(tableWallHot); interactables.add(tableWallHot);
 }
 
 /* ---------- ввод / клики ---------- */
@@ -377,13 +398,13 @@ function onSelectStart(e){
   if(obj.userData.key){ handleKey(obj.userData.key); return; }
   let p=obj; while(p){ if(interactables.has(p)) break; p=p.parent; }
   if(!p) return;
-  if(p.userData.interactive==='table'){ showNotePanel('В словах прошлого хранится свет, который ведет и вдохновляет тех, кто ищет путь'); }
+  if(p.userData.interactive==='table'){ showNote('В словах прошлого хранится свет, который ведет и вдохновляет тех, кто ищет путь'); }
   if(p.userData.interactive==='barrels'){ showInputPanelInFrontOfCamera(); }
 }
 function init2DClicks(){
   const canvas=renderer.domElement;
   function setPointer(ev){const r=canvas.getBoundingClientRect(),x=('clientX'in ev)?ev.clientX:ev.touches?.[0]?.clientX,y=('clientY'in ev)?ev.clientY:ev.touches?.[0]?.clientY;pointer.x=((x-r.left)/r.width)*2-1;pointer.y=-((y-r.top)/r.height)*2+1;}
-  function pick2D(){raycaster.setFromCamera(pointer,camera);const hits=raycaster.intersectObjects(listPickables(),true);if(!hits.length)return;let p=hits[0].object;while(p){if(interactables.has(p))break;p=p.parent;}if(!p)return;if(p.userData.interactive==='table'){showNotePanel('В словах прошлого хранится свет, который ведет и вдохновляет тех, кто ищет путь');}if(p.userData.interactive==='barrels'){showInputPanelInFrontOfCamera();}}
+  function pick2D(){raycaster.setFromCamera(pointer,camera);const hits=raycaster.intersectObjects(listPickables(),true);if(!hits.length)return;let p=hits[0].object;while(p){if(interactables.has(p))break;p=p.parent;}if(!p)return;if(p.userData.interactive==='table'){showNote('В словах прошлого хранится свет, который ведет и вдохновляет тех, кто ищет путь');}if(p.userData.interactive==='barrels'){showInputPanelInFrontOfCamera();}}
   canvas.addEventListener('click',e=>{setPointer(e);pick2D();});
   canvas.addEventListener('touchstart',e=>{setPointer(e);pick2D();},{passive:true});
 }
