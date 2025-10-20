@@ -11,13 +11,15 @@
       background: radial-gradient(ellipse at center, rgba(0,0,0,.75), rgba(0,0,0,.95));
       font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color:#fff;
     }
-    #overlay button {
-      font-size:16px; padding:12px 18px; border-radius:10px; border:none; cursor:pointer;
+    #overlay button { font-size:16px; padding:12px 18px; border-radius:10px; border:none; cursor:pointer; }
+    .hud { position:fixed; right:12px; top:10px; z-index:6; color:#aaa; font:12px/1.2 system-ui, Arial; opacity:.6; user-select:none; }
+    /* встроенная кнопка VR */
+    .vr-btn {
+      position: fixed; left: 12px; bottom: 12px; z-index: 6;
+      background:#1e1e1e; color:#fff; border:1px solid #444; border-radius:8px;
+      padding:10px 14px; font:14px/1 system-ui, Arial; cursor:pointer; user-select:none;
     }
-    .hud {
-      position:fixed; right:12px; top:10px; z-index:6; color:#aaa; font:12px/1.2 system-ui, Arial;
-      opacity:.6; user-select:none;
-    }
+    .vr-btn[disabled]{ opacity:.4; cursor:not-allowed; }
   </style>
 </head>
 <body>
@@ -30,647 +32,387 @@
   </div>
   <div class="hud">Управление: лучом наведись на стол/бочку и нажми триггер</div>
 
-  <!-- локальные скрипты, как у тебя в проекте -->
+  <!-- твои локальные скрипты -->
   <script src="assets/js/three.min.js"></script>
   <script src="assets/js/OrbitControls.js"></script>
   <script src="assets/js/GLTFLoader.js"></script>
-  <script src="assets/js/VRButton.js"></script>
 
 <script>
 /* ===========================
+   ВСТРОЕННЫЙ VR BUTTON (без внешнего файла)
+   =========================== */
+function createSimpleVRButton(renderer){
+  const btn = document.createElement('button');
+  btn.className = 'vr-btn';
+  btn.textContent = 'Войти в VR';
+
+  if (!('xr' in navigator)) {
+    btn.textContent = 'VR не поддерживается';
+    btn.disabled = true;
+    return btn;
+  }
+
+  let currentSession = null;
+
+  async function onSessionEnded(){
+    currentSession.removeEventListener('end', onSessionEnded);
+    currentSession = null;
+    btn.textContent = 'Войти в VR';
+  }
+
+  async function onSessionStarted(session){
+    session.addEventListener('end', onSessionEnded);
+    await renderer.xr.setSession(session);
+    currentSession = session;
+    btn.textContent = 'Выйти из VR';
+  }
+
+  btn.addEventListener('click', async () => {
+    try{
+      if (!currentSession){
+        const sessionInit = { requiredFeatures: ['local-floor'] };
+        const session = await navigator.xr.requestSession('immersive-vr', sessionInit);
+        onSessionStarted(session);
+      } else {
+        await currentSession.end();
+      }
+    }catch(e){
+      console.warn('XR error:', e);
+    }
+  });
+
+  return btn;
+}
+
+/* ===========================
    КОНСТАНТЫ / НАСТРОЙКИ
    =========================== */
+const ROOM_W=4, ROOM_D=4, ROOM_H=3;
 
-// размеры комнаты (метры)
-const ROOM_W = 4, ROOM_D = 4, ROOM_H = 3;
+const TEX_FLOOR='assets/textures/floor.jpg';
+const TEX_WALL ='assets/textures/wall.jpg';
+const TEX_CEIL ='assets/textures/potolok.jpg';
+const MUSIC_MP3='assets/music/music.mp3';
 
-// пути к ресурсам (проверь у себя)
-const TEX_FLOOR  = 'assets/textures/floor.jpg';
-const TEX_WALL   = 'assets/textures/wall.jpg';
-const TEX_CEIL   = 'assets/textures/potolok.jpg';
-const TEX_NOTE   = null; // не нужен; текст рисуем на canvas
+const MODEL_TABLE ='assets/models/table.glb';
+const MODEL_BARREL='assets/models/barrel.glb';
+const MODEL_DOOR  ='assets/models/door.glb';
 
-const MUSIC_MP3  = 'assets/music/music.mp3';
+const POS_TABLE  = new THREE.Vector3( 0.0, 0.0, -ROOM_D/2 + 0.55);
+const POS_BARREL = new THREE.Vector3(-ROOM_W/2 + 0.65, 0.0,  1.10);
+const POS_DOOR   = new THREE.Vector3( 0.0, 0.0,  ROOM_D/2 - 0.01);
 
-// модели (если имена другие — поправь)
-const MODEL_TABLE  = 'assets/models/table.glb';
-const MODEL_BARREL = 'assets/models/barrel.glb';
-const MODEL_DOOR   = 'assets/models/door.glb';
-
-// позиции объектов (правь под свой сетап)
-const POS_TABLE  = new THREE.Vector3( 0.0, 0.0, -ROOM_D/2 + 0.55); // у задней стены (с «зеркалом»)
-const POS_BARREL = new THREE.Vector3(-ROOM_W/2 + 0.65, 0.0,  1.10); // у левой стены, ближе к камере
-const POS_DOOR   = new THREE.Vector3( 0.0, 0.0,  ROOM_D/2 - 0.01);  // вплотную к передней стене
-
-// слово-ключ
-const SECRET_WORD = 'ВЕРА';
-
-// флаги
-const USE_ORBIT = true;   // на десктопе — мышью крутить
-const SHOW_BEAMS = false; // если захочешь — сделаем позже
+const SECRET_WORD='ВЕРА';
+const USE_ORBIT=true;
 
 /* ===========================
    ОСНОВА СЦЕНЫ
    =========================== */
+let scene,camera,renderer,controls,listener,bgm;
+const raycaster=new THREE.Raycaster(), tempVec3=new THREE.Vector3();
+let xrControllerR,xrControllerL,reticleR,reticleL;
+let tableMesh=null, barrelMesh=null;
+let notePanel=null, keyboardPanel=null, fadeQuad=null;
+let collapsing=false;
+let hitboxTable=null, hitboxBarrel=null;
+let audioReady=false;
+let xrPickStart=null;
 
-let scene, camera, renderer, controls;
-let listener, bgm;
-let clock = new THREE.Clock();
+function init(){
+  scene=new THREE.Scene();
+  scene.background=new THREE.Color(0x0b0706);
+  scene.fog=new THREE.Fog(0x120b08,6,14);
 
-const raycaster = new THREE.Raycaster();
-const tempVec3 = new THREE.Vector3();
+  camera=new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.05, 100);
+  camera.position.set(0,1.6,2.8);
 
-let xrControllerR, xrControllerL;
-let reticleR, reticleL; // маленькие «точки» на луче
-
-let tableMesh = null;     // опорные ссылки
-let barrelMesh = null;
-let notePanel = null;     // плашка-надпись
-let keyboardPanel = null; // панель букв
-let fadeQuad = null;      // затемнение для «всхлопа»
-let collapsing = false;   // флаг анимации финала
-
-// хитбоксы
-let hitboxTable = null;
-let hitboxBarrel = null;
-
-// аудио разрешение
-let audioReady = false;
-
-function init() {
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0b0706);
-  scene.fog = new THREE.Fog(0x120b08, 6, 14);
-
-  camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.05, 100);
-  camera.position.set(0, 1.6, 2.8);
-
-  renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-  renderer.setSize(innerWidth, innerHeight);
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer=new THREE.WebGLRenderer({antialias:true});
+  renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+  renderer.setSize(innerWidth,innerHeight);
+  renderer.outputColorSpace=THREE.SRGBColorSpace;
+  renderer.toneMapping=THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure=1.05;
+  renderer.shadowMap.enabled=true;
+  renderer.shadowMap.type=THREE.PCFSoftShadowMap;
   document.body.appendChild(renderer.domElement);
 
-  // VR
-  document.body.appendChild(VRButton.createButton(renderer));
-  renderer.xr.enabled = true;
+  // Включаем XR и добавляем встроенную кнопку
+  renderer.xr.enabled=true;
+  document.body.appendChild(createSimpleVRButton(renderer));
 
-  // Контролы для десктопа
-  if (USE_ORBIT) {
-    controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.target.set(0, 1.2, 0);
-    controls.enableDamping = true;
+  if(USE_ORBIT){
+    controls=new THREE.OrbitControls(camera, renderer.domElement);
+    controls.target.set(0,1.2,0);
+    controls.enableDamping=true;
   }
 
-  // Свет
-  const hemi = new THREE.HemisphereLight(0xffdcb8, 0x1b0e0a, 0.4);
-  scene.add(hemi);
+  const hemi=new THREE.HemisphereLight(0xffdcb8,0x1b0e0a,0.4); scene.add(hemi);
+  const amb =new THREE.AmbientLight(0xffe0bb,0.18); scene.add(amb);
+  const dir =new THREE.DirectionalLight(0xffb06a,1.2);
+  dir.position.set(-2.5,3.2,1.5); dir.castShadow=true; dir.shadow.mapSize.set(2048,2048); dir.shadow.radius=6; scene.add(dir);
+  const candle=new THREE.PointLight(0xffa860,.65,5.0); candle.position.set(-1.4,1.15,1.1); scene.add(candle);
 
-  const amb  = new THREE.AmbientLight(0xffe0bb, 0.18);
-  scene.add(amb);
+  const tl=new THREE.TextureLoader();
+  const floorTex=tl.load(TEX_FLOOR); floorTex.wrapS=floorTex.wrapT=THREE.RepeatWrapping; floorTex.repeat.set(2,2); floorTex.colorSpace=THREE.SRGBColorSpace;
+  const wallTex =tl.load(TEX_WALL ); wallTex.wrapS=wallTex.wrapT=THREE.ClampToEdgeWrapping; wallTex.colorSpace=THREE.SRGBColorSpace;
+  const ceilTex =tl.load(TEX_CEIL ); ceilTex.wrapS=ceilTex.wrapT=THREE.RepeatWrapping; ceilTex.repeat.set(2,2); ceilTex.colorSpace=THREE.SRGBColorSpace;
 
-  const dir  = new THREE.DirectionalLight(0xffb06a, 1.2);
-  dir.position.set(-2.5, 3.2, 1.5);
-  dir.castShadow = true; dir.shadow.mapSize.set(2048, 2048);
-  dir.shadow.radius = 6;
-  scene.add(dir);
+  const floor=new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W,ROOM_D), new THREE.MeshStandardMaterial({map:floorTex,roughness:.9}));
+  floor.rotation.x=-Math.PI/2; floor.receiveShadow=true; scene.add(floor);
 
-  const candle = new THREE.PointLight(0xffa860, .65, 5.0);
-  candle.position.set(-1.4, 1.15, 1.1);
-  scene.add(candle);
+  const wallMat=new THREE.MeshStandardMaterial({map:wallTex,roughness:1.0});
+  const back=new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W,ROOM_H), wallMat); back.position.set(0,ROOM_H/2,-ROOM_D/2); scene.add(back);
+  const front=new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W,ROOM_H), wallMat); front.position.set(0,ROOM_H/2,ROOM_D/2); front.rotation.y=Math.PI; scene.add(front);
+  const left=new THREE.Mesh(new THREE.PlaneGeometry(ROOM_D,ROOM_H), wallMat); left.position.set(-ROOM_W/2,ROOM_H/2,0); left.rotation.y=Math.PI/2; scene.add(left);
+  const right=new THREE.Mesh(new THREE.PlaneGeometry(ROOM_D,ROOM_H), wallMat); right.position.set( ROOM_W/2,ROOM_H/2,0); right.rotation.y=-Math.PI/2; scene.add(right);
 
-  // Текстуры
-  const tl = new THREE.TextureLoader();
-  const floorTex = tl.load(TEX_FLOOR);  floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping; floorTex.repeat.set(2,2); floorTex.colorSpace = THREE.SRGBColorSpace;
-  const wallTex  = tl.load(TEX_WALL);   wallTex.wrapS = wallTex.wrapT = THREE.ClampToEdgeWrapping; wallTex.colorSpace = THREE.SRGBColorSpace;
-  const ceilTex  = tl.load(TEX_CEIL);   ceilTex.wrapS = ceilTex.wrapT = THREE.RepeatWrapping; ceilTex.repeat.set(2,2); ceilTex.colorSpace = THREE.SRGBColorSpace;
+  const ceil=new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W,ROOM_D), new THREE.MeshStandardMaterial({map:ceilTex,roughness:.8}));
+  ceil.position.set(0,ROOM_H,0); ceil.rotation.x=Math.PI/2; ceil.receiveShadow=true; scene.add(ceil);
 
-  // Пол
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_D), new THREE.MeshStandardMaterial({ map: floorTex, roughness:.9 }));
-  floor.rotation.x = -Math.PI/2; floor.receiveShadow = true; scene.add(floor);
+  listener=new THREE.AudioListener(); camera.add(listener);
+  bgm=new THREE.Audio(listener);
 
-  // Стены
-  const wallMatZ = new THREE.MeshStandardMaterial({ map: wallTex, roughness:1.0 });
-  const wallMatX = wallMatZ;
-
-  const back  = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_H), wallMatZ);
-  back.position.set(0, ROOM_H/2, -ROOM_D/2);
-  scene.add(back);
-
-  const front = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_H), wallMatZ);
-  front.position.set(0, ROOM_H/2,  ROOM_D/2);
-  front.rotation.y = Math.PI; scene.add(front);
-
-  const left  = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_D, ROOM_H), wallMatX);
-  left.position.set(-ROOM_W/2, ROOM_H/2, 0);
-  left.rotation.y =  Math.PI/2; scene.add(left);
-
-  const right = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_D, ROOM_H), wallMatX);
-  right.position.set( ROOM_W/2, ROOM_H/2, 0);
-  right.rotation.y = -Math.PI/2; scene.add(right);
-
-  // Потолок
-  const ceil = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_D), new THREE.MeshStandardMaterial({ map: ceilTex, roughness:.8, metalness:0 }));
-  ceil.position.set(0, ROOM_H, 0);
-  ceil.rotation.x = Math.PI/2; ceil.receiveShadow = true; scene.add(ceil);
-
-  // Аудио
-  listener = new THREE.AudioListener(); camera.add(listener);
-  bgm = new THREE.Audio(listener);
-
-  // XR-контроллеры
   setupXRControllers();
+  fadeQuad=makeFadeQuad(); scene.add(fadeQuad);
 
-  // Тёмный квад для финального эффекта
-  fadeQuad = makeFadeQuad();
-  scene.add(fadeQuad);
-
-  // Загрузка объектов
   loadAll();
 
-  // resize
   addEventListener('resize', onResize);
-
-  // анимация
   renderer.setAnimationLoop(tick);
 
-  // кнопка входа
-  document.getElementById('enter').addEventListener('click', startLoadFlow, { once:true });
+  document.getElementById('enter').addEventListener('click', startLoadFlow, {once:true});
 }
 
-function onResize(){
-  camera.aspect = innerWidth/innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
-}
+function onResize(){ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); }
 
-/* ===========================
-   XR КОНТРОЛЛЕРЫ + РЕЙКАСТ
-   =========================== */
-
+/* XR контроллеры */
 function setupXRControllers(){
-  const makeController = (handedness) => {
-    const ctrl = renderer.xr.getController(handedness === 'left' ? 0 : 1);
-    scene.add(ctrl);
-
-    const lineGeom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
-    const lineMat  = new THREE.LineBasicMaterial({ color:0xffe0bb, transparent:true, opacity:.9 });
-    const line = new THREE.Line(lineGeom, lineMat);
-    line.scale.z = 1.8;
-    ctrl.add(line);
-
-    // маленькая точка-ретикл
-    const dot = new THREE.Mesh(new THREE.SphereGeometry(0.01, 12, 12), new THREE.MeshBasicMaterial({ color:0xffffff }));
-    dot.position.z = -1.8;
-    ctrl.add(dot);
-
-    ctrl.addEventListener('selectstart', () => onSelect(ctrl));
-    return { ctrl, dot };
+  const make=(idx)=>{
+    const ctrl=renderer.xr.getController(idx); scene.add(ctrl);
+    const lineGeom=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
+    const line=new THREE.Line(lineGeom, new THREE.LineBasicMaterial({color:0xffe0bb,transparent:true,opacity:.9}));
+    line.scale.z=1.8; ctrl.add(line);
+    const dot=new THREE.Mesh(new THREE.SphereGeometry(0.01,12,12), new THREE.MeshBasicMaterial({color:0xffffff}));
+    dot.position.z=-1.8; ctrl.add(dot);
+    ctrl.addEventListener('selectstart', ()=>onSelect(ctrl));
+    return {ctrl, dot};
   };
-
-  const R = makeController('right'); xrControllerR = R.ctrl; reticleR = R.dot;
-  const L = makeController('left');  xrControllerL = L.ctrl; reticleL = L.dot;
+  const L=make(0); xrControllerL=L.ctrl; reticleL=L.dot;
+  const R=make(1); xrControllerR=R.ctrl; reticleR=R.dot;
 }
 
 function onSelect(ctrl){
-  // рейкаст от контроллера
-  const m = ctrl.matrixWorld;
-  const dir = new THREE.Vector3(0,0,-1).applyMatrix4(new THREE.Matrix4().extractRotation(m));
-  const origin = new THREE.Vector3().setFromMatrixPosition(m);
+  const m=ctrl.matrixWorld;
+  const dir=new THREE.Vector3(0,0,-1).applyMatrix4(new THREE.Matrix4().extractRotation(m));
+  const origin=new THREE.Vector3().setFromMatrixPosition(m);
   raycaster.set(origin, dir);
 
-  const candidates = [];
-  if (hitboxTable)  candidates.push(hitboxTable);
-  if (hitboxBarrel) candidates.push(hitboxBarrel);
-
-  const hit = raycaster.intersectObjects(candidates, false)[0];
-  if (!hit) return;
-
-  const obj = hit.object.userData?.type;
-  if (obj === 'table') {
-    showNotePanel('В словах прошлого хранится свет,\nкоторый ведёт и вдохновляет тех,\nкто ищет путь.');
-  } else if (obj === 'barrel') {
-    showKeyboardPanel();
-  }
+  const arr=[]; if(hitboxTable)arr.push(hitboxTable); if(hitboxBarrel)arr.push(hitboxBarrel);
+  const hit=raycaster.intersectObjects(arr,false)[0]; if(!hit) return;
+  const t=hit.object.userData?.type;
+  if(t==='table') showNotePanel('В словах прошлого хранится свет,\nкоторый ведёт и вдохновляет тех,\nкто ищет путь.');
+  else if(t==='barrel') showKeyboardPanel();
 }
 
-/* ===========================
-   ЗАГРУЗКА МОДЕЛЕЙ
-   =========================== */
-
+/* Загрузка моделей */
 function loadAll(){
-  const loader = new THREE.GLTFLoader();
+  const loader=new THREE.GLTFLoader();
 
-  // СТОЛ
-  loader.load(MODEL_TABLE, (gltf)=>{
-    const g = gltf.scene;
-    g.traverse(o=>{ if(o.isMesh){ o.castShadow=o.receiveShadow=true; }});
-    fitOnFloor(g, 1.2);    // нормализуем и ставим на пол
-    g.position.copy(POS_TABLE);
-    g.rotation.y = 0;
-    scene.add(g);
-    tableMesh = g;
+  loader.load(MODEL_TABLE,(gltf)=>{
+    const g=gltf.scene; g.traverse(o=>{ if(o.isMesh){o.castShadow=o.receiveShadow=true;}});
+    fitOnFloor(g,1.2); g.position.copy(POS_TABLE); scene.add(g); tableMesh=g;
 
-    // хитбокс — аккуратно над столешницей
-    const hb = new THREE.Mesh(
-      new THREE.BoxGeometry(1.2, 0.5, 0.6),
-      new THREE.MeshBasicMaterial({ visible:false })
-    );
-    hb.position.set(POS_TABLE.x, 0.95, POS_TABLE.z);
-    hb.userData.type = 'table';
-    scene.add(hb);
-    hitboxTable = hb;
+    const hb=new THREE.Mesh(new THREE.BoxGeometry(1.2,0.5,0.6), new THREE.MeshBasicMaterial({visible:false}));
+    hb.position.set(POS_TABLE.x,0.95,POS_TABLE.z); hb.userData.type='table'; scene.add(hb); hitboxTable=hb;
   });
 
-  // БОЧКА
-  loader.load(MODEL_BARREL, (gltf)=>{
-    const g = gltf.scene;
-    g.traverse(o=>{ if(o.isMesh){ o.castShadow=o.receiveShadow=true; }});
-    fitOnFloor(g, 0.9);
-    g.position.copy(POS_BARREL);
-    g.rotation.y = Math.PI * 0.5;
-    scene.add(g);
-    barrelMesh = g;
+  loader.load(MODEL_BARREL,(gltf)=>{
+    const g=gltf.scene; g.traverse(o=>{ if(o.isMesh){o.castShadow=o.receiveShadow=true;}});
+    fitOnFloor(g,0.9); g.position.copy(POS_BARREL); g.rotation.y=Math.PI*0.5; scene.add(g); barrelMesh=g;
 
-    const hb = new THREE.Mesh(
-      new THREE.BoxGeometry(0.7, 1.0, 0.7),
-      new THREE.MeshBasicMaterial({ visible:false })
-    );
-    hb.position.set(POS_BARREL.x, 0.8, POS_BARREL.z);
-    hb.userData.type = 'barrel';
-    scene.add(hb);
-    hitboxBarrel = hb;
+    const hb=new THREE.Mesh(new THREE.BoxGeometry(0.7,1.0,0.7), new THREE.MeshBasicMaterial({visible:false}));
+    hb.position.set(POS_BARREL.x,0.8,POS_BARREL.z); hb.userData.type='barrel'; scene.add(hb); hitboxBarrel=hb;
   });
 
-  // ДВЕРЬ (вплотную к стене)
-  loader.load(MODEL_DOOR, (gltf)=>{
-    const g = gltf.scene;
-    g.traverse(o=>{ if(o.isMesh){ o.castShadow=o.receiveShadow=true; }});
-    fitOnFloor(g, 1.9);
-    g.position.copy(POS_DOOR);
-    g.rotation.y = Math.PI; // лицом в комнату
-    // утопим на пару мм, чтобы точно вплотную
-    g.position.z =  ROOM_D/2 - 0.005;
-    scene.add(g);
+  loader.load(MODEL_DOOR,(gltf)=>{
+    const g=gltf.scene; g.traverse(o=>{ if(o.isMesh){o.castShadow=o.receiveShadow=true;}});
+    fitOnFloor(g,1.9); g.position.copy(POS_DOOR); g.rotation.y=Math.PI; g.position.z=ROOM_D/2 - 0.005; scene.add(g);
   });
 }
 
-// масштаб до заданной диагонали + на пол
-function fitOnFloor(root, targetDiag){
-  const b = new THREE.Box3().setFromObject(root);
-  const s = b.getSize(new THREE.Vector3());
-  const diag = s.length() || 1;
-  const k = targetDiag / diag;
+function fitOnFloor(root,targetDiag){
+  const b=new THREE.Box3().setFromObject(root), s=b.getSize(new THREE.Vector3());
+  const diag=s.length()||1, k=targetDiag/diag;
   root.scale.setScalar(k);
-
-  // пересчёт и поставить основание на y=0
-  const b2 = new THREE.Box3().setFromObject(root);
+  const b2=new THREE.Box3().setFromObject(root);
   root.position.sub(b2.getCenter(new THREE.Vector3()));
-  const b3 = new THREE.Box3().setFromObject(root);
+  const b3=new THREE.Box3().setFromObject(root);
   root.position.y -= b3.min.y;
 }
 
-/* ===========================
-   ПАНЕЛЬ-НАДПИСЬ (стол)
-   =========================== */
+/* Плашка-надпись (стол) */
 function showNotePanel(text){
-  // если уже есть — убрать
-  if (notePanel && notePanel.parent) notePanel.parent.remove(notePanel);
+  if(notePanel && notePanel.parent) notePanel.parent.remove(notePanel);
 
-  // канвас → текстура
-  const canvas = document.createElement('canvas');
-  canvas.width = 1024; canvas.height = 512;
-  const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#2a1a14';
-  ctx.globalAlpha = 0.88;
-  ctx.fillRect(0,0,canvas.width, canvas.height);
+  const canvas=document.createElement('canvas'); canvas.width=1024; canvas.height=512;
+  const ctx=canvas.getContext('2d');
+  ctx.fillStyle='#2a1a14'; ctx.globalAlpha=.88; ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.globalAlpha=1; ctx.fillStyle='#f7e1c0'; ctx.font='bold 54px system-ui, Arial'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  const lines=(''+text).split('\n'); const cx=canvas.width/2, cy=canvas.height/2, lh=68;
+  lines.forEach((ln,i)=>ctx.fillText(ln,cx,cy+(i-(lines.length-1)/2)*lh));
+  const tex=new THREE.CanvasTexture(canvas); tex.colorSpace=THREE.SRGBColorSpace;
 
-  ctx.globalAlpha = 1.0;
-  ctx.fillStyle = '#f7e1c0';
-  ctx.font = 'bold 54px system-ui, Arial';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-
-  const lines = (''+text).split('\n');
-  const cx = canvas.width/2, cy = canvas.height/2;
-  const lh = 68;
-  lines.forEach((ln, i)=>{
-    ctx.fillText(ln, cx, cy + (i - (lines.length-1)/2)*lh);
-  });
-
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-
-  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent:true, opacity: 0.0 });
-  const geo = new THREE.PlaneGeometry(0.95, 0.48);
-  notePanel = new THREE.Mesh(geo, mat);
-
-  // ставим перед камерой
-  const dist = 0.9;
-  tempVec3.set(0, 0, -dist).applyQuaternion(camera.quaternion).add(camera.position);
-  notePanel.position.copy(tempVec3);
-  notePanel.quaternion.copy(camera.quaternion);
-
+  notePanel=new THREE.Mesh(new THREE.PlaneGeometry(0.95,0.48), new THREE.MeshBasicMaterial({map:tex,transparent:true,opacity:0}));
+  const dist=0.9; tempVec3.set(0,0,-dist).applyQuaternion(camera.quaternion).add(camera.position);
+  notePanel.position.copy(tempVec3); notePanel.quaternion.copy(camera.quaternion);
   scene.add(notePanel);
 
-  // плавное появление → 3с → исчезновение
-  const t0 = performance.now();
-  const fadeIn = () => {
-    const t = (performance.now() - t0)/300; // 300ms
-    notePanel.material.opacity = Math.min(1, t);
-    if (t < 1) requestAnimationFrame(fadeIn);
-    else setTimeout(fadeOut, 2500);
-  };
-  const fadeOut = () => {
-    const t1 = performance.now();
-    const go = ()=>{
-      const t = (performance.now() - t1)/400;
-      notePanel.material.opacity = Math.max(0, 1 - t);
-      if (t < 1) requestAnimationFrame(go);
-      else { if (notePanel.parent) notePanel.parent.remove(notePanel); notePanel = null; }
-    };
-    go();
-  };
+  const t0=performance.now();
+  const fadeIn=()=>{ const t=(performance.now()-t0)/300; notePanel.material.opacity=Math.min(1,t); if(t<1) requestAnimationFrame(fadeIn); else setTimeout(fadeOut,2500); };
+  const fadeOut=()=>{ const t1=performance.now(); const go=()=>{ const t=(performance.now()-t1)/400; notePanel.material.opacity=Math.max(0,1-t); if(t<1) requestAnimationFrame(go); else { if(notePanel.parent) notePanel.parent.remove(notePanel); notePanel=null; } }; go(); };
   fadeIn();
 }
 
-/* ===========================
-   КЛАВИАТУРА (бочка)
-   =========================== */
-let keyboardState = { value: '', group:null, bg:null };
+/* Клавиатура (бочка) */
+let keyboardState={value:'', group:null, bg:null, inputText:null};
 
 function showKeyboardPanel(){
-  closeKeyboard(); // если уже открыта
+  closeKeyboard();
+  const g=new THREE.Group(); keyboardState.group=g;
 
-  const g = new THREE.Group(); keyboardState.group = g;
+  const bg=new THREE.Mesh(new THREE.PlaneGeometry(1.1,0.55), new THREE.MeshBasicMaterial({color:0x1f1410,transparent:true,opacity:0.6}));
+  g.add(bg); keyboardState.bg=bg;
 
-  // полупрозрачный фон
-  const bg = new THREE.Mesh(
-    new THREE.PlaneGeometry(1.1, 0.55),
-    new THREE.MeshBasicMaterial({ color:0x1f1410, transparent:true, opacity:0.6 })
-  );
-  g.add(bg); keyboardState.bg = bg;
+  const letters='ЙЦУКЕНГШЩЗХЪ|ФЫВАПРОЛДЖЭ|ЯЧСМИТЬБЮ|ОК←';
+  const rows=letters.split('|'); const keyW=.08,keyH=.08,gap=.01;
 
-  // кнопки
-  const letters = 'ЙЦУКЕНГШЩЗХЪ|ФЫВАПРОЛДЖЭ|ЯЧСМИТЬБЮ|ОК←';
-  const rows = letters.split('|');
-  const keyW = 0.08, keyH = 0.08, gap = 0.01;
+  function makeKey(ch){
+    const m=new THREE.Mesh(new THREE.PlaneGeometry(keyW,keyH), new THREE.MeshBasicMaterial({color:0x3a281f,transparent:true,opacity:.85}));
+    m.userData.char=ch;
+    const c=document.createElement('canvas'); c.width=256; c.height=256;
+    const cx=c.getContext('2d'); cx.fillStyle='#3a281f'; cx.fillRect(0,0,256,256); cx.fillStyle='#f7e1c0'; cx.font='bold 140px system-ui, Arial'; cx.textAlign='center'; cx.textBaseline='middle'; cx.fillText(ch,128,132);
+    const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace;
+    const txt=new THREE.Mesh(new THREE.PlaneGeometry(keyW*.9,keyH*.9), new THREE.MeshBasicMaterial({map:t,transparent:true,opacity:.95}));
+    txt.position.z=.001; m.add(txt); return m;
+  }
 
-  const makeKey = (ch) => {
-    const geom = new THREE.PlaneGeometry(keyW, keyH);
-    const mat  = new THREE.MeshBasicMaterial({ color:0x3a281f, transparent:true, opacity:0.85 });
-    const m = new THREE.Mesh(geom, mat);
-    m.userData.char = ch;
-
-    // текст
-    const c = document.createElement('canvas'); c.width = 256; c.height = 256;
-    const cx = c.getContext('2d');
-    cx.fillStyle = '#3a281f'; cx.fillRect(0,0,256,256);
-    cx.fillStyle = '#f7e1c0'; cx.font='bold 140px system-ui, Arial'; cx.textAlign='center'; cx.textBaseline='middle';
-    cx.fillText(ch, 128, 132);
-    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
-    const txt = new THREE.Mesh(
-      new THREE.PlaneGeometry(keyW*0.9, keyH*0.9),
-      new THREE.MeshBasicMaterial({ map:t, transparent:true, opacity:0.95 })
-    );
-    txt.position.z = 0.001;
-    m.add(txt);
-    return m;
-  };
-
-  let y = 0.12;
-  rows.forEach((row, ri)=>{
-    const arr = row.split('');
-    const totalW = arr.length*keyW + (arr.length-1)*gap;
-    let x = -totalW/2 + keyW/2;
-    arr.forEach((ch)=>{
-      const k = makeKey(ch);
-      k.position.set(x, y, 0.001);
-      g.add(k);
-      x += keyW + gap;
-    });
-    y -= keyH + gap;
+  let y=0.12;
+  rows.forEach(row=>{
+    const arr=row.split(''); const totalW=arr.length*keyW+(arr.length-1)*gap; let x=-totalW/2+keyW/2;
+    arr.forEach(ch=>{ const k=makeKey(ch); k.position.set(x,y,0.001); g.add(k); x+=keyW+gap; });
+    y-=keyH+gap;
   });
 
-  // поле ввода (над клавишами)
-  const inputBg = new THREE.Mesh(
-    new THREE.PlaneGeometry(1.05, 0.14),
-    new THREE.MeshBasicMaterial({ color:0x2d1d16, transparent:true, opacity:0.8 })
-  );
-  inputBg.position.set(0, 0.26, 0.001);
-  g.add(inputBg);
+  const inputBg=new THREE.Mesh(new THREE.PlaneGeometry(1.05,0.14), new THREE.MeshBasicMaterial({color:0x2d1d16,transparent:true,opacity:.8}));
+  inputBg.position.set(0,0.26,0.001); g.add(inputBg);
+  const inputText=makeTextMesh('(введите слово)',0.08); inputText.position.set(0,0.26,0.002); g.add(inputText);
+  keyboardState.inputText=inputText;
 
-  const inputText = makeTextMesh('(введите слово)', 0.08);
-  inputText.position.set(0, 0.26, 0.002);
-  g.add(inputText);
-
-  // поставить перед камерой
-  const dist = 1.1;
-  tempVec3.set(0, -0.05, -dist).applyQuaternion(camera.quaternion).add(camera.position);
-  g.position.copy(tempVec3);
-  g.quaternion.copy(camera.quaternion);
-
+  const dist=1.1; tempVec3.set(0,-.05,-dist).applyQuaternion(camera.quaternion).add(camera.position);
+  g.position.copy(tempVec3); g.quaternion.copy(camera.quaternion);
   scene.add(g);
 
-  keyboardState.value = '';
-  keyboardState.inputText = inputText;
-
-  // обработчик кликов по клавишам
+  keyboardState.value='';
   renderer.domElement.addEventListener('pointerdown', onPointerForKeyboard);
-  xrPickStart = (ctrl)=>keyboardPick(ctrl);
+  xrPickStart=(ctrl)=>keyboardPick(ctrl);
 }
 
 function closeKeyboard(){
-  if (!keyboardState.group) return;
-  if (keyboardState.group.parent) keyboardState.group.parent.remove(keyboardState.group);
-  keyboardState = { value:'', group:null, bg:null, inputText:null };
+  if(!keyboardState.group) return;
+  if(keyboardState.group.parent) keyboardState.group.parent.remove(keyboardState.group);
+  keyboardState={value:'',group:null,bg:null,inputText:null};
   renderer.domElement.removeEventListener('pointerdown', onPointerForKeyboard);
-  xrPickStart = null;
+  xrPickStart=null;
 }
 
 function setInputText(str){
-  if (!keyboardState.inputText) return;
-  const mesh = keyboardState.inputText;
-  mesh.parent.remove(mesh);
-  const t = makeTextMesh(str || ' ', 0.085);
-  t.position.set(0, 0.26, 0.002);
-  keyboardState.group.add(t);
-  keyboardState.inputText = t;
+  if(!keyboardState.inputText||!keyboardState.group) return;
+  keyboardState.inputText.parent.remove(keyboardState.inputText);
+  const t=makeTextMesh(str||' ',0.085); t.position.set(0,0.26,0.002); keyboardState.group.add(t); keyboardState.inputText=t;
 }
 
 function onPointerForKeyboard(ev){
-  if (!keyboardState.group) return;
-  // обычный клик мышью — рейкаст из камеры
+  if(!keyboardState.group) return;
   raycaster.setFromCamera({x:(ev.clientX/innerWidth)*2-1, y:-(ev.clientY/innerHeight)*2+1}, camera);
   keyboardHit(raycaster);
 }
-
-// для XR
-let xrPickStart = null;
 function keyboardPick(ctrl){
-  if (!keyboardState.group) return;
-  const m = ctrl.matrixWorld;
-  const dir = new THREE.Vector3(0,0,-1).applyMatrix4(new THREE.Matrix4().extractRotation(m));
-  const origin = new THREE.Vector3().setFromMatrixPosition(m);
+  if(!keyboardState.group) return;
+  const m=ctrl.matrixWorld;
+  const dir=new THREE.Vector3(0,0,-1).applyMatrix4(new THREE.Matrix4().extractRotation(m));
+  const origin=new THREE.Vector3().setFromMatrixPosition(m);
   raycaster.set(origin, dir);
   keyboardHit(raycaster);
 }
-
 function keyboardHit(rc){
-  const hits = rc.intersectObjects(keyboardState.group.children, true);
-  if (!hits.length) return;
-  const key = hits[0].object;
-  // ищем носителя char
-  let node = key;
-  while (node && !node.userData.char) node = node.parent;
-  if (!node || !node.userData.char) return;
-
-  const ch = node.userData.char;
-  if (ch === '←') {
-    keyboardState.value = keyboardState.value.slice(0,-1);
-  } else if (ch === 'О' || ch === 'К') {
-    // подтверждение — если нажаты подряд "О"+"К" (прощаем порядок)
-    // либо просто «ОК» в нажатиях подряд на панели — упростим до «ОК»: в ряду рядом
-    if (keyboardState.value.toUpperCase() === SECRET_WORD) finishPortal();
-    else pulsePanel(keyboardState.group, 0xcc4433);
+  const hits=rc.intersectObjects(keyboardState.group.children,true);
+  if(!hits.length) return;
+  let node=hits[0].object; while(node && !node.userData.char) node=node.parent; if(!node) return;
+  const ch=node.userData.char;
+  if(ch==='←'){ keyboardState.value=keyboardState.value.slice(0,-1); }
+  else if(ch==='О' || ch==='К'){
+    if(keyboardState.value.toUpperCase()===SECRET_WORD) finishPortal();
+    else pulsePanel(keyboardState.group,0xcc4433);
     return;
-  } else {
-    keyboardState.value += ch;
-  }
+  } else { keyboardState.value += ch; }
   setInputText(keyboardState.value);
 }
-
-/* маленькая анимация окраски панели при неверном вводе */
-function pulsePanel(group, hex){
-  if (!group) return;
-  const m = group.children[0]; // bg
-  if (!m || !m.material) return;
-  const base = m.material.color.clone();
-  m.material.color.setHex(hex);
-  setTimeout(()=>{ m.material.color.copy(base); }, 200);
+function pulsePanel(group,hex){
+  if(!group) return; const m=group.children[0]; if(!m||!m.material) return;
+  const base=m.material.color.clone(); m.material.color.setHex(hex); setTimeout(()=>m.material.color.copy(base),200);
 }
 
-/* ===========================
-   ФИНАЛ: ВСХЛОП ПОРТАЛА
-   =========================== */
+/* Финал */
 function finishPortal(){
-  // хаптик
-  try {
-    const session = renderer.xr.getSession();
-    session?.inputSources?.forEach(src => src.gamepad?.vibrationActuator?.playEffect?.('dual-rumble', { duration: 120, strongMagnitude: 0.8, weakMagnitude: 0.6 }));
-  } catch(e){}
-
+  try{
+    const s=renderer.xr.getSession();
+    s?.inputSources?.forEach(src=>src.gamepad?.vibrationActuator?.playEffect?.('dual-rumble',{duration:120,strongMagnitude:.8,weakMagnitude:.6}));
+  }catch(e){}
   closeKeyboard();
   showNotePanel('Портал закрыт');
-
-  // старт коллапса
-  collapsing = true;
+  collapsing=true;
 }
-
 function makeFadeQuad(){
-  const g = new THREE.PlaneGeometry(10,10);
-  const m = new THREE.MeshBasicMaterial({ color:0x000000, transparent:true, opacity:0, depthTest:false });
-  const q = new THREE.Mesh(g, m);
-  q.position.set(0, 1.6, -0.5);
-  q.renderOrder = 9999;
-  return q;
+  const q=new THREE.Mesh(new THREE.PlaneGeometry(10,10), new THREE.MeshBasicMaterial({color:0x000,transparent:true,opacity:0,depthTest:false}));
+  q.position.set(0,1.6,-0.5); q.renderOrder=9999; return q;
+}
+function makeTextMesh(text,width=.6){
+  const c=document.createElement('canvas'); c.width=1024; c.height=256; const ctx=c.getContext('2d');
+  ctx.fillStyle='#2a1a14'; ctx.fillRect(0,0,c.width,c.height);
+  ctx.fillStyle='#f7e1c0'; ctx.font='bold 120px system-ui, Arial'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(text,c.width/2,c.height/2);
+  const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; const aspect=c.height/c.width;
+  return new THREE.Mesh(new THREE.PlaneGeometry(width,width*aspect), new THREE.MeshBasicMaterial({map:t,transparent:true,opacity:1}));
 }
 
-/* ===========================
-   ТЕКСТ МЕШ
-   =========================== */
-function makeTextMesh(text, width=0.6){
-  const canvas = document.createElement('canvas'); canvas.width=1024; canvas.height=256;
-  const ctx = canvas.getContext('2d');
-  ctx.fillStyle='#2a1a14'; ctx.fillRect(0,0,canvas.width,canvas.height);
-  ctx.fillStyle='#f7e1c0'; ctx.font='bold 120px system-ui, Arial'; ctx.textAlign='center'; ctx.textBaseline='middle';
-  ctx.fillText(text, canvas.width/2, canvas.height/2);
-  const tex = new THREE.CanvasTexture(canvas); tex.colorSpace = THREE.SRGBColorSpace;
-  const aspect = canvas.height/canvas.width;
-  const mesh = new THREE.Mesh(
-    new THREE.PlaneGeometry(width, width*aspect),
-    new THREE.MeshBasicMaterial({ map: tex, transparent:true, opacity:1 })
-  );
-  return mesh;
-}
-
-/* ===========================
-   АУДИО
-   =========================== */
+/* Аудио */
 function startAudio(){
-  if (audioReady) return;
-  audioReady = true;
-  try {
-    const ac = listener?.context;
-    if (ac && ac.state === 'suspended') ac.resume();
-    const loader = new THREE.AudioLoader();
-    loader.load(MUSIC_MP3, (buffer)=>{
-      bgm.setBuffer(buffer);
-      bgm.setLoop(true);
-      bgm.setVolume(0.35);
-      bgm.play();
-    }, undefined, ()=>console.warn('Музыка не найдена:', MUSIC_MP3));
-  } catch(e){ console.warn('Audio error', e); }
+  if(audioReady) return; audioReady=true;
+  try{
+    const ac=listener?.context; if(ac && ac.state==='suspended') ac.resume();
+    const ld=new THREE.AudioLoader();
+    ld.load(MUSIC_MP3,(buf)=>{ bgm.setBuffer(buf); bgm.setLoop(true); bgm.setVolume(.35); bgm.play(); }, undefined, ()=>console.warn('Музыка не найдена:', MUSIC_MP3));
+  }catch(e){ console.warn('Audio error',e); }
 }
 
-/* ===========================
-   ПОТОК ЗАПУСКА
-   =========================== */
-async function startLoadFlow(){
-  // старт аудио и скрыть оверлей
-  startAudio();
-  const overlay = document.getElementById('overlay');
-  overlay.style.display = 'none';
-}
+/* Запуск */
+async function startLoadFlow(){ startAudio(); document.getElementById('overlay').style.display='none'; }
 
-/* ===========================
-   ЦИКЛ ОТРИСОВКИ
-   =========================== */
+/* Рендер-цикл */
 function tick(){
-  const t = performance.now()*0.003;
-
-  // лёгкое «дыхание» свечи
-  // (ищем по типу)
-  // — пропустим: вверху мы сохранили ссылку candle? Можно не трогать.
-
-  if (controls) controls.update();
-
-  // XR «клавиатура»: обработка триггера
-  if (xrPickStart && renderer.xr.isPresenting){
-    // ничего — вызывается в onSelect
-  }
-
-  // финальный всхлоп
-  if (collapsing){
-    // притягиваем сцену к точке перед камерой и затемняем
-    const s = Math.max(0, 1 - (performance.now()%1e9 - 0)/1200);
-    scene.scale.setScalar(Math.max(0.001, s));
-    fadeQuad.material.opacity = THREE.MathUtils.clamp(1 - s*1.2 + 0.15, 0, 1);
-
-    if (s <= 0.01){
-      // финальная надпись (в самом VR)
-      fadeQuad.material.opacity = 1;
-      // фиксируем текст перед камерой
-      if (!fadeQuad.userData.shown){
-        const msg = makeTextMesh('Ищи следующий портал там,\nгде вода бесконечна', 1.4);
-        msg.position.set(0, -0.2, 0.001);
-        fadeQuad.add(msg);
-        fadeQuad.userData.shown = true;
-      }
+  if(controls) controls.update();
+  if(collapsing){
+    const s=Math.max(0, 1 - (performance.now()%1e9 - 0)/1200);
+    scene.scale.setScalar(Math.max(0.001,s));
+    fadeQuad.material.opacity=THREE.MathUtils.clamp(1 - s*1.2 + 0.15, 0, 1);
+    if(s<=0.01 && !fadeQuad.userData.shown){
+      const msg=makeTextMesh('Ищи следующий портал там,\nгде вода бесконечна',1.4);
+      msg.position.set(0,-0.2,0.001); fadeQuad.add(msg); fadeQuad.userData.shown=true;
     }
   }
-
-  renderer.render(scene, camera);
+  renderer.render(scene,camera);
 }
 
-/* ===========================
-   УТИЛИТЫ
-   =========================== */
-
+/* Утилиты */
 init();
 </script>
 </body>
