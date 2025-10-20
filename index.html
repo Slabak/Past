@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Комната — VR</title>
+<title>Комната — стабильный билд</title>
 <style>
   html,body{height:100%;margin:0;overflow:hidden;background:#000}
   #overlay{position:fixed;inset:0;display:grid;place-items:center;background:radial-gradient(circle at center,rgba(0,0,0,.85),#000);color:#fff;z-index:9999;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
@@ -19,19 +19,15 @@
 </style>
 </head>
 <body>
-  <div id="overlay">
-    <div class="btns">
-      <button id="start-vr" class="primary">Погрузиться в VR</button>
-      <button id="start-flat" class="secondary">Обычный режим</button>
-    </div>
-  </div>
+  <div id="overlay"><div class="btns">
+    <button id="start-vr" class="primary">Погрузиться в VR</button>
+    <button id="start-flat" class="secondary">Обычный режим</button>
+  </div></div>
 
-  <div id="loading">
-    <div>
-      <div id="status">Переносимся через портал… <span id="pc">0%</span></div>
-      <div class="bar"><div id="fill" class="fill"></div></div>
-    </div>
-  </div>
+  <div id="loading"><div>
+    <div id="status">Переносимся через портал… <span id="pc">0%</span></div>
+    <div class="bar"><div id="fill" class="fill"></div></div>
+  </div></div>
 
   <div id="final-note"><div>Ищи следующий портал там, где вода бесконечна.</div></div>
 
@@ -39,22 +35,66 @@
   <script src="assets/js/OrbitControls.js"></script>
   <script src="assets/js/GLTFLoader.js"></script>
 <script>
-/* ===== ПАРАМЕТРЫ ===== */
-const w=4,d=4,h=3;
+/* ==== КОНСТАНТЫ И ГЛОБАЛ ==== */
+const ROOM_W=4, ROOM_D=4, ROOM_H=3;
 const SECRET='ВЕРА';
-const CHEST_SIZE_MULT=1.5, CHEST_WALLOFFSET_X=0.45, CHEST_Z=1.10;
-const BARRELS_H=1.30, BARRELS_X=0.45, BARRELS_Z=-1.10;
-const DOOR_H=2.10, DOOR_SINK=0.05;
+const BEAMS_ON=true; // можно выключить, если вдруг
 const BEAM_THICK=0.24, BEAM_MITER=BEAM_THICK*1.3;
 
-/* ===== ГЛОБАЛ ===== */
 let scene,camera,renderer,controls,room,fire;
 let controller0,controller1;
-let notePanel=null,inputPanel=null,inputText=null,inputValue='';   /* ← оставили только здесь */
-const raycaster=new THREE.Raycaster(); const tempM=new THREE.Matrix4();
+let notePanel=null,inputPanel=null,inputText=null,inputValue='';
 const interactables=new Set(); const uiPickables=[];
+const raycaster=new THREE.Raycaster(); const tmpM=new THREE.Matrix4();
 
-/* ===== УТИЛЫ UI ===== */
+/* ==== УТИЛЫ ==== */
+function resetScene(){
+  if(renderer){ renderer.setAnimationLoop(null); }
+  if(scene){
+    // аккуратно удаляем старые меши/текстуры
+    scene.traverse(o=>{
+      if(o.geometry) o.geometry.dispose?.();
+      const mat=o.material;
+      if(Array.isArray(mat)) mat.forEach(m=>m.dispose?.());
+      else mat?.dispose?.();
+      if(o.texture) o.texture.dispose?.();
+    });
+  }
+  scene=new THREE.Scene();
+  scene.background=new THREE.Color(0x0e0806);
+  scene.fog=new THREE.Fog(0x160c08,6,13);
+  camera=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,.05,50);
+  camera.position.set(0,1.6,0);
+  if(!renderer){
+    renderer=new THREE.WebGLRenderer({antialias:true});
+    renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+    renderer.setSize(innerWidth,innerHeight);
+    renderer.shadowMap.enabled=true;
+    renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+    renderer.outputColorSpace=THREE.SRGBColorSpace;
+    renderer.toneMapping=THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure=1.18;
+    document.body.appendChild(renderer.domElement);
+  }else{
+    renderer.clear();
+  }
+  // свет
+  scene.add(new THREE.HemisphereLight(0xffe0bb,0x120804,0.32));
+  scene.add(new THREE.AmbientLight(0xffcf9a,0.22));
+  const dir=new THREE.DirectionalLight(0xffb366,1.25);
+  dir.position.set(-2.5,3.5,1.5); dir.castShadow=true; dir.shadow.mapSize.set(2048,2048); dir.shadow.radius=6;
+  scene.add(dir);
+  fire=new THREE.PointLight(0xffa860,0.55,6); fire.position.set(-1.5,1.2,1.2); scene.add(fire);
+
+  // корневой контейнер комнаты
+  room=new THREE.Group();
+  room.position.set(0,0,0);
+  room.rotation.set(0,0,0);
+  room.scale.set(1,1,1);
+  room.visible=false;
+  scene.add(room);
+}
+
 function uiMat(o={}){return new THREE.MeshBasicMaterial({transparent:true,depthTest:false,depthWrite:false,toneMapped:false,side:THREE.DoubleSide,...o});}
 function makeLabel(text,{pad=10,fs=84,color='#ffe8c6',bg='#2a1a10',stroke='#614027'}={}){
   const c=document.createElement('canvas'),x=c.getContext('2d');
@@ -78,32 +118,32 @@ function HUD(msg){
 function showNote(text){
   if(!notePanel){ notePanel=new THREE.Group(); notePanel.renderOrder=2001; notePanel.frustumCulled=false; scene.add(notePanel); }
   else notePanel.clear();
-  const bg=new THREE.Mesh(new THREE.PlaneGeometry(0.70,0.28), uiMat({color:0x1a120c,opacity:.82}));
-  const msg=makeLabel(text,{fs:96}); notePanel.add(bg); notePanel.add(msg);
+  const bg=new THREE.Mesh(new THREE.PlaneGeometry(0.55,0.22), uiMat({color:0x1a120c,opacity:.88}));
+  const msg=makeLabel(text,{fs:88}); msg.position.z=0.001;
+  notePanel.add(bg); notePanel.add(msg);
   const dir=new THREE.Vector3(); camera.getWorldDirection(dir);
-  notePanel.position.copy(camera.position).addScaledVector(dir,0.95); notePanel.quaternion.copy(camera.quaternion);
+  notePanel.position.copy(camera.position).addScaledVector(dir,0.9); notePanel.quaternion.copy(camera.quaternion);
   notePanel.visible=true; const m1=bg.material,m2=msg.material;
-  setTimeout(()=>{const t0=performance.now(),dur=400;(function fade(t){const k=Math.min(1,(t-t0)/dur),op=1-k;m1.opacity=op;m2.opacity=op;if(k<1)requestAnimationFrame(fade);else notePanel.visible=false;})(performance.now());},3000);
+  setTimeout(()=>{const t0=performance.now(),dur=400;(function fade(t){const k=Math.min(1,(t-t0)/dur),op=1-k;m1.opacity=op;m2.opacity=op;if(k<1)requestAnimationFrame(fade);else notePanel.visible=false;})(performance.now());},2200);
 }
 
-/* ===== КЛАВИАТУРА ===== */
 function ensureKeyboard(){
   if(inputPanel) return;
   inputPanel=new THREE.Group(); inputPanel.renderOrder=2001; inputPanel.frustumCulled=false; inputPanel.visible=false;
-  inputPanel.add(new THREE.Mesh(new THREE.PlaneGeometry(1.1,0.62), uiMat({color:0x1a120c,opacity:.55})));
-  inputText=makeLabel(' ',{fs:72}); inputText.position.set(0,.20,0); inputPanel.add(inputText);
+  inputPanel.add(new THREE.Mesh(new THREE.PlaneGeometry(1.0,0.54), uiMat({color:0x1a120c,opacity:.55})));
+  inputText=makeLabel(' ',{fs:72}); inputText.position.set(0,.18,0); inputPanel.add(inputText);
   const rows=['ЙЦУКЕНГШЩЗХЪ','ФЫВАПРОЛДЖЭ','ЯЧСМИТЬБЮ']; let y=.05;
-  const add=(t,x,y)=>{const m=makeLabel(t,{fs:54,color:'#000',bg:'#ffd091',stroke:'#000'});m.position.set(x,y,0);m.userData.key=t;uiPickables.push(m);inputPanel.add(m);};
-  rows.forEach(r=>{const n=r.length,sp=.082,st=-(n-1)*sp*.5; for(let i=0;i<n;i++) add(r[i],st+i*sp,y); y-=.11;});
-  add('←',-.30,y); add('OK',.30,y);
+  const add=(t,x,y)=>{const m=makeLabel(t,{fs:52,color:'#000',bg:'#ffd091',stroke:'#000'});m.position.set(x,y,0);m.userData.key=t;uiPickables.push(m);inputPanel.add(m);};
+  rows.forEach(r=>{const n=r.length,sp=.078,st=-(n-1)*sp*.5; for(let i=0;i<n;i++) add(r[i],st+i*sp,y); y-=.105;});
+  add('←',-.28,y); add('OK',.28,y);
   scene.add(inputPanel);
 }
 const NRM=s=>{try{return s.normalize('NFC').trim().toUpperCase('ru')}catch(e){return (s||'').trim().toUpperCase()}};
-function updateInputView(){ if(!inputPanel)return; inputPanel.remove(inputText); inputText=makeLabel(inputValue||' ',{fs:72}); inputText.position.set(0,.20,0); inputPanel.add(inputText); }
+function updateInputView(){ if(!inputPanel)return; inputPanel.remove(inputText); inputText=makeLabel(inputValue||' ',{fs:72}); inputText.position.set(0,.18,0); inputPanel.add(inputText); }
 function showKeyboard(){
   ensureKeyboard(); inputValue=''; updateInputView();
   const dir=new THREE.Vector3(); camera.getWorldDirection(dir);
-  inputPanel.position.copy(camera.position).addScaledVector(dir,1.0); inputPanel.quaternion.copy(camera.quaternion);
+  inputPanel.position.copy(camera.position).addScaledVector(dir,0.95); inputPanel.quaternion.copy(camera.quaternion);
   inputPanel.visible=true;
 }
 function pressKey(k){
@@ -119,50 +159,11 @@ function pressKey(k){
   inputValue+=k; updateInputView();
 }
 
-/* ===== СЦЕНА ===== */
-function buildScene(manager){
-  scene=new THREE.Scene(); scene.background=new THREE.Color(0x0e0806); scene.fog=new THREE.Fog(0x160c08,6,13);
-  camera=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,.05,50); camera.position.set(0,1.6,0);
-  renderer=new THREE.WebGLRenderer({antialias:true}); renderer.setPixelRatio(Math.min(devicePixelRatio,2)); renderer.setSize(innerWidth,innerHeight);
-  renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap; renderer.outputColorSpace=THREE.SRGBColorSpace;
-  renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.18; document.body.appendChild(renderer.domElement);
-
-  const hemi=new THREE.HemisphereLight(0xffe0bb,0x120804,0.32); scene.add(hemi);
-  scene.add(new THREE.AmbientLight(0xffcf9a,0.22));
-  const dir=new THREE.DirectionalLight(0xffb366,1.25); dir.position.set(-2.5,3.5,1.5); dir.castShadow=true; dir.shadow.mapSize.set(2048,2048); dir.shadow.radius=6; scene.add(dir);
-  fire=new THREE.PointLight(0xffa860,0.55,6); fire.position.set(-1.5,1.2,1.2); scene.add(fire);
-  scene.add(new THREE.PointLight(0xffb07a,0.22,7)).position.set( 1.6,2.6, 1.2);
-  scene.add(new THREE.PointLight(0xffc28a,0.18,7)).position.set(-1.6,2.6,-1.2);
-
-  const tl=new THREE.TextureLoader(manager);
-  const floorTex=tl.load('assets/textures/floor.jpg'); floorTex.colorSpace=THREE.SRGBColorSpace; floorTex.wrapS=floorTex.wrapT=THREE.RepeatWrapping; floorTex.repeat.set(2,2);
-  const wallTex =tl.load('assets/textures/wall.jpg?v=nostretch'); wallTex.colorSpace=THREE.SRGBColorSpace; wallTex.wrapS=wallTex.wrapT=THREE.ClampToEdgeWrapping;
-  const ceilTex =tl.load('assets/textures/potolok.jpg'); ceilTex.colorSpace=THREE.SRGBColorSpace;
-  const mirrorTex=tl.load('assets/textures/mirror.jpg'); mirrorTex.colorSpace=THREE.SRGBColorSpace;
-
-  room=new THREE.Group(); room.visible=false; scene.add(room);
-
-  const floor=new THREE.Mesh(new THREE.PlaneGeometry(w,d), new THREE.MeshStandardMaterial({map:floorTex,roughness:.9}));
-  floor.rotation.x=-Math.PI/2; floor.position.y=0.0005; floor.receiveShadow=true; room.add(floor);
-
-  const wallMat=new THREE.MeshStandardMaterial({map:wallTex,roughness:1});
-  [[0,h/2-0.01,-d/2,0],[0,h/2-0.01,d/2,Math.PI],[-w/2,h/2-0.01,0,Math.PI/2],[w/2,h/2-0.01,0,-Math.PI/2]].forEach(([x,y,z,ry])=>{
-    const m=new THREE.Mesh(new THREE.PlaneGeometry(ry?d:w,h+0.02),wallMat); m.position.set(x,y,z); if(ry)m.rotation.y=ry; m.receiveShadow=true; room.add(m);
-  });
-
-  const ceil=new THREE.Mesh(new THREE.PlaneGeometry(w,d), new THREE.MeshStandardMaterial({map:ceilTex,roughness:.9}));
-  ceil.rotation.x=Math.PI/2; ceil.position.set(0,h-0.001,0); ceil.receiveShadow=true; room.add(ceil);
-
-  const mirror=new THREE.Mesh(new THREE.PlaneGeometry(.9,.6), new THREE.MeshStandardMaterial({map:mirrorTex,metalness:.85,roughness:.22}));
-  mirror.position.set(0,1.5,-d/2+.01); room.add(mirror);
-}
-
-/* ===== МОДЕЛИ ===== */
 function fixMats(root){
   root.traverse(o=>{
     if(!o.isMesh) return;
     const apply=m=>{
-      if(!m)return;
+      if(!m) return;
       if(m.map){m.map.colorSpace=THREE.SRGBColorSpace; m.map.anisotropy=renderer.capabilities.getMaxAnisotropy?.()||8;}
       if(m.roughness===undefined)m.roughness=.82;
       if(m.metalness===undefined)m.metalness=.05;
@@ -172,83 +173,121 @@ function fixMats(root){
     o.castShadow=true;o.receiveShadow=true;
   });
 }
-function loadModels(){
-  const L=new THREE.GLTFLoader();
 
+/* ==== КОМНАТА ==== */
+function buildRoom(manager){
+  resetScene();
+
+  const tl=new THREE.TextureLoader(manager);
+  const floorTex=tl.load('assets/textures/floor.jpg'); floorTex.colorSpace=THREE.SRGBColorSpace; floorTex.wrapS=floorTex.wrapT=THREE.RepeatWrapping; floorTex.repeat.set(2,2);
+  const wallTex =tl.load('assets/textures/wall.jpg?v=nostretch'); wallTex.colorSpace=THREE.SRGBColorSpace; wallTex.wrapS=wallTex.wrapT=THREE.ClampToEdgeWrapping;
+  const ceilTex =tl.load('assets/textures/potolok.jpg'); ceilTex.colorSpace=THREE.SRGBColorSpace;
+  const mirrorTex=tl.load('assets/textures/mirror.jpg'); mirrorTex.colorSpace=THREE.SRGBColorSpace;
+
+  const floor=new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W,ROOM_D), new THREE.MeshStandardMaterial({map:floorTex,roughness:.9}));
+  floor.rotation.x=-Math.PI/2; floor.position.y=0.0005; floor.receiveShadow=true; room.add(floor);
+
+  const wallMat=new THREE.MeshStandardMaterial({map:wallTex,roughness:1});
+  [[0,ROOM_H/2-0.01,-ROOM_D/2,0],[0,ROOM_H/2-0.01,ROOM_D/2,Math.PI],[-ROOM_W/2,ROOM_H/2-0.01,0,Math.PI/2],[ROOM_W/2,ROOM_H/2-0.01,0,-Math.PI/2]].forEach(([x,y,z,ry])=>{
+    const m=new THREE.Mesh(new THREE.PlaneGeometry(ry?ROOM_D:ROOM_W,ROOM_H+0.02),wallMat);
+    m.position.set(x,y,z); if(ry)m.rotation.y=ry; m.receiveShadow=true; room.add(m);
+  });
+
+  const ceil=new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W,ROOM_D), new THREE.MeshStandardMaterial({map:ceilTex,roughness:.9}));
+  ceil.rotation.x=Math.PI/2; ceil.position.set(0,ROOM_H-0.001,0); ceil.receiveShadow=true; room.add(ceil);
+
+  const mirror=new THREE.Mesh(new THREE.PlaneGeometry(.9,.6), new THREE.MeshStandardMaterial({map:mirrorTex,metalness:.85,roughness:.22}));
+  mirror.position.set(0,1.5,-ROOM_D/2+.01); room.add(mirror);
+
+  // модели
+  const L=new THREE.GLTFLoader(manager);
+
+  // сундук
   L.load('assets/models/chest.glb?v=1',(g)=>{
-    const m=g.scene, b0=new THREE.Box3().setFromObject(m); m.position.sub(b0.getCenter(new THREE.Vector3()));
-    const sTarget=1.2*CHEST_SIZE_MULT, diag=b0.getSize(new THREE.Vector3()).length(); m.scale.setScalar(diag>0?sTarget/diag:1);
-    const b1=new THREE.Box3().setFromObject(m); m.position.y-=b1.min.y;
-    m.position.set(-w/2+CHEST_WALLOFFSET_X,m.position.y,CHEST_Z); m.rotation.y=Math.PI;
-    fixMats(m); room.add(m);
+    const m=g.scene; let b=new THREE.Box3().setFromObject(m); m.position.sub(b.getCenter(new THREE.Vector3()));
+    const diag=b.getSize(new THREE.Vector3()).length()||1; m.scale.setScalar((1.2*1.5)/diag);
+    b=new THREE.Box3().setFromObject(m); m.position.y-=b.min.y;
+    m.position.set(-ROOM_W/2+0.45,m.position.y,1.10); m.rotation.y=Math.PI; fixMats(m); room.add(m);
   });
 
+  // бочка (триггер ввода)
   L.load('assets/models/barrel.glb?v=1',(g)=>{
-    const m=g.scene, b0=new THREE.Box3().setFromObject(m); m.position.sub(b0.getCenter(new THREE.Vector3()));
-    const H=b0.getSize(new THREE.Vector3()).y||1; m.scale.setScalar(BARRELS_H/H);
-    const b1=new THREE.Box3().setFromObject(m); m.position.y-=b1.min.y;
-    m.position.set(-w/2+BARRELS_X,m.position.y,BARRELS_Z); m.rotation.y=Math.PI/2;
-    fixMats(m); room.add(m); m.userData.interactive='barrels'; interactables.add(m);
+    const m=g.scene; let b=new THREE.Box3().setFromObject(m); m.position.sub(b.getCenter(new THREE.Vector3()));
+    const H=b.getSize(new THREE.Vector3()).y||1; m.scale.setScalar(1.30/H);
+    b=new THREE.Box3().setFromObject(m); m.position.y-=b.min.y;
+    m.position.set(-ROOM_W/2+0.45,m.position.y,-1.10); m.rotation.y=Math.PI/2; fixMats(m); room.add(m);
+    m.userData.interactive='barrels'; interactables.add(m);
   });
 
+  // стол + маленький хитбокс только на столешнице
   L.load('assets/models/table.glb?v=1',(g)=>{
-    const m=g.scene;
-    let b=new THREE.Box3().setFromObject(m), c=b.getCenter(new THREE.Vector3());
-    m.position.sub(c);
+    const m=g.scene; let b=new THREE.Box3().setFromObject(m), c=b.getCenter(new THREE.Vector3()); m.position.sub(c);
     const k=(b.getSize(new THREE.Vector3()).y>0)?0.78/b.getSize(new THREE.Vector3()).y:1; m.scale.setScalar(k);
     b=new THREE.Box3().setFromObject(m); m.position.y-=b.min.y;
-    const depth=b.getSize(new THREE.Vector3()).z||0.6; const zTop=-d/2+depth/2+.02;
+    const depth=b.getSize(new THREE.Vector3()).z||0.6; const zTop=-ROOM_D/2+depth/2+.02;
     m.position.set(0,m.position.y,zTop); fixMats(m); room.add(m);
 
     const size=b.getSize(new THREE.Vector3()), topH=Math.min(0.14, size.y*0.5);
-    const hb=new THREE.Mesh(new THREE.BoxGeometry(size.x*1.02, topH, size.z*0.96), uiMat({opacity:0.0}));
-    hb.position.set(m.position.x, m.position.y + size.y - topH*0.5 + 0.02, m.position.z);
+    const hb=new THREE.Mesh(new THREE.BoxGeometry(size.x*0.95, topH*0.6, size.z*0.9), uiMat({opacity:0.0}));
+    hb.position.set(m.position.x, m.position.y + size.y - topH*0.5 + 0.03, m.position.z);
     hb.userData.interactive='table'; room.add(hb); interactables.add(hb);
   });
 
+  // глобус
   L.load('assets/models/globus.glb?v=1',(g)=>{
-    const m=g.scene, b0=new THREE.Box3().setFromObject(m); m.position.sub(b0.getCenter(new THREE.Vector3()));
-    const H=b0.getSize(new THREE.Vector3()).y||1; m.scale.setScalar(1.5/H);
-    const b1=new THREE.Box3().setFromObject(m); m.position.y-=b1.min.y;
-    m.position.set(w/2-0.45,m.position.y,-d/2+0.9); m.rotation.y=-Math.PI/2; fixMats(m); room.add(m);
+    const m=g.scene; let b=new THREE.Box3().setFromObject(m); m.position.sub(b.getCenter(new THREE.Vector3()));
+    const H=b.getSize(new THREE.Vector3()).y||1; m.scale.setScalar(1.5/H);
+    b=new THREE.Box3().setFromObject(m); m.position.y-=b.min.y;
+    m.position.set(ROOM_W/2-0.45,m.position.y,-ROOM_D/2+0.9); m.rotation.y=-Math.PI/2; fixMats(m); room.add(m);
   });
 
+  // дверь: строго в плоскости задней стены
   L.load('assets/models/door.glb?v=1',(g)=>{
     const m=g.scene; let b=new THREE.Box3().setFromObject(m); m.position.sub(b.getCenter(new THREE.Vector3()));
-    const H=b.getSize(new THREE.Vector3()).y||1; m.scale.setScalar(DOOR_H/H);
+    const H=b.getSize(new THREE.Vector3()).y||1; m.scale.setScalar(2.10/H);
     b=new THREE.Box3().setFromObject(m); m.position.y-=b.min.y;
-    const depth=b.getSize(new THREE.Vector3()).z||0.04; m.position.set(0,m.position.y,d/2-(depth/2)+DOOR_SINK);
+    const depth=b.getSize(new THREE.Vector3()).z||0.04;
+    m.position.set(0,m.position.y, ROOM_D/2 - (depth/2) + 0.05); // утапливаем на 5мм в стену
     fixMats(m); room.add(m);
   });
 
-  L.load('assets/models/plank.glb?v=1',(g)=>{
-    const src=g.scene;
-    const box=new THREE.Box3().setFromObject(src); src.position.sub(box.getCenter(new THREE.Vector3()));
-    const size=box.getSize(new THREE.Vector3()); let axis='y';
-    if(size.x>=size.y&&size.x>=size.z)axis='x'; else if(size.z>=size.y&&size.z>=size.x)axis='z';
-    if(axis==='x')src.rotation.set(0,0,Math.PI/2); else if(axis==='z')src.rotation.set(-Math.PI/2,0,0);
-    const L0=new THREE.Box3().setFromObject(src).getSize(new THREE.Vector3()).y||1; src.scale.multiplyScalar(1/L0);
-    function spawn(a,b,th=BEAM_THICK){
-      const g=src.clone(true); const dir=new THREE.Vector3().subVectors(b,a); const len=dir.length();
-      const base=new THREE.Box3().setFromObject(g).getSize(new THREE.Vector3());
-      g.scale.set(th/(base.x||1e-6), len+BEAM_MITER*2, th/(base.z||1e-6));
-      g.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), dir.normalize()); g.position.copy(new THREE.Vector3().addVectors(a,b).multiplyScalar(.5));
-      g.traverse(o=>{if(o.isMesh){o.castShadow=false;o.receiveShadow=false;const m=o.material;if(m?.color)m.color.set(0xE0B889); if(m?.emissive)m.emissive.setRGB(.25,.18,.10),m.emissiveIntensity=.25; if(m?.roughness!==undefined)m.roughness=.75; if(m?.metalness!==undefined)m.metalness=0; m.needsUpdate=true; }});
-      room.add(g);
-    }
-    const half=BEAM_THICK*.5,xL=-w/2+half,xR=w/2-half,zB=-d/2+half,zF=d/2-half,y=h-half;
-    spawn(new THREE.Vector3(xL,0+half,zB),new THREE.Vector3(xL,y,zB));
-    spawn(new THREE.Vector3(xR,0+half,zB),new THREE.Vector3(xR,y,zB));
-    spawn(new THREE.Vector3(xL,0+half,zF),new THREE.Vector3(xL,y,zF));
-    spawn(new THREE.Vector3(xR,0+half,zF),new THREE.Vector3(xR,y,zF));
-    spawn(new THREE.Vector3(xL-BEAM_MITER,y,zB),new THREE.Vector3(xR+BEAM_MITER,y,zB));
-    spawn(new THREE.Vector3(xL-BEAM_MITER,y,zF),new THREE.Vector3(xR+BEAM_MITER,y,zF));
-    spawn(new THREE.Vector3(xL,y,zB-BEAM_MITER),new THREE.Vector3(xL,y,zF+BEAM_MITER));
-    spawn(new THREE.Vector3(xR,y,zB-BEAM_MITER),new THREE.Vector3(xR,y,zF+BEAM_MITER));
-  });
+  // балки (с защитой от двойного вызова)
+  if(BEAMS_ON){
+    L.load('assets/models/plank.glb?v=1',(g)=>{
+      const src=g.scene;
+      const box=new THREE.Box3().setFromObject(src); src.position.sub(box.getCenter(new THREE.Vector3()));
+      const size=box.getSize(new THREE.Vector3()); let axis='y';
+      if(size.x>=size.y&&size.x>=size.z)axis='x'; else if(size.z>=size.y&&size.z>=size.x)axis='z';
+      if(axis==='x')src.rotation.set(0,0,Math.PI/2); else if(axis==='z')src.rotation.set(-Math.PI/2,0,0);
+      const L0=new THREE.Box3().setFromObject(src).getSize(new THREE.Vector3()).y||1; src.scale.multiplyScalar(1/L0);
+      function spawn(a,b,th=BEAM_THICK){
+        const g=src.clone(true);
+        const dir=new THREE.Vector3().subVectors(b,a); const len=dir.length();
+        const base=new THREE.Box3().setFromObject(g).getSize(new THREE.Vector3());
+        g.scale.set(th/(base.x||1e-6), len+BEAM_MITER*2, th/(base.z||1e-6));
+        g.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), dir.normalize()); g.position.copy(new THREE.Vector3().addVectors(a,b).multiplyScalar(.5));
+        g.traverse(o=>{ if(o.isMesh){ o.castShadow=false;o.receiveShadow=false;
+          const m=o.material; if(m?.color)m.color.set(0xE0B889); if(m?.emissive)m.emissive.setRGB(.25,.18,.10),m.emissiveIntensity=.25; if(m?.roughness!==undefined)m.roughness=.75; if(m?.metalness!==undefined)m.metalness=0; m.needsUpdate=true; }});
+        room.add(g);
+      }
+      const half=BEAM_THICK*.5,xL=-ROOM_W/2+half,xR=ROOM_W/2-half,zB=-ROOM_D/2+half,zF=ROOM_D/2-half,y=ROOM_H-half;
+      // вертикальные 4 стойки
+      spawn(new THREE.Vector3(xL,0+half,zB),new THREE.Vector3(xL,y,zB));
+      spawn(new THREE.Vector3(xR,0+half,zB),new THREE.Vector3(xR,y,zB));
+      spawn(new THREE.Vector3(xL,0+half,zF),new THREE.Vector3(xL,y,zF));
+      spawn(new THREE.Vector3(xR,0+half,zF),new THREE.Vector3(xR,y,zF));
+      // горизонтальные
+      spawn(new THREE.Vector3(xL-BEAM_MITER,y,zB),new THREE.Vector3(xR+BEAM_MITER,y,zB));
+      spawn(new THREE.Vector3(xL-BEAM_MITER,y,zF),new THREE.Vector3(xR+BEAM_MITER,y,zF));
+      spawn(new THREE.Vector3(xL,y,zB-BEAM_MITER),new THREE.Vector3(xL,y,zF+BEAM_MITER));
+      spawn(new THREE.Vector3(xR,y,zB-BEAM_MITER),new THREE.Vector3(xR,y,zF+BEAM_MITER));
+    });
+  }
+
+  // «зеркальная» табличка (для атмосферы): уже есть
 }
 
-/* ===== ПИКИНГ/КОНТРОЛЛЕРЫ ===== */
+/* ==== ПИКИНГ ==== */
 function listPickables(){const arr=[];interactables.forEach(r=>r.traverse(o=>{if(o.isMesh)arr.push(o);})); uiPickables.forEach(o=>arr.push(o)); return arr;}
 function setupControllers(){
   controller0=renderer.xr.getController(0);
@@ -258,13 +297,13 @@ function setupControllers(){
                               new THREE.LineBasicMaterial({color:0xffb366}));
     line.name='ray'; line.scale.z=20; c.add(line);
     c.addEventListener('selectstart',onSelect);
+    scene.add(c);
   });
-  scene.add(controller0); scene.add(controller1);
 }
 function intersectController(c){
-  tempM.identity().extractRotation(c.matrixWorld);
+  tmpM.identity().extractRotation(c.matrixWorld);
   const o=new THREE.Vector3().setFromMatrixPosition(c.matrixWorld);
-  const d=new THREE.Vector3(0,0,-1).applyMatrix4(tempM);
+  const d=new THREE.Vector3(0,0,-1).applyMatrix4(tmpM);
   raycaster.set(o,d); return raycaster.intersectObjects(listPickables(),true);
 }
 function onSelect(e){
@@ -292,7 +331,7 @@ function setupMouseTouch(){
   cvs.addEventListener('click',click); cvs.addEventListener('touchstart',click,{passive:true});
 }
 
-/* ===== ФИНАЛ В VR ===== */
+/* ==== ФИНАЛ ==== */
 function closePortalXR(){
   HUD('Закрываем портал…');
   try {
@@ -323,31 +362,33 @@ function closePortalXR(){
   });
 }
 
-/* ===== ЗАГРУЗКА/СТАРТ ===== */
-function startFlow(){
+/* ==== ЗАГРУЗКА/СТАРТ ==== */
+function startLoadFlow(){
   const loading=document.getElementById('loading'),pc=document.getElementById('pc'),fill=document.querySelector('.fill');
   const mgr=new THREE.LoadingManager(()=>{
     room.visible=true; fill.style.width='100%'; pc.textContent='100%';
     loading.classList.add('fade-out'); setTimeout(()=>loading.remove(),900);
     controls=new THREE.OrbitControls(camera,renderer.domElement);
     controls.target.set(0,1.5,0); controls.enableZoom=false; controls.enablePan=false; controls.rotateSpeed=-0.8; controls.enableDamping=true; controls.dampingFactor=.12;
-    setupMouseTouch(); loadModels();
+    setupMouseTouch();
   },(_,ld,tot)=>{ const p=Math.round(ld/tot*100); pc.textContent=p+'%'; fill.style.width=p+'%'; });
 
-  buildScene(mgr);
+  buildRoom(mgr);
+
   renderer.setAnimationLoop(()=>{ controls?.update?.(); if(fire) fire.intensity=0.55+Math.sin(performance.now()*0.003)*0.15; renderer.render(scene,camera); });
-  loading.style.display='grid';
+  document.getElementById('loading').style.display='grid';
 }
+
 function init(){
   const overlay=document.getElementById('overlay');
-  document.getElementById('start-flat').addEventListener('click',()=>{ overlay.style.display='none'; startFlow(); },{once:true});
+  document.getElementById('start-flat').addEventListener('click',()=>{ overlay.style.display='none'; startLoadFlow(); },{once:true});
   document.getElementById('start-vr').addEventListener('click',async()=>{
     try{
       renderer.xr.enabled=true; renderer.xr.setReferenceSpaceType?.('local-floor');
       const sess=await navigator.xr.requestSession('immersive-vr',{optionalFeatures:['local-floor','bounded-floor']});
       await renderer.xr.setSession(sess);
-      overlay.style.display='none'; startFlow(); setupControllers();
-    }catch(e){ overlay.style.display='none'; startFlow(); }
+      overlay.style.display='none'; startLoadFlow(); setupControllers();
+    }catch(e){ overlay.style.display='none'; startLoadFlow(); }
   },{once:true});
   window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
 }
