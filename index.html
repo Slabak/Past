@@ -67,6 +67,23 @@ function makeLabel(text,{pad=10,fs=84,color='#ffe8c6',bg='#2a1a10',stroke='#6140
   const tex=new THREE.CanvasTexture(c); tex.colorSpace=THREE.SRGBColorSpace;
   return new THREE.Mesh(new THREE.PlaneGeometry(c.width/1200,c.height/1200), uiMat({map:tex,opacity:1}));
 }
+
+/* HUD для отладки в VR */
+let hud; 
+function HUD(msg){
+  if(!hud){
+    const base=new THREE.Mesh(new THREE.PlaneGeometry(0.6,0.12), uiMat({color:0x000,opacity:.65}));
+    hud=new THREE.Group(); hud.add(base); scene.add(hud);
+  }
+  const label=makeLabel(msg,{fs:64});
+  label.position.z=0.001;
+  hud.clear(); hud.add(new THREE.Mesh(new THREE.PlaneGeometry(0.6,0.12), uiMat({color:0x000,opacity:.65}))); hud.add(label);
+  const dir=new THREE.Vector3(); camera.getWorldDirection(dir);
+  hud.position.copy(camera.position).addScaledVector(dir,0.8);
+  hud.quaternion.copy(camera.quaternion);
+  hud.visible=true; setTimeout(()=>{ if(hud) hud.visible=false; },1200);
+}
+
 function showNote(text){
   if(!notePanel){
     notePanel=new THREE.Group(); notePanel.renderOrder=2001; notePanel.frustumCulled=false; scene.add(notePanel);
@@ -84,24 +101,7 @@ function showNote(text){
   },3000);
 }
 
-/* HUD для отладки в VR */
-let hud; 
-function HUD(msg){
-  if(!hud){
-    const p=new THREE.PlaneGeometry(0.6,0.12);
-    const m=uiMat({color:0x000000,opacity:.65});
-    const base=new THREE.Mesh(p,m);
-    hud=new THREE.Group(); hud.add(base); scene.add(hud);
-  }
-  const label=makeLabel(msg,{fs:64});
-  label.position.z=0.001;
-  hud.clear(); const base=new THREE.Mesh(new THREE.PlaneGeometry(0.6,0.12), uiMat({color:0x000,opacity:.65})); hud.add(base); hud.add(label);
-  const dir=new THREE.Vector3(); camera.getWorldDirection(dir);
-  hud.position.copy(camera.position).addScaledVector(dir,0.8);
-  hud.quaternion.copy(camera.quaternion);
-  hud.visible=true; setTimeout(()=>{ if(hud) hud.visible=false; },1200);
-}
-
+/* ===== КЛАВИАТУРА ===== */
 function ensureKeyboard(){
   if(inputPanel) return;
   inputPanel=new THREE.Group(); inputPanel.renderOrder=2001; inputPanel.frustumCulled=false; inputPanel.visible=false;
@@ -113,6 +113,7 @@ function ensureKeyboard(){
   add('←',-.30,y); add('OK',.30,y);
   scene.add(inputPanel);
 }
+let inputValue=''; const NRM=s=>{try{return s.normalize('NFC').trim().toUpperCase('ru')}catch(e){return (s||'').trim().toUpperCase()}};
 function updateInputView(){ if(!inputPanel)return; inputPanel.remove(inputText); inputText=makeLabel(inputValue||' ',{fs:72}); inputText.position.set(0,.20,0); inputPanel.add(inputText); }
 function showKeyboard(){
   ensureKeyboard(); inputValue=''; updateInputView();
@@ -121,7 +122,6 @@ function showKeyboard(){
   inputPanel.quaternion.copy(camera.quaternion);
   inputPanel.visible=true;
 }
-const NRM=s=>{try{return s.normalize('NFC').trim().toUpperCase('ru')}catch(e){return (s||'').trim().toUpperCase()}};
 function pressKey(k){
   if(!inputPanel) return;
   if(k==='←'){ inputValue=inputValue.slice(0,-1); updateInputView(); return; }
@@ -232,12 +232,12 @@ function loadModels(){
   // глобус
   L.load('assets/models/globus.glb?v=1',(g)=>{
     const m=g.scene, b0=new THREE.Box3().setFromObject(m); m.position.sub(b0.getCenter(new THREE.Vector3()));
-    const H=b0.getSize(new THREE.Vector3()).y||1; m.scale.setScalar(1.2/H);
+    const H=b0.getSize(new THREE.Vector3()).y||1; m.scale.setScalar(1.5/H); // ↑ чуть крупнее
     const b1=new THREE.Box3().setFromObject(m); m.position.y-=b1.min.y;
     m.position.set(w/2-0.45,m.position.y,-d/2+0.9); m.rotation.y=-Math.PI/2; fixMats(m); room.add(m);
   });
 
-  // дверь — в стене
+  // дверь — в стене (front wall)
   L.load('assets/models/door.glb?v=1',(g)=>{
     const m=g.scene; let b=new THREE.Box3().setFromObject(m); m.position.sub(b.getCenter(new THREE.Vector3()));
     const H=b.getSize(new THREE.Vector3()).y||1; m.scale.setScalar(DOOR_H/H);
@@ -266,7 +266,7 @@ function loadModels(){
     spawn(new THREE.Vector3(xL,0+half,zB),new THREE.Vector3(xL,y,zB));
     spawn(new THREE.Vector3(xR,0+half,zB),new THREE.Vector3(xR,y,zB));
     spawn(new THREE.Vector3(xL,0+half,zF),new THREE.Vector3(xL,y,zF));
-    spawn(new THREE.Vector3(xR,0+half,zF),new THREE.VectorVector3(xR,y,zF));
+    spawn(new THREE.Vector3(xR,0+half,zF),new THREE.Vector3(xR,y,zF));
     spawn(new THREE.Vector3(xL-BEAM_MITER,y,zB),new THREE.Vector3(xR+BEAM_MITER,y,zB));
     spawn(new THREE.Vector3(xL-BEAM_MITER,y,zF),new THREE.Vector3(xR+BEAM_MITER,y,zF));
     spawn(new THREE.Vector3(xL,y,zB-BEAM_MITER),new THREE.Vector3(xL,y,zF+BEAM_MITER));
