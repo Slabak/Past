@@ -127,18 +127,15 @@ function safeStartBGM(){
 
 /* ---------- подсказка (singleton) ---------- */
 function showNotePanel(text){
-  // если уже висит — просто обновим текст и перезапустим таймер
   if(!notePanel){
     notePanel=billboard(text);
     scene.add(notePanel);
   }else{
-    // заменить внутренний текст
     const old=notePanel.children.find(m=>m.material?.map);
     if(old){ notePanel.remove(old); }
     notePanel.add( makeCanvasLabel(text,{fontSize:72,bg:'#2a1a10',color:'#ffe8c6',stroke:'#614027',pad:20}) );
     notePanel.visible=true;
   }
-  // позиционирование перед камерой
   const dir=new THREE.Vector3();camera.getWorldDirection(dir);
   notePanel.position.copy(camera.position).addScaledVector(dir,1.1);
   notePanel.quaternion.copy(camera.quaternion);
@@ -146,12 +143,7 @@ function showNotePanel(text){
 
   if(noteTimer){ clearTimeout(noteTimer); noteTimer=null; }
   noteTimer=setTimeout(()=>{
-    if(notePanel){
-      notePanel.visible=false;
-      // удалять не обязательно, но если хочешь — безопасно так:
-      // if(notePanel.parent) notePanel.parent.remove(notePanel);
-      // notePanel=null;
-    }
+    if(notePanel){ notePanel.visible=false; }
   }, 3500);
 }
 
@@ -200,7 +192,6 @@ function handleKey(k){
 function closePortal(){
   try{ if(sfxClose?.isPlaying)sfxClose.stop(); sfxClose?.play?.(); }catch{}
   try{ const s=renderer.xr.getSession?.(); for(const S of (s?.inputSources||[])){ S.gamepad?.hapticActuators?.[0]?.pulse?.(0.9,120) } }catch{}
-  const inXR=renderer.xr.isPresenting===true;
   const t0=performance.now(),dur=900,s0=roomGroup.scale.x||1;
   const tick=t=>{const k=Math.min(1,(t-t0)/dur),s=THREE.MathUtils.lerp(s0,0.001,k); roomGroup.scale.setScalar(s); if(k<1)requestAnimationFrame(tick); else showFinalCard();};
   requestAnimationFrame(tick);
@@ -264,7 +255,7 @@ function lazyModels(){
     fixMaterials(barrels); barrels.userData.interactive='barrels'; roomGroup.add(barrels); interactables.add(barrels);
   });
 
-  // стол: хитбоксы сразу (работают даже без модели)
+  // стол: хитбоксы сразу
   addTableHotspots();
   withRetry(gltf.load.bind(gltf),'assets/models/table.glb?v=1',(g)=>{
     if(!g) return;
@@ -373,7 +364,6 @@ function setupVRControllers(){
   });
   scene.add(controller0);scene.add(controller1);
 }
-const tempMatrix=new THREE.Matrix4();
 function intersectController(controller){
   tempMatrix.identity().extractRotation(controller.matrixWorld);
   const origin=new THREE.Vector3().setFromMatrixPosition(controller.matrixWorld);
