@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Комната — балки из plank.glb</title>
+<title>Комната — без балок, бочка у зеркала</title>
 <style>
   html,body{height:100%;margin:0;background:#000;overflow:hidden}
   #overlay{position:fixed;inset:0;display:grid;place-items:center;z-index:5;
@@ -23,11 +23,12 @@
     </div>
   </div>
 
+  <!-- three.js -->
   <script src="assets/js/three.min.js"></script>
   <script src="assets/js/OrbitControls.js"></script>
   <script src="assets/js/GLTFLoader.js"></script>
 <script>
-/* ===== мини VR-кнопка, без внешних файлов ===== */
+/* ===== мини VR-кнопка (без внешних файлов) ===== */
 function createSimpleVRButton(renderer){
   const btn=document.createElement('button'); btn.className='vr-btn'; btn.textContent='Войти в VR';
   if(!('xr' in navigator)){ btn.textContent='VR не поддерживается'; btn.disabled=true; return btn; }
@@ -45,7 +46,7 @@ function createSimpleVRButton(renderer){
   return btn;
 }
 
-/* ===== габариты комнаты ===== */
+/* ===== размеры комнаты ===== */
 const W=4, D=4, H=3;
 
 /* ===== ресурсы ===== */
@@ -58,33 +59,24 @@ const MODEL_BARREL='assets/models/barrel.glb';
 const MODEL_CHEST ='assets/models/chest.glb';
 const MODEL_GLOBUS='assets/models/globus.glb';
 const MODEL_DOOR  ='assets/models/door.glb';
-const MODEL_PLANK ='assets/models/plank.glb';  // <— твоя балка
 
-/* ===== позиции мебели ===== */
+/* ===== позиции ===== */
 // стол — задняя стена под «зеркалом»
 const POS_TABLE  = new THREE.Vector3( 0.0, 0.0, -D/2 + 0.55);
 // сундук — левая стена, ближе к зрителю
 const POS_CHEST_X = -W/2 + 0.45;
 const POS_CHEST_Z =  1.10;
-// бочка — СПРАВА от сундука (к зеркалу — в сторону минус Z)
-const POS_BARREL_X = POS_CHEST_X;
-const POS_BARREL_Z = POS_CHEST_Z - 0.90;
+// БОЧКА — ПРАВЫЙ УГОЛ у зеркала (задняя+правая стены)
+const POS_BARREL = new THREE.Vector3( W/2 - 0.45, 0.0, -D/2 + 0.45 );
+const BARREL_HEIGHT = 1.0; // м
 // глобус — правая стена ближе к задней
 const POS_GLOBUS  = new THREE.Vector3( W/2 - 0.55, 0.0, -D/2 + 0.9 );
 // дверь — в плоскости передней стены, утоп на 5 мм
 const POS_DOOR    = new THREE.Vector3( 0.0, 0.0,  D/2 - 0.005 );
 
-/* ===== балки: параметры ===== */
-const BEAM_T = 0.22;           // «толщина» балки (сторона квадрата), м
-const BEAM_INSET_WALL = 0.001; // маленький зазор от стен, чтобы не мерцал Z
-const BEAM_INSET_CEIL = 0.001; // маленький зазор к потолку
-const BEAM_MITER_OVERLAP = 0.04; // перекрытие стыков, чтобы не было щели
-let plankUnitSpawner=null;     // сюда положим spawnBetween из plank.glb
-
 /* ===== глобальные ===== */
 let scene,camera,renderer,controls,tl;
 
-/* ===== init ===== */
 function init(){
   scene=new THREE.Scene();
   scene.background=new THREE.Color(0x0b0706);
@@ -112,8 +104,8 @@ function init(){
 
   tl=new THREE.TextureLoader();
 
-  buildRoom();        // стены/пол/потолок + свет
-  loadPlankAndBuildBeams().then(()=>loadModels()); // сначала загрузим plank и сделаем балки
+  buildRoom();     // стены/пол/потолок + свет
+  loadModels();    // мебель
 
   addEventListener('resize',()=>{
     camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight);
@@ -152,113 +144,7 @@ function buildRoom(){
   const fire=new THREE.PointLight(0xffa860,0.58,5.0); fire.position.set(-1.4,1.15,1.1); scene.add(fire);
 }
 
-/* ===== загрузить plank.glb и построить балки точно ===== */
-async function loadPlankAndBuildBeams(){
-  const L=new THREE.GLTFLoader();
-
-  function prepareUnit(src){
-    // 1) центрируем
-    const box=new THREE.Box3().setFromObject(src);
-    src.position.sub(box.getCenter(new THREE.Vector3()));
-
-    // 2) определяем «длинную» ось и разворачиваем так, чтобы высота шла по +Y
-    const size=box.getSize(new THREE.Vector3());
-    let dominant='y';
-    if(size.x>=size.y && size.x>=size.z) dominant='x'; else if(size.z>=size.y && size.z>=size.x) dominant='z';
-    if(dominant==='x'){ src.rotation.set(0,0,Math.PI/2); }
-    if(dominant==='z'){ src.rotation.set(-Math.PI/2,0,0); }
-
-    // 3) нормализуем по высоте: делаем «высота=1м»
-    const box2=new THREE.Box3().setFromObject(src);
-    const h=Math.max(box2.getSize(new THREE.Vector3()).y,1e-6);
-    const norm=1/h;
-    src.scale.multiplyScalar(norm);
-
-    // 4) узнаем сечение (после нормализации)
-    const base=new THREE.Box3().setFromObject(src).getSize(new THREE.Vector3());
-    const sx=Math.max(base.x,1e-6), sz=Math.max(base.z,1e-6);
-
-    // 5) подготовим инстансер: spawnBetween(a,b, thickness)
-    function spawnBetween(a,b,th=BEAM_T){
-      const g=new THREE.Group();
-      const clone=src.clone(true);
-      g.add(clone);
-
-      // длина и направление
-      const dir=new THREE.Vector3().subVectors(b,a);
-      const len=dir.length(); if(len<1e-6) return null;
-
-      // масштаб: по Y — длина, по X/Z — толщина
-      g.scale.set(th/sx, len + BEAM_MITER_OVERLAP*2, th/sz);
-
-      // ориентируем вдоль (0,1,0) -> dir
-      const q=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), dir.clone().normalize());
-      g.quaternion.copy(q);
-
-      // позиция — середина отрезка
-      const mid=new THREE.Vector3().addVectors(a,b).multiplyScalar(0.5);
-      g.position.copy(mid);
-
-      g.traverse(o=>{ if(o.isMesh){ o.castShadow=false; o.receiveShadow=false; }});
-      scene.add(g);
-      return g;
-    }
-    return {spawnBetween};
-  }
-
-  // загрузили plank и построили «спавнер»
-  await new Promise((resolve,reject)=>{
-    L.load(MODEL_PLANK,(g)=>{
-      const src=g.scene;
-      src.traverse(o=>{ if(o.isMesh && o.material){ o.material.roughness=0.75; o.material.metalness=0.0; }});
-      plankUnitSpawner=prepareUnit(src);
-      // дальше — точная расстановка:
-      placeAllBeams();
-      resolve();
-    },undefined,reject);
-  });
-}
-
-function placeAllBeams(){
-  if(!plankUnitSpawner) return;
-  const {spawnBetween}=plankUnitSpawner;
-
-  const half = BEAM_T * 0.5;
-  const xL = -W/2 + BEAM_INSET_WALL + half;
-  const xR =  W/2 - BEAM_INSET_WALL - half;
-  const zB = -D/2 + BEAM_INSET_WALL + half; // задняя стена (mirror side)
-  const zF =  D/2 - BEAM_INSET_WALL - half; // передняя стена (door side)
-
-  const y0 = 0 + half;                          // низ стоек (центр)
-  const yT = H - BEAM_INSET_CEIL - half;        // верх стоек (центр)
-  const yH = yT;                                 // горизонтальные прямо под потолком
-
-  // 4 вертикальные стойки
-  spawnBetween(new THREE.Vector3(xL,y0,zB), new THREE.Vector3(xL,yT,zB));
-  spawnBetween(new THREE.Vector3(xR,y0,zB), new THREE.Vector3(xR,yT,zB));
-  spawnBetween(new THREE.Vector3(xL,y0,zF), new THREE.Vector3(xL,yT,zF));
-  spawnBetween(new THREE.Vector3(xR,y0,zF), new THREE.Vector3(xR,yT,zF));
-
-  // 4 горизонтальные под потолком (с небольшим перекрытием в углах)
-  spawnBetween(
-    new THREE.Vector3(xL-BEAM_MITER_OVERLAP,yH,zB),
-    new THREE.Vector3(xR+BEAM_MITER_OVERLAP,yH,zB)
-  ); // задняя
-  spawnBetween(
-    new THREE.Vector3(xL-BEAM_MITER_OVERLAP,yH,zF),
-    new THREE.Vector3(xR+BEAM_MITER_OVERLAP,yH,zF)
-  ); // передняя
-  spawnBetween(
-    new THREE.Vector3(xL,yH,zB-BEAM_MITER_OVERLAP),
-    new THREE.Vector3(xL,yH,zF+BEAM_MITER_OVERLAP)
-  ); // левая
-  spawnBetween(
-    new THREE.Vector3(xR,yH,zB-BEAM_MITER_OVERLAP),
-    new THREE.Vector3(xR,yH,zF+BEAM_MITER_OVERLAP)
-  ); // правая
-}
-
-/* ===== мебель/декор/дверь ===== */
+/* ===== мебеляшка ===== */
 function loadModels(){
   const L=new THREE.GLTFLoader();
 
@@ -281,34 +167,27 @@ function loadModels(){
     scene.add(m);
   });
 
-  // сундук (как было)
+  // сундук
   L.load(MODEL_CHEST,(g)=>{
     const chest=g.scene;
     chest.traverse(o=>{ if(o.isMesh){ o.castShadow=o.receiveShadow=true; } });
-
     const box0=new THREE.Box3().setFromObject(chest);
     chest.position.sub(box0.getCenter(new THREE.Vector3()));
-
-    const SIZE_MULT=1.5;
-    const targetDiag=1.2*SIZE_MULT;
+    const targetDiag=1.2*1.5; // было у нас
     const diag0=box0.getSize(new THREE.Vector3()).length();
     const s=diag0>0 ? targetDiag/diag0 : 1;
     chest.scale.setScalar(s);
-
     const box1=new THREE.Box3().setFromObject(chest);
     chest.position.y -= box1.min.y;
-
-    chest.position.x = POS_CHEST_X;
-    chest.position.z = POS_CHEST_Z;
+    chest.position.set(POS_CHEST_X, 0, POS_CHEST_Z);
     chest.rotation.y = Math.PI;
-
     scene.add(chest);
   });
 
-  // бочка ~ 1.0 м — СПРАВА от сундука (к зеркалу, минус Z)
+  // БОЧКА — у правого заднего угла (у зеркала)
   L.load(MODEL_BARREL,(g)=>{
-    const m=g.scene; fitByHeight(m, 1.00);
-    m.position.set(POS_BARREL_X, 0, POS_BARREL_Z);
+    const m=g.scene; fitByHeight(m, BARREL_HEIGHT);
+    m.position.copy(POS_BARREL);
     m.rotation.y=Math.PI;
     scene.add(m);
   });
@@ -324,7 +203,7 @@ function loadModels(){
   // дверь ~ 2.1 м — уложить в плоскость передней стены и утопить
   L.load(MODEL_DOOR,(g)=>{
     const m=g.scene; fitByHeight(m, 2.10);
-
+    // выбираем ориентацию с минимальной толщиной к камере
     const rotations=[0, Math.PI/2, Math.PI, -Math.PI/2];
     let bestR = 0, bestZ = Infinity;
     rotations.forEach(r=>{
@@ -339,7 +218,6 @@ function loadModels(){
   });
 }
 
-/* ===== старт ===== */
 window.addEventListener('load', init);
 </script>
 </body>
