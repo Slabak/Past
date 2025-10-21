@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Комната — щит поправлен</title>
+<title>Комната — дверь/сундук/бочка правки</title>
 <style>
   html,body{height:100%;margin:0;background:#000;overflow:hidden}
   #overlay{position:fixed;inset:0;display:grid;place-items:center;z-index:5;
@@ -23,10 +23,13 @@
     </div>
   </div>
 
+  <!-- libs -->
   <script src="assets/js/three.min.js"></script>
   <script src="assets/js/OrbitControls.js"></script>
   <script src="assets/js/GLTFLoader.js"></script>
+
 <script>
+/* простая VR-кнопка (без внешнего VRButton.js) */
 function createSimpleVRButton(renderer){
   const btn=document.createElement('button'); btn.className='vr-btn'; btn.textContent='Войти в VR';
   if(!('xr' in navigator)){ btn.textContent='VR не поддерживается'; btn.disabled=true; return btn; }
@@ -47,7 +50,7 @@ function createSimpleVRButton(renderer){
 /* размеры комнаты */
 const W=4, D=4, H=3;
 
-/* текстуры и модели */
+/* пути */
 const TEX_FLOOR='assets/textures/floor.jpg';
 const TEX_WALL ='assets/textures/wall.jpg';
 const TEX_CEIL ='assets/textures/potolok.jpg';
@@ -58,16 +61,17 @@ const MODEL_GLOBUS='assets/models/globus.glb';
 const MODEL_DOOR  ='assets/models/door.glb';
 const MODEL_SHIELD='assets/models/shield.glb';
 
-/* позиции */
-const POS_TABLE  = new THREE.Vector3( 0.0, 0.0, -D/2 + 0.55);
-const POS_CHEST_X = -W/2 + 0.45;
-const POS_CHEST_Z =  1.10;
-const POS_BARREL = new THREE.Vector3( -W/2 + 0.55, 0.0, -D/2 + 0.65 );
-const POS_GLOBUS  = new THREE.Vector3( W/2 - 0.55, 0.0, -D/2 + 0.90 );
-const POS_DOOR    = new THREE.Vector3( 0.0, 0.0,  D/2 - 0.005 );
-const POS_SHIELD  = new THREE.Vector3( W/2 - 0.07, 1.55, -0.40 ); // щит чуть выдвинут вперёд
+/* заранее подобранные позиции */
+const POS_TABLE   = new THREE.Vector3( 0.0, 0.0, -D/2 + 0.55);
+const POS_CHEST_X = -W/2 + 0.45;   // у левой стены
+const POS_CHEST_Z =  1.10;         // ближе к передней
+const POS_BARREL  = new THREE.Vector3( -W/2 + 0.55, 0.0, -D/2 + 0.65 ); // слева от стола у задней стены
+const POS_GLOBUS  = new THREE.Vector3(  W/2 - 0.55, 0.0, -D/2 + 0.90 );
+const POS_DOOR    = new THREE.Vector3(  0.0, 0.0,  D/2 - 0.02 ); // утопили чуть в переднюю стену
+const POS_SHIELD  = new THREE.Vector3(  W/2 - 0.07, 1.55, -0.40 );
 const SHIELD_HEIGHT = 0.80;
 
+/* сцена */
 let scene,camera,renderer,controls,tl;
 
 function init(){
@@ -138,6 +142,7 @@ function buildRoom(){
   const fire=new THREE.PointLight(0xffa860,0.58,5.0); fire.position.set(-1.4,1.15,1.1); scene.add(fire);
 }
 
+/* нормализация по высоте и постановка на пол */
 function fitByHeight(root, targetH){
   root.traverse(o=>{ if(o.isMesh){o.castShadow=o.receiveShadow=true; }});
   const b=new THREE.Box3().setFromObject(root);
@@ -153,21 +158,43 @@ function fitByHeight(root, targetH){
 function loadModels(){
   const L=new THREE.GLTFLoader();
 
+  /* стол */
   L.load(MODEL_TABLE,(g)=>{
     const m=g.scene; fitByHeight(m,0.78); m.position.copy(POS_TABLE); scene.add(m);
   });
+
+  /* сундук — ЧУТЬ МЕНЬШЕ (было ~1.2, стало 0.95) */
   L.load(MODEL_CHEST,(g)=>{
-    const chest=g.scene; fitByHeight(chest,1.2); chest.position.set(POS_CHEST_X,0,POS_CHEST_Z); chest.rotation.y=Math.PI; scene.add(chest);
+    const chest=g.scene; fitByHeight(chest,0.95);
+    chest.position.set(POS_CHEST_X,0,POS_CHEST_Z);
+    chest.rotation.y=Math.PI;
+    scene.add(chest);
   });
+
+  /* бочка — ЧУТЬ БОЛЬШЕ (было 1.0, стало 1.15) */
   L.load(MODEL_BARREL,(g)=>{
-    const m=g.scene; fitByHeight(m,1.0); m.position.copy(POS_BARREL); scene.add(m);
+    const m=g.scene; fitByHeight(m,1.15);
+    m.position.copy(POS_BARREL);
+    scene.add(m);
   });
+
+  /* глобус */
   L.load(MODEL_GLOBUS,(g)=>{
-    const m=g.scene; fitByHeight(m,1.2); m.position.copy(POS_GLOBUS); m.rotation.y=-Math.PI/2; scene.add(m);
+    const m=g.scene; fitByHeight(m,1.2);
+    m.position.copy(POS_GLOBUS);
+    m.rotation.y=-Math.PI/2;
+    scene.add(m);
   });
+
+  /* дверь — повернули лицом в комнату и утопили в переднюю стену */
   L.load(MODEL_DOOR,(g)=>{
-    const m=g.scene; fitByHeight(m,2.1); m.rotation.set(0,0,0); m.position.copy(POS_DOOR); scene.add(m);
+    const m=g.scene; fitByHeight(m,2.1);
+    m.rotation.set(0, Math.PI, 0);          // поворот к комнате
+    m.position.copy(POS_DOOR);              // почти в одной плоскости со стеной
+    scene.add(m);
   });
+
+  /* щит (как раньше) */
   L.load(MODEL_SHIELD,(g)=>{
     const shield=g.scene;
     fitByHeight(shield,SHIELD_HEIGHT);
