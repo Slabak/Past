@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Комната — фиксы двери</title>
+<title>Комната — дверь утоплена</title>
 <style>
   html,body{height:100%;margin:0;background:#000;overflow:hidden}
   #overlay{position:fixed;inset:0;display:grid;place-items:center;z-index:5;
@@ -19,7 +19,6 @@
     <div style="text-align:center">
       <div style="margin-bottom:12px;font-size:18px">Переносимся через портал…</div>
       <button id="enter">Войти</button>
-      <div style="margin-top:10px;font-size:12px;opacity:.7">Экран и VR (Quest) поддерживаются</div>
     </div>
   </div>
 
@@ -28,25 +27,27 @@
   <script src="assets/js/GLTFLoader.js"></script>
 
 <script>
+/* --- мини VR-кнопка --- */
 function createSimpleVRButton(renderer){
   const btn=document.createElement('button'); btn.className='vr-btn'; btn.textContent='Войти в VR';
   if(!('xr' in navigator)){ btn.textContent='VR не поддерживается'; btn.disabled=true; return btn; }
   let session=null;
   async function onEnd(){ session.removeEventListener('end', onEnd); session=null; btn.textContent='Войти в VR'; }
-  async function onStart(s){ session=s; s.addEventListener('end', onEnd); await renderer.xr.setSession(s); btn.textContent='Выйти из VR'; }
   btn.addEventListener('click', async ()=>{
     try{
       if(!session){
         const s=await navigator.xr.requestSession('immersive-vr',{requiredFeatures:['local-floor']});
-        onStart(s);
-      } else { await session.end(); }
+        session=s; s.addEventListener('end', onEnd); await renderer.xr.setSession(s); btn.textContent='Выйти из VR';
+      }else{ await session.end(); }
     }catch(e){ console.warn('XR error',e); }
   });
   return btn;
 }
 
+/* --- размеры комнаты --- */
 const W=4, D=4, H=3;
 
+/* --- пути --- */
 const TEX_FLOOR='assets/textures/floor.jpg';
 const TEX_WALL ='assets/textures/wall.jpg';
 const TEX_CEIL ='assets/textures/potolok.jpg';
@@ -57,6 +58,7 @@ const MODEL_GLOBUS='assets/models/globus.glb';
 const MODEL_DOOR  ='assets/models/door.glb';
 const MODEL_SHIELD='assets/models/shield.glb';
 
+/* --- позиции объектов --- */
 const POS_TABLE   = new THREE.Vector3( 0.0, 0.0, -D/2 + 0.55);
 const POS_CHEST_X = -W/2 + 0.45;
 const POS_CHEST_Z =  1.10;
@@ -135,6 +137,7 @@ function buildRoom(){
   const fire=new THREE.PointLight(0xffa860,0.58,5.0); fire.position.set(-1.4,1.15,1.1); scene.add(fire);
 }
 
+/* подгон по высоте + на пол */
 function fitByHeight(root, targetH){
   root.traverse(o=>{ if(o.isMesh){o.castShadow=o.receiveShadow=true; }});
   const b=new THREE.Box3().setFromObject(root);
@@ -145,6 +148,15 @@ function fitByHeight(root, targetH){
   root.position.sub(b2.getCenter(new THREE.Vector3()));
   const b3=new THREE.Box3().setFromObject(root);
   root.position.y -= b3.min.y;
+}
+
+/* аккуратное «утопление» во фронтальную стену */
+function snapToFrontWall(mesh, inset=-0.018){ // inset < 0 — утопить немного внутрь
+  const box=new THREE.Box3().setFromObject(mesh);
+  const maxZ=box.max.z;            // край, который ближе всего к зрителю
+  const target=D/2 + inset;        // плоскость стены с небольшим отрицательным отступом
+  const dz=target - maxZ;          // сколько сдвинуть весь объект
+  mesh.position.z += dz;
 }
 
 function loadModels(){
@@ -158,19 +170,17 @@ function loadModels(){
 
   L.load(MODEL_GLOBUS,(g)=>{ const m=g.scene; fitByHeight(m,1.2); m.position.copy(POS_GLOBUS); m.rotation.y=-Math.PI/2; scene.add(m); });
 
-  /* ДВЕРЬ: поворот на 90° вокруг Y и прижимаем к стене по Z */
+  /* ДВЕРЬ: поворот на 90° и точная подгонка к стене без щели */
   L.load(MODEL_DOOR,(g)=>{
     const m=g.scene;
     fitByHeight(m,2.1);
-    m.rotation.set(0, Math.PI/2, 0); // <<< ключевая строка: 90° вокруг Y
-
-    // после поворота — прижимаем "переднюю" грань к плоскости z = D/2
-    const box=new THREE.Box3().setFromObject(m);
-    const size=box.getSize(new THREE.Vector3());
-    const depth=size.z;                // текущая глубина модели после поворота
-    const eps=0.012;                   // чуть утопим в стену
-    m.position.set(0,0, D/2 - eps - depth/2);
-
+    m.rotation.set(0, Math.PI/2, 0);        // 90° вокруг Y
+    // черновая постановка — примерно к передней стене
+    const b0=new THREE.Box3().setFromObject(m);
+    const depth=b0.getSize(new THREE.Vector3()).z;
+    m.position.set(0,0, D/2 - depth*0.5);
+    // точная подгонка по bbox: утопить на 18 мм внутрь
+    snapToFrontWall(m, -0.018);
     scene.add(m);
   });
 
