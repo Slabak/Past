@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Комната — бочка слева от стола + щит</title>
+<title>Комната — щит поправлен</title>
 <style>
   html,body{height:100%;margin:0;background:#000;overflow:hidden}
   #overlay{position:fixed;inset:0;display:grid;place-items:center;z-index:5;
@@ -23,12 +23,10 @@
     </div>
   </div>
 
-  <!-- three.js -->
   <script src="assets/js/three.min.js"></script>
   <script src="assets/js/OrbitControls.js"></script>
   <script src="assets/js/GLTFLoader.js"></script>
 <script>
-/* ===== простая VR-кнопка без внешних файлов ===== */
 function createSimpleVRButton(renderer){
   const btn=document.createElement('button'); btn.className='vr-btn'; btn.textContent='Войти в VR';
   if(!('xr' in navigator)){ btn.textContent='VR не поддерживается'; btn.disabled=true; return btn; }
@@ -46,14 +44,13 @@ function createSimpleVRButton(renderer){
   return btn;
 }
 
-/* ===== размеры комнаты ===== */
+/* размеры комнаты */
 const W=4, D=4, H=3;
 
-/* ===== ресурсы ===== */
+/* текстуры и модели */
 const TEX_FLOOR='assets/textures/floor.jpg';
 const TEX_WALL ='assets/textures/wall.jpg';
 const TEX_CEIL ='assets/textures/potolok.jpg';
-
 const MODEL_TABLE ='assets/models/table.glb';
 const MODEL_BARREL='assets/models/barrel.glb';
 const MODEL_CHEST ='assets/models/chest.glb';
@@ -61,24 +58,16 @@ const MODEL_GLOBUS='assets/models/globus.glb';
 const MODEL_DOOR  ='assets/models/door.glb';
 const MODEL_SHIELD='assets/models/shield.glb';
 
-/* ===== позиции (метры) ===== */
-// стол — задняя стена под «зеркалом»
+/* позиции */
 const POS_TABLE  = new THREE.Vector3( 0.0, 0.0, -D/2 + 0.55);
-// сундук — левая стена, ближе к зрителю
 const POS_CHEST_X = -W/2 + 0.45;
 const POS_CHEST_Z =  1.10;
-// БОЧКА — СЛЕВА ОТ СТОЛА (задний левый угол)
 const POS_BARREL = new THREE.Vector3( -W/2 + 0.55, 0.0, -D/2 + 0.65 );
-const BARREL_HEIGHT = 1.0; // м
-// глобус — правая стена ближе к задней
 const POS_GLOBUS  = new THREE.Vector3( W/2 - 0.55, 0.0, -D/2 + 0.90 );
-// дверь — в плоскости передней стены, утоп на 5 мм
 const POS_DOOR    = new THREE.Vector3( 0.0, 0.0,  D/2 - 0.005 );
-// ЩИТ — правая стена, повыше, немного ближе к центру стены (чуть «правее» от глобуса)
-const POS_SHIELD  = new THREE.Vector3( W/2 - 0.02, 1.55, -0.40 );
+const POS_SHIELD  = new THREE.Vector3( W/2 - 0.07, 1.55, -0.40 ); // щит чуть выдвинут вперёд
 const SHIELD_HEIGHT = 0.80;
 
-/* ===== глобальные ===== */
 let scene,camera,renderer,controls,tl;
 
 function init(){
@@ -91,12 +80,13 @@ function init(){
 
   renderer=new THREE.WebGLRenderer({antialias:true});
   const isMobile=/Android|iPhone|iPad|iPod|Quest|Oculus/i.test(navigator.userAgent);
-  renderer.setPixelRatio(isMobile? 1 : Math.min(devicePixelRatio,2));
+  renderer.setPixelRatio(isMobile?1:Math.min(devicePixelRatio,2));
   renderer.setSize(innerWidth,innerHeight);
   renderer.outputColorSpace=THREE.SRGBColorSpace;
-  renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.05;
-  renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap;
-
+  renderer.toneMapping=THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure=1.05;
+  renderer.shadowMap.enabled=true;
+  renderer.shadowMap.type=THREE.PCFSoftShadowMap;
   renderer.xr.enabled=true;
   document.body.appendChild(renderer.domElement);
   document.body.appendChild(createSimpleVRButton(renderer));
@@ -108,11 +98,13 @@ function init(){
 
   tl=new THREE.TextureLoader();
 
-  buildRoom();     // стены/пол/потолок + свет
-  loadModels();    // мебель + щит
+  buildRoom();
+  loadModels();
 
   addEventListener('resize',()=>{
-    camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight);
+    camera.aspect=innerWidth/innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth,innerHeight);
   });
 
   renderer.setAnimationLoop(()=>{ controls.update(); renderer.render(scene,camera); });
@@ -122,7 +114,6 @@ function init(){
   },{once:true});
 }
 
-/* ===== комната ===== */
 function buildRoom(){
   const floorTex=tl.load(TEX_FLOOR); floorTex.wrapS=floorTex.wrapT=THREE.RepeatWrapping; floorTex.repeat.set(2,2); floorTex.colorSpace=THREE.SRGBColorSpace;
   const wallTex =tl.load(TEX_WALL ); wallTex.wrapS=wallTex.wrapT=THREE.ClampToEdgeWrapping; wallTex.colorSpace=THREE.SRGBColorSpace;
@@ -140,7 +131,6 @@ function buildRoom(){
   const ceil=new THREE.Mesh(new THREE.PlaneGeometry(W,D), new THREE.MeshStandardMaterial({map:ceilTex,roughness:.85}));
   ceil.position.set(0,H,0); ceil.rotation.x=Math.PI/2; scene.add(ceil);
 
-  // мягкий тёплый свет
   scene.add(new THREE.HemisphereLight(0xffdcb8,0x1b0e0a,0.38));
   scene.add(new THREE.AmbientLight(0xffe0bb,0.2));
   const dir=new THREE.DirectionalLight(0xffb06a,1.05);
@@ -148,7 +138,6 @@ function buildRoom(){
   const fire=new THREE.PointLight(0xffa860,0.58,5.0); fire.position.set(-1.4,1.15,1.1); scene.add(fire);
 }
 
-/* ===== утилита подгонки по высоте ===== */
 function fitByHeight(root, targetH){
   root.traverse(o=>{ if(o.isMesh){o.castShadow=o.receiveShadow=true; }});
   const b=new THREE.Box3().setFromObject(root);
@@ -158,97 +147,37 @@ function fitByHeight(root, targetH){
   const b2=new THREE.Box3().setFromObject(root);
   root.position.sub(b2.getCenter(new THREE.Vector3()));
   const b3=new THREE.Box3().setFromObject(root);
-  root.position.y -= b3.min.y; // на пол
+  root.position.y -= b3.min.y;
 }
 
-/* ===== загрузка моделей ===== */
 function loadModels(){
   const L=new THREE.GLTFLoader();
 
-  // стол ~ 0.78 м
   L.load(MODEL_TABLE,(g)=>{
-    const m=g.scene; fitByHeight(m, 0.78);
-    m.position.copy(POS_TABLE);
-    scene.add(m);
+    const m=g.scene; fitByHeight(m,0.78); m.position.copy(POS_TABLE); scene.add(m);
   });
-
-  // сундук
   L.load(MODEL_CHEST,(g)=>{
-    const chest=g.scene;
-    chest.traverse(o=>{ if(o.isMesh){ o.castShadow=o.receiveShadow=true; } });
-    const box0=new THREE.Box3().setFromObject(chest);
-    chest.position.sub(box0.getCenter(new THREE.Vector3()));
-    const targetDiag=1.2*1.5; // как раньше
-    const diag0=box0.getSize(new THREE.Vector3()).length();
-    const s=diag0>0 ? targetDiag/diag0 : 1;
-    chest.scale.setScalar(s);
-    const box1=new THREE.Box3().setFromObject(chest);
-    chest.position.y -= box1.min.y;
-    chest.position.set(POS_CHEST_X, 0, POS_CHEST_Z);
-    chest.rotation.y = Math.PI;
-    scene.add(chest);
+    const chest=g.scene; fitByHeight(chest,1.2); chest.position.set(POS_CHEST_X,0,POS_CHEST_Z); chest.rotation.y=Math.PI; scene.add(chest);
   });
-
-  // БОЧКА — СЛЕВА ОТ СТОЛА
   L.load(MODEL_BARREL,(g)=>{
-    const m=g.scene; fitByHeight(m, BARREL_HEIGHT);
-    m.position.copy(POS_BARREL);
-    m.rotation.y=0; // вдоль задней стены
-    scene.add(m);
+    const m=g.scene; fitByHeight(m,1.0); m.position.copy(POS_BARREL); scene.add(m);
   });
-
-  // глобус ~ 1.2 м — правая стена
   L.load(MODEL_GLOBUS,(g)=>{
-    const m=g.scene; fitByHeight(m, 1.20);
-    m.position.copy(POS_GLOBUS);
-    m.rotation.y=-Math.PI/2;
-    scene.add(m);
+    const m=g.scene; fitByHeight(m,1.2); m.position.copy(POS_GLOBUS); m.rotation.y=-Math.PI/2; scene.add(m);
   });
-
-  // дверь ~ 2.1 м — плоскость передней стены
   L.load(MODEL_DOOR,(g)=>{
-    const m=g.scene; fitByHeight(m, 2.10);
-    // минимальная толщина к стене
-    const rotations=[0, Math.PI/2, Math.PI, -Math.PI/2];
-    let bestR = 0, bestZ = Infinity;
-    rotations.forEach(r=>{
-      m.rotation.set(0,r,0);
-      const bb=new THREE.Box3().setFromObject(m);
-      const size=bb.getSize(new THREE.Vector3());
-      if(size.z < bestZ){ bestZ=size.z; bestR=r; }
-    });
-    m.rotation.set(0,bestR,0);
-    m.position.copy(POS_DOOR);
-    scene.add(m);
+    const m=g.scene; fitByHeight(m,2.1); m.rotation.set(0,0,0); m.position.copy(POS_DOOR); scene.add(m);
   });
-
-  // ЩИТ — на правую стену, повыше, чуть к центру
   L.load(MODEL_SHIELD,(g)=>{
     const shield=g.scene;
-    // подгоняем по высоте (щит плоский, но модель может быть с разными осями)
-    shield.traverse(o=>{ if(o.isMesh){ o.castShadow=o.receiveShadow=true; }});
-    // нормируем размер по высоте
-    (function fitShieldByHeight(root, targetH){
-      const b=new THREE.Box3().setFromObject(root);
-      const h=b.getSize(new THREE.Vector3()).y||1;
-      const k=targetH/h;
-      root.scale.setScalar(k);
-      const b2=new THREE.Box3().setFromObject(root);
-      root.position.sub(b2.getCenter(new THREE.Vector3()));
-    })(shield, SHIELD_HEIGHT);
-
-    // положить на правую стену и чуть утопить
-    shield.position.set(POS_SHIELD.x, POS_SHIELD.y, POS_SHIELD.z);
-    // развернуть лицом в комнату
-    shield.rotation.y = -Math.PI/2;
-    // лёгкий вынос из стены, чтобы не мигал
-    shield.position.x = W/2 - 0.01;
-
+    fitByHeight(shield,SHIELD_HEIGHT);
+    shield.rotation.y=-Math.PI/2;
+    shield.position.copy(POS_SHIELD);
     scene.add(shield);
   });
 }
 
-window.addEventListener('load', init);
+window.addEventListener('load',init);
 </script>
 </body>
 </html>
