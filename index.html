@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Комната — без балок, бочка у зеркала</title>
+<title>Комната — бочка слева от стола</title>
 <style>
   html,body{height:100%;margin:0;background:#000;overflow:hidden}
   #overlay{position:fixed;inset:0;display:grid;place-items:center;z-index:5;
@@ -28,7 +28,7 @@
   <script src="assets/js/OrbitControls.js"></script>
   <script src="assets/js/GLTFLoader.js"></script>
 <script>
-/* ===== мини VR-кнопка (без внешних файлов) ===== */
+/* ===== простая VR-кнопка без внешних файлов ===== */
 function createSimpleVRButton(renderer){
   const btn=document.createElement('button'); btn.className='vr-btn'; btn.textContent='Войти в VR';
   if(!('xr' in navigator)){ btn.textContent='VR не поддерживается'; btn.disabled=true; return btn; }
@@ -60,17 +60,17 @@ const MODEL_CHEST ='assets/models/chest.glb';
 const MODEL_GLOBUS='assets/models/globus.glb';
 const MODEL_DOOR  ='assets/models/door.glb';
 
-/* ===== позиции ===== */
+/* ===== позиции (метры) ===== */
 // стол — задняя стена под «зеркалом»
 const POS_TABLE  = new THREE.Vector3( 0.0, 0.0, -D/2 + 0.55);
 // сундук — левая стена, ближе к зрителю
 const POS_CHEST_X = -W/2 + 0.45;
 const POS_CHEST_Z =  1.10;
-// БОЧКА — ПРАВЫЙ УГОЛ у зеркала (задняя+правая стены)
-const POS_BARREL = new THREE.Vector3( W/2 - 0.45, 0.0, -D/2 + 0.45 );
+// БОЧКА — СЛЕВА ОТ СТОЛА (задний левый угол)
+const POS_BARREL = new THREE.Vector3( -W/2 + 0.55, 0.0, -D/2 + 0.65 );
 const BARREL_HEIGHT = 1.0; // м
 // глобус — правая стена ближе к задней
-const POS_GLOBUS  = new THREE.Vector3( W/2 - 0.55, 0.0, -D/2 + 0.9 );
+const POS_GLOBUS  = new THREE.Vector3( W/2 - 0.55, 0.0, -D/2 + 0.90 );
 // дверь — в плоскости передней стены, утоп на 5 мм
 const POS_DOOR    = new THREE.Vector3( 0.0, 0.0,  D/2 - 0.005 );
 
@@ -144,7 +144,7 @@ function buildRoom(){
   const fire=new THREE.PointLight(0xffa860,0.58,5.0); fire.position.set(-1.4,1.15,1.1); scene.add(fire);
 }
 
-/* ===== мебеляшка ===== */
+/* ===== загрузка моделей ===== */
 function loadModels(){
   const L=new THREE.GLTFLoader();
 
@@ -173,7 +173,7 @@ function loadModels(){
     chest.traverse(o=>{ if(o.isMesh){ o.castShadow=o.receiveShadow=true; } });
     const box0=new THREE.Box3().setFromObject(chest);
     chest.position.sub(box0.getCenter(new THREE.Vector3()));
-    const targetDiag=1.2*1.5; // было у нас
+    const targetDiag=1.2*1.5; // как раньше
     const diag0=box0.getSize(new THREE.Vector3()).length();
     const s=diag0>0 ? targetDiag/diag0 : 1;
     chest.scale.setScalar(s);
@@ -184,11 +184,11 @@ function loadModels(){
     scene.add(chest);
   });
 
-  // БОЧКА — у правого заднего угла (у зеркала)
+  // БОЧКА — СЛЕВА ОТ СТОЛА
   L.load(MODEL_BARREL,(g)=>{
     const m=g.scene; fitByHeight(m, BARREL_HEIGHT);
     m.position.copy(POS_BARREL);
-    m.rotation.y=Math.PI;
+    m.rotation.y=0; // вдоль задней стены
     scene.add(m);
   });
 
@@ -200,10 +200,10 @@ function loadModels(){
     scene.add(m);
   });
 
-  // дверь ~ 2.1 м — уложить в плоскость передней стены и утопить
+  // дверь ~ 2.1 м — плоскость передней стены
   L.load(MODEL_DOOR,(g)=>{
     const m=g.scene; fitByHeight(m, 2.10);
-    // выбираем ориентацию с минимальной толщиной к камере
+    // свернуть толщину к плоскости стены
     const rotations=[0, Math.PI/2, Math.PI, -Math.PI/2];
     let bestR = 0, bestZ = Infinity;
     rotations.forEach(r=>{
