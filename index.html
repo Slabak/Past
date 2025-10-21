@@ -3,16 +3,13 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Комната — стабильная и быстрая</title>
+<title>Комната — стабильная база (с модельными балками)</title>
 <style>
   html,body{height:100%;margin:0;background:#000;overflow:hidden}
   #overlay{position:fixed;inset:0;display:grid;place-items:center;z-index:5;
     background:radial-gradient(ellipse at center,rgba(0,0,0,.78),rgba(0,0,0,.95));
     color:#fff;font:16px/1.3 system-ui,-apple-system,Segoe UI,Roboto,Arial}
   #overlay button{padding:12px 18px;border:none;border-radius:10px;background:#ffb366;color:#000;cursor:pointer}
-  #loading{position:fixed;inset:0;display:none;place-items:center;z-index:6;color:#fff;font:14px system-ui}
-  .bar{width:260px;height:8px;background:rgba(255,255,255,.12);border-radius:8px;overflow:hidden;margin-top:10px}
-  .fill{height:100%;width:0;background:#ffb366;transition:width .15s}
   .vr-btn{position:fixed;left:12px;bottom:12px;z-index:7;background:#1e1e1e;color:#fff;border:1px solid #444;border-radius:8px;padding:10px 14px;font:14px system-ui;cursor:pointer}
   .vr-btn[disabled]{opacity:.4;cursor:not-allowed}
 </style>
@@ -25,18 +22,12 @@
       <div style="margin-top:10px;font-size:12px;opacity:.7">Экран и VR (Quest) поддерживаются</div>
     </div>
   </div>
-  <div id="loading">
-    <div>
-      <div id="ld-text" style="text-align:center">Загрузка… <span id="pc">0%</span></div>
-      <div class="bar"><div id="fill" class="fill"></div></div>
-    </div>
-  </div>
 
   <script src="assets/js/three.min.js"></script>
   <script src="assets/js/OrbitControls.js"></script>
   <script src="assets/js/GLTFLoader.js"></script>
 <script>
-/* ===== Встроенная простая VR-кнопка ===== */
+/* ===== простая встроенная VR-кнопка (без внешних файлов) ===== */
 function createSimpleVRButton(renderer){
   const btn=document.createElement('button'); btn.className='vr-btn'; btn.textContent='Войти в VR';
   if(!('xr' in navigator)){ btn.textContent='VR не поддерживается'; btn.disabled=true; return btn; }
@@ -54,26 +45,39 @@ function createSimpleVRButton(renderer){
   return btn;
 }
 
-/* ===== Константы / пути ===== */
-const W=4, D=4, H=3; // размеры комнаты (м)
+/* ===== размеры комнаты ===== */
+const W=4, D=4, H=3;
+
+/* ===== пути к ресурсам ===== */
 const TEX_FLOOR='assets/textures/floor.jpg';
 const TEX_WALL ='assets/textures/wall.jpg';
 const TEX_CEIL ='assets/textures/potolok.jpg';
+
 const MODEL_TABLE ='assets/models/table.glb';
 const MODEL_BARREL='assets/models/barrel.glb';
+const MODEL_CHEST ='assets/models/chest.glb';
+const MODEL_GLOBUS='assets/models/globus.glb';
+const MODEL_PLANK ='assets/models/plank.glb';
 const MODEL_DOOR  ='assets/models/door.glb';
-const MODEL_GLOBUS='assets/models/globus.glb'; // ты его кидал — вернул
 
-/* ===== Позиции ===== */
-const POS_TABLE  = new THREE.Vector3( 0.0, 0.0, -D/2 + 0.55);    // под «зеркалом»
-const POS_BARREL = new THREE.Vector3(-W/2 + 0.65, 0.0,  1.10);   // левая стена, ближе к игроку
-const POS_GLOBUS = new THREE.Vector3( W/2 - 0.55, 0.0, -D/2 + 0.9); // правая стена у задней
-const POS_DOOR   = new THREE.Vector3( 0.0, 0.0,  D/2 - 0.005);   // вплотную к передней стене
+/* ===== позиции объектов (как «раньше хорошо») ===== */
+// стол — задняя стена под «зеркалом»
+const POS_TABLE  = new THREE.Vector3( 0.0, 0.0, -D/2 + 0.55);
+// сундук — левая стена, ближе к зрителю
+const POS_CHEST_X = -W/2 + 0.45;
+const POS_CHEST_Z =  1.10;
+// бочка — справа от сундука вдоль той же левой стены
+const POS_BARREL_X = POS_CHEST_X + 0.80; // правее сундука
+const POS_BARREL_Z = POS_CHEST_Z;
+// глобус — правая стена ближе к задней
+const POS_GLOBUS  = new THREE.Vector3( W/2 - 0.55, 0.0, -D/2 + 0.9 );
+// дверь — строго в плоскости передней стены (утоплена на 5 мм)
+const POS_DOOR    = new THREE.Vector3( 0.0, 0.0,  D/2 - 0.005 );
 
-/* ===== Глобальные ===== */
-let scene,camera,renderer,controls,loopRunning=false;
+/* ===== глобальные ===== */
+let scene,camera,renderer,controls,loopRunning=false, tl;
 
-/* ===== Инициализация ===== */
+/* ===== инициализация ===== */
 function init(){
   scene=new THREE.Scene();
   scene.background=new THREE.Color(0x0b0706);
@@ -83,7 +87,6 @@ function init(){
   camera.position.set(0,1.6,2.8);
 
   renderer=new THREE.WebGLRenderer({antialias:true});
-  // Быстрее на мобилках/VR:
   const isMobile=/Android|iPhone|iPad|iPod|Quest|Oculus/i.test(navigator.userAgent);
   renderer.setPixelRatio(isMobile? 1 : Math.min(devicePixelRatio,2));
   renderer.setSize(innerWidth,innerHeight);
@@ -92,8 +95,6 @@ function init(){
   renderer.toneMappingExposure=1.05;
   renderer.shadowMap.enabled=true;
   renderer.shadowMap.type=THREE.PCFSoftShadowMap;
-  // Чуть скромнее карта теней — быстрее:
-  renderer.shadowMap.autoUpdate=true;
 
   renderer.xr.enabled=true;
   document.body.appendChild(renderer.domElement);
@@ -107,16 +108,11 @@ function init(){
   controls.rotateSpeed=-0.8;
   controls.dampingFactor=0.12;
 
-  // Свет
-  scene.add(new THREE.HemisphereLight(0xffdcb8,0x1b0e0a,0.38));
-  scene.add(new THREE.AmbientLight(0xffe0bb,0.2));
-  const dir=new THREE.DirectionalLight(0xffb06a,1.05);
-  dir.position.set(-2.5,3.2,1.5);
-  dir.castShadow=true; dir.shadow.mapSize.set(1024,1024); dir.shadow.radius=4;
-  scene.add(dir);
-  const fire=new THREE.PointLight(0xffa860,0.58,5.0); fire.position.set(-1.4,1.15,1.1); scene.add(fire);
+  tl=new THREE.TextureLoader();
 
-  buildRoom();
+  buildRoom();         // стены/пол/потолок
+  loadPlankBeams();    // БАЛКИ из plank.glb (как просил)
+  loadModels();        // стол, сундук, бочка, глобус, дверь
 
   addEventListener('resize',()=>{
     camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight);
@@ -129,32 +125,11 @@ function init(){
 
   document.getElementById('enter').addEventListener('click',()=>{
     document.getElementById('overlay').style.display='none';
-    startLoad();
   },{once:true});
 }
 
-/* ===== Комната и загрузка ===== */
-function startLoad(){
-  const loading=document.getElementById('loading');
-  const pc=document.getElementById('pc');
-  const fill=document.getElementById('fill');
-  loading.style.display='grid';
-
-  const mgr=new THREE.LoadingManager(()=>{
-    // готово
-    fill.style.width='100%'; pc.textContent='100%';
-    setTimeout(()=>loading.style.display='none',200);
-  },(_,loaded,total)=>{
-    const p=Math.max(0,Math.min(100, Math.round(loaded/Math.max(1,total)*100)));
-    pc.textContent=p+'%'; fill.style.width=p+'%';
-  });
-
-  loadModels(mgr);
-}
-
+/* ===== комната ===== */
 function buildRoom(){
-  const tl=new THREE.TextureLoader();
-  // Текстуры грузим сразу (без менеджера), они лёгкие:
   const floorTex=tl.load(TEX_FLOOR); floorTex.wrapS=floorTex.wrapT=THREE.RepeatWrapping; floorTex.repeat.set(2,2); floorTex.colorSpace=THREE.SRGBColorSpace;
   const wallTex =tl.load(TEX_WALL ); wallTex.wrapS=wallTex.wrapT=THREE.ClampToEdgeWrapping; wallTex.colorSpace=THREE.SRGBColorSpace;
   const ceilTex =tl.load(TEX_CEIL ); ceilTex.wrapS=ceilTex.wrapT=THREE.RepeatWrapping; ceilTex.repeat.set(2,2); ceilTex.colorSpace=THREE.SRGBColorSpace;
@@ -171,41 +146,115 @@ function buildRoom(){
   const ceil=new THREE.Mesh(new THREE.PlaneGeometry(W,D), new THREE.MeshStandardMaterial({map:ceilTex,roughness:.85}));
   ceil.position.set(0,H,0); ceil.rotation.x=Math.PI/2; scene.add(ceil);
 
-  // БАЛКИ — процедурно (без GLB, чтобы не тормозить)
-  addBeams();
+  // свет (мягкий тёплый)
+  scene.add(new THREE.HemisphereLight(0xffdcb8,0x1b0e0a,0.38));
+  scene.add(new THREE.AmbientLight(0xffe0bb,0.2));
+  const dir=new THREE.DirectionalLight(0xffb06a,1.05);
+  dir.position.set(-2.5,3.2,1.5); dir.castShadow=true; dir.shadow.mapSize.set(1024,1024); dir.shadow.radius=4;
+  scene.add(dir);
+  const fire=new THREE.PointLight(0xffa860,0.58,5.0); fire.position.set(-1.4,1.15,1.1); scene.add(fire);
 }
 
-/* ===== Процедурные балки (быстро) ===== */
-function addBeams(){
-  const TH=0.22; // толщина
-  const Y=H-TH/2; // высота для горизонтальных
-  const wood=new THREE.MeshStandardMaterial({color:0x9b6b3a, roughness:.75, metalness:0});
-  // вертикальные 4 стойки
-  const postGeo=new THREE.BoxGeometry(TH, H-0.02, TH);
-  const posts=[
-    [-W/2+TH/2, (H-0.02)/2, -D/2+TH/2],
-    [ W/2-TH/2, (H-0.02)/2, -D/2+TH/2],
-    [-W/2+TH/2, (H-0.02)/2,  D/2-TH/2],
-    [ W/2-TH/2, (H-0.02)/2,  D/2-TH/2],
-  ];
-  posts.forEach(p=>{ const m=new THREE.Mesh(postGeo, wood); m.position.set(...p); m.castShadow=false; m.receiveShadow=false; scene.add(m); });
-  // горизонтальные 4 по периметру
-  const hzX=new THREE.BoxGeometry(W-TH*2, TH, TH);   // зад/перед
-  const hzZ=new THREE.BoxGeometry(TH, TH, D-TH*2);   // лево/право
-  const hz=[
-    [0, Y, -D/2+TH/2, hzX], // задняя
-    [0, Y,  D/2-TH/2, hzX], // передняя
-    [-W/2+TH/2, Y, 0, hzZ], // левая
-    [ W/2-TH/2, Y, 0, hzZ], // правая
-  ];
-  hz.forEach(([x,y,z,g])=>{ const m=new THREE.Mesh(g, wood); m.position.set(x,y,z); m.castShadow=false; m.receiveShadow=false; scene.add(m); });
+/* ===== балки из plank.glb ===== */
+const BEAM_THICK=0.22;            // «толщина» балки (м)
+const BEAM_MITER_OVERLAP=0.04;    // небольшой нахлёст, чтобы без щелей
+const BEAM_INSET_WALL=0.00;       // отступ от стен (оставим 0)
+const POST_FLOOR_GAP=0.01;        // от пола (чтоб не мерцали)
+const BEAM_INSET_CEIL=0.00;       // от потолка
+
+function loadPlankBeams(){
+  const loader=new THREE.GLTFLoader();
+  loader.load(MODEL_PLANK,(gltf)=>{
+    const root=gltf.scene;
+
+    // Нормализуем plank так, чтобы его «длинная ось» стала осью Y и имела длину 1.
+    function prepareUnit(src){
+      const box=new THREE.Box3().setFromObject(src);
+      src.position.sub(box.getCenter(new THREE.Vector3()));
+
+      const s=box.getSize(new THREE.Vector3());
+      // определяем главную ось (самая длинная)
+      let axis='y';
+      if(s.x>=s.y && s.x>=s.z) axis='x';
+      else if(s.z>=s.y && s.z>=s.x) axis='z';
+
+      // поворачиваем так, чтобы длинная ось стала Y
+      if(axis==='x'){ src.rotation.set(0,0,Math.PI/2); }
+      if(axis==='z'){ src.rotation.set(-Math.PI/2,0,0); }
+
+      // масштабируем, чтобы высота (по Y) = 1
+      const box2=new THREE.Box3().setFromObject(src);
+      const lenY=Math.max(box2.getSize(new THREE.Vector3()).y,1e-6);
+      src.scale.multiplyScalar(1/lenY);
+
+      // текущие поперечные размеры (X,Z) после нормализации
+      const base=new THREE.Box3().setFromObject(src).getSize(new THREE.Vector3());
+      const baseX=Math.max(base.x,1e-6), baseZ=Math.max(base.z,1e-6);
+
+      const unit=new THREE.Group(); unit.add(src);
+
+      function spawnBetween(a,b,th=BEAM_THICK){
+        const clone=unit.clone(true);
+        const dir=new THREE.Vector3().subVectors(b,a);
+        const len=dir.length(); if(len<1e-6) return null;
+
+        // позиция — центр между A и B
+        const mid=new THREE.Vector3().addVectors(a,b).multiplyScalar(0.5);
+        clone.position.copy(mid);
+
+        // ориентация: из +Y в dir
+        const q=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), dir.clone().normalize());
+        clone.quaternion.copy(q);
+
+        // масштаб: по Y — длина, по X/Z — толщина
+        clone.scale.set(th/baseX, len + BEAM_MITER_OVERLAP*2, th/baseZ);
+
+        // тени у балок выключим (чистый контакт со стенами, быстрее)
+        clone.traverse(o=>{ if(o.isMesh){ o.castShadow=false; o.receiveShadow=false; } });
+
+        scene.add(clone);
+        return clone;
+      }
+
+      return {spawnBetween};
+    }
+
+    const {spawnBetween}=prepareUnit(root);
+
+    // координаты периметра
+    const half=BEAM_THICK*0.5;
+    const xL = -W/2 + BEAM_INSET_WALL + half;
+    const xR =  W/2 - BEAM_INSET_WALL - half;
+    const zB = -D/2 + BEAM_INSET_WALL + half; // задняя
+    const zF =  D/2 - BEAM_INSET_WALL - half; // передняя
+
+    const y0 = 0 + POST_FLOOR_GAP + half;           // низ стоек (центр)
+    const yT = H - BEAM_INSET_CEIL - half;          // верх стоек (центр)
+    const yH = yT;                                   // горизонтальные под потолком
+
+    // 4 вертикальные стойки
+    spawnBetween(new THREE.Vector3(xL,y0,zB), new THREE.Vector3(xL,yT,zB));
+    spawnBetween(new THREE.Vector3(xR,y0,zB), new THREE.Vector3(xR,yT,zB));
+    spawnBetween(new THREE.Vector3(xL,y0,zF), new THREE.Vector3(xL,yT,zF));
+    spawnBetween(new THREE.Vector3(xR,y0,zF), new THREE.Vector3(xR,yT,zF));
+
+    // 4 горизонтальные под потолком (периметр)
+    spawnBetween(new THREE.Vector3(xL - BEAM_MITER_OVERLAP, yH, zB),
+                 new THREE.Vector3(xR + BEAM_MITER_OVERLAP, yH, zB));
+    spawnBetween(new THREE.Vector3(xL - BEAM_MITER_OVERLAP, yH, zF),
+                 new THREE.Vector3(xR + BEAM_MITER_OVERLAP, yH, zF));
+    spawnBetween(new THREE.Vector3(xL, yH, zB - BEAM_MITER_OVERLAP),
+                 new THREE.Vector3(xL, yH, zF + BEAM_MITER_OVERLAP));
+    spawnBetween(new THREE.Vector3(xR, yH, zB - BEAM_MITER_OVERLAP),
+                 new THREE.Vector3(xR, yH, zF + BEAM_MITER_OVERLAP));
+  }, undefined, (e)=>console.warn('Ошибка plank.glb', e));
 }
 
-/* ===== Загрузка моделей с предсказуемыми размерами ===== */
-function loadModels(manager){
-  const L=new THREE.GLTFLoader(manager);
+/* ===== загрузка мебели/декора/двери ===== */
+function loadModels(){
+  const L=new THREE.GLTFLoader();
 
-  // helper: нормализация по ВЫСОТЕ, не по диагонали — стабильнее
+  // helper: нормализация по ВЫСОТЕ (стабильнее визуально)
   function fitByHeight(root, targetH){
     root.traverse(o=>{ if(o.isMesh){o.castShadow=o.receiveShadow=true; }});
     const b=new THREE.Box3().setFromObject(root);
@@ -225,15 +274,43 @@ function loadModels(manager){
     scene.add(m);
   });
 
-  // БОЧКА ~ 1.0 м
+  // СУНДУК — как раньше (по диагонали, ×1.5), у левой стены
+  L.load(MODEL_CHEST,(g)=>{
+    const chest=g.scene;
+    chest.traverse(o=>{ if(o.isMesh){ o.castShadow=o.receiveShadow=true; } });
+
+    // центр вокруг (0,0,0)
+    const box0=new THREE.Box3().setFromObject(chest);
+    chest.position.sub(box0.getCenter(new THREE.Vector3()));
+
+    // масштаб по диагонали (как в твоём стабильном варианте)
+    const SIZE_MULT=1.5;
+    const targetDiag=1.2*SIZE_MULT;
+    const diag0=box0.getSize(new THREE.Vector3()).length();
+    const s=diag0>0 ? targetDiag/diag0 : 1;
+    chest.scale.setScalar(s);
+
+    // поставить на пол
+    const box1=new THREE.Box3().setFromObject(chest);
+    chest.position.y -= box1.min.y;
+
+    // позиция и поворот
+    chest.position.x = POS_CHEST_X;
+    chest.position.z = POS_CHEST_Z;
+    chest.rotation.y = Math.PI; // вдоль левой стены, «лицом» в комнату
+
+    scene.add(chest);
+  });
+
+  // БОЧКА ~ 1.0 м — СПРАВА от сундука вдоль той же левой стены
   L.load(MODEL_BARREL,(g)=>{
     const m=g.scene; fitByHeight(m, 1.00);
-    m.position.copy(POS_BARREL);
-    m.rotation.y=Math.PI*0.5;
+    m.position.set(POS_BARREL_X, 0, POS_BARREL_Z);
+    m.rotation.y=Math.PI; // ориентируем как сундук
     scene.add(m);
   });
 
-  // ГЛОБУС ~ 1.2 м
+  // ГЛОБУС ~ 1.2 м — правая стена, ближе к задней
   L.load(MODEL_GLOBUS,(g)=>{
     const m=g.scene; fitByHeight(m, 1.20);
     m.position.copy(POS_GLOBUS);
@@ -241,16 +318,17 @@ function loadModels(manager){
     scene.add(m);
   });
 
-  // ДВЕРЬ ~ 2.1 м, строго в плоскости стены
+  // ДВЕРЬ ~ 2.1 м — строго в плоскости передней стены (не под 90°!)
   L.load(MODEL_DOOR,(g)=>{
     const m=g.scene; fitByHeight(m, 2.10);
-    m.rotation.y=Math.PI;
-    m.position.copy(POS_DOOR); // уже вплотную (−0.005)
+    m.rotation.y=Math.PI;          // лицом в комнату
+    m.rotation.x=0; m.rotation.z=0; // НЕ заваливать!
+    m.position.copy(POS_DOOR);     // z = D/2 - 0.005 (утоплена)
     scene.add(m);
   });
 }
 
-/* ===== Старт ===== */
+/* ===== старт ===== */
 window.addEventListener('load', init);
 </script>
 </body>
