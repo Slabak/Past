@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Комната — бочка слева от стола</title>
+<title>Комната — бочка слева от стола + щит</title>
 <style>
   html,body{height:100%;margin:0;background:#000;overflow:hidden}
   #overlay{position:fixed;inset:0;display:grid;place-items:center;z-index:5;
@@ -59,6 +59,7 @@ const MODEL_BARREL='assets/models/barrel.glb';
 const MODEL_CHEST ='assets/models/chest.glb';
 const MODEL_GLOBUS='assets/models/globus.glb';
 const MODEL_DOOR  ='assets/models/door.glb';
+const MODEL_SHIELD='assets/models/shield.glb';
 
 /* ===== позиции (метры) ===== */
 // стол — задняя стена под «зеркалом»
@@ -73,6 +74,9 @@ const BARREL_HEIGHT = 1.0; // м
 const POS_GLOBUS  = new THREE.Vector3( W/2 - 0.55, 0.0, -D/2 + 0.90 );
 // дверь — в плоскости передней стены, утоп на 5 мм
 const POS_DOOR    = new THREE.Vector3( 0.0, 0.0,  D/2 - 0.005 );
+// ЩИТ — правая стена, повыше, немного ближе к центру стены (чуть «правее» от глобуса)
+const POS_SHIELD  = new THREE.Vector3( W/2 - 0.02, 1.55, -0.40 );
+const SHIELD_HEIGHT = 0.80;
 
 /* ===== глобальные ===== */
 let scene,camera,renderer,controls,tl;
@@ -105,7 +109,7 @@ function init(){
   tl=new THREE.TextureLoader();
 
   buildRoom();     // стены/пол/потолок + свет
-  loadModels();    // мебель
+  loadModels();    // мебель + щит
 
   addEventListener('resize',()=>{
     camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight);
@@ -144,21 +148,22 @@ function buildRoom(){
   const fire=new THREE.PointLight(0xffa860,0.58,5.0); fire.position.set(-1.4,1.15,1.1); scene.add(fire);
 }
 
+/* ===== утилита подгонки по высоте ===== */
+function fitByHeight(root, targetH){
+  root.traverse(o=>{ if(o.isMesh){o.castShadow=o.receiveShadow=true; }});
+  const b=new THREE.Box3().setFromObject(root);
+  const h=b.getSize(new THREE.Vector3()).y||1;
+  const k=targetH/h;
+  root.scale.setScalar(k);
+  const b2=new THREE.Box3().setFromObject(root);
+  root.position.sub(b2.getCenter(new THREE.Vector3()));
+  const b3=new THREE.Box3().setFromObject(root);
+  root.position.y -= b3.min.y; // на пол
+}
+
 /* ===== загрузка моделей ===== */
 function loadModels(){
   const L=new THREE.GLTFLoader();
-
-  function fitByHeight(root, targetH){
-    root.traverse(o=>{ if(o.isMesh){o.castShadow=o.receiveShadow=true; }});
-    const b=new THREE.Box3().setFromObject(root);
-    const h=b.getSize(new THREE.Vector3()).y||1;
-    const k=targetH/h;
-    root.scale.setScalar(k);
-    const b2=new THREE.Box3().setFromObject(root);
-    root.position.sub(b2.getCenter(new THREE.Vector3()));
-    const b3=new THREE.Box3().setFromObject(root);
-    root.position.y -= b3.min.y; // на пол
-  }
 
   // стол ~ 0.78 м
   L.load(MODEL_TABLE,(g)=>{
@@ -203,7 +208,7 @@ function loadModels(){
   // дверь ~ 2.1 м — плоскость передней стены
   L.load(MODEL_DOOR,(g)=>{
     const m=g.scene; fitByHeight(m, 2.10);
-    // свернуть толщину к плоскости стены
+    // минимальная толщина к стене
     const rotations=[0, Math.PI/2, Math.PI, -Math.PI/2];
     let bestR = 0, bestZ = Infinity;
     rotations.forEach(r=>{
@@ -215,6 +220,31 @@ function loadModels(){
     m.rotation.set(0,bestR,0);
     m.position.copy(POS_DOOR);
     scene.add(m);
+  });
+
+  // ЩИТ — на правую стену, повыше, чуть к центру
+  L.load(MODEL_SHIELD,(g)=>{
+    const shield=g.scene;
+    // подгоняем по высоте (щит плоский, но модель может быть с разными осями)
+    shield.traverse(o=>{ if(o.isMesh){ o.castShadow=o.receiveShadow=true; }});
+    // нормируем размер по высоте
+    (function fitShieldByHeight(root, targetH){
+      const b=new THREE.Box3().setFromObject(root);
+      const h=b.getSize(new THREE.Vector3()).y||1;
+      const k=targetH/h;
+      root.scale.setScalar(k);
+      const b2=new THREE.Box3().setFromObject(root);
+      root.position.sub(b2.getCenter(new THREE.Vector3()));
+    })(shield, SHIELD_HEIGHT);
+
+    // положить на правую стену и чуть утопить
+    shield.position.set(POS_SHIELD.x, POS_SHIELD.y, POS_SHIELD.z);
+    // развернуть лицом в комнату
+    shield.rotation.y = -Math.PI/2;
+    // лёгкий вынос из стены, чтобы не мигал
+    shield.position.x = W/2 - 0.01;
+
+    scene.add(shield);
   });
 }
 
