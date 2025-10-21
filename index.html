@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Комната — фикс балок, бочки и двери</title>
+<title>Комната — фикс балок и бочки</title>
 <style>
   html,body{height:100%;margin:0;background:#000;overflow:hidden}
   #overlay{position:fixed;inset:0;display:grid;place-items:center;z-index:5;
@@ -27,7 +27,7 @@
   <script src="assets/js/OrbitControls.js"></script>
   <script src="assets/js/GLTFLoader.js"></script>
 <script>
-/* ===== простая встроенная VR-кнопка ===== */
+/* ===== простая VR-кнопка (без внешних файлов) ===== */
 function createSimpleVRButton(renderer){
   const btn=document.createElement('button'); btn.className='vr-btn'; btn.textContent='Войти в VR';
   if(!('xr' in navigator)){ btn.textContent='VR не поддерживается'; btn.disabled=true; return btn; }
@@ -57,25 +57,24 @@ const MODEL_TABLE ='assets/models/table.glb';
 const MODEL_BARREL='assets/models/barrel.glb';
 const MODEL_CHEST ='assets/models/chest.glb';
 const MODEL_GLOBUS='assets/models/globus.glb';
-const MODEL_PLANK ='assets/models/plank.glb';
 const MODEL_DOOR  ='assets/models/door.glb';
 
-/* ===== позиции (как договаривались) ===== */
+/* ===== позиции ===== */
 // стол — задняя стена под «зеркалом»
 const POS_TABLE  = new THREE.Vector3( 0.0, 0.0, -D/2 + 0.55);
 // сундук — левая стена, ближе к зрителю
 const POS_CHEST_X = -W/2 + 0.45;
 const POS_CHEST_Z =  1.10;
-// бочка — СПРАВА от сундука ВДОЛЬ той же левой стены (двигаем по Z)
-const POS_BARREL_X = POS_CHEST_X;          // тот же X, чтобы вдоль стены
-const POS_BARREL_Z = POS_CHEST_Z + 0.90;   // правее (если смотришь на сундук) — вперёд по Z
+// бочка — СПРАВА от сундука (к зеркалу, т.е. в сторону минус Z), вдоль той же левой стены
+const POS_BARREL_X = POS_CHEST_X;
+const POS_BARREL_Z = POS_CHEST_Z - 0.90;
 // глобус — правая стена ближе к задней
 const POS_GLOBUS  = new THREE.Vector3( W/2 - 0.55, 0.0, -D/2 + 0.9 );
 // дверь — плоскость передней стены, утоп на 5мм
 const POS_DOOR    = new THREE.Vector3( 0.0, 0.0,  D/2 - 0.005 );
 
 /* ===== глобальные ===== */
-let scene,camera,renderer,controls,loopRunning=false, tl;
+let scene,camera,renderer,controls,tl;
 
 /* ===== инициализация ===== */
 function init(){
@@ -105,18 +104,15 @@ function init(){
 
   tl=new THREE.TextureLoader();
 
-  buildRoom();         // стены/пол/потолок + свет
-  loadPlankBeams();    // балКИ из модели, без щелей
-  loadModels();        // стол, сундук, бочка, глобус, дверь
+  buildRoom();        // стены/пол/потолок + свет
+  buildBoxBeams();    // балки — геометрией, без перекосов
+  loadModels();       // стол, сундук, бочка, глобус, дверь
 
   addEventListener('resize',()=>{
     camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight);
   });
 
-  if(!loopRunning){
-    loopRunning=true;
-    renderer.setAnimationLoop(()=>{ controls.update(); renderer.render(scene,camera); });
-  }
+  renderer.setAnimationLoop(()=>{ controls.update(); renderer.render(scene,camera); });
 
   document.getElementById('enter').addEventListener('click',()=>{
     document.getElementById('overlay').style.display='none';
@@ -149,80 +145,31 @@ function buildRoom(){
   const fire=new THREE.PointLight(0xffa860,0.58,5.0); fire.position.set(-1.4,1.15,1.1); scene.add(fire);
 }
 
-/* ===== балки из plank.glb (без щелей) ===== */
-const BEAM_THICK=0.22;          // толщина балки
-const BEAM_MITER_OVERLAP=0.04;  // нахлёст в стык
-const POST_FLOOR_GAP=0.01;      // от пола (м)
-const EPS=0.001;                // микрозазор к потолку
+/* ===== балки “BoxGeometry” (ровно по углам и под потолком) ===== */
+function buildBoxBeams(){
+  const t = 0.22;          // толщина
+  const eps = 0.001;       // микрозазор
+  const mat = new THREE.MeshStandardMaterial({color:0x2a1c12, roughness:.75, metalness:0});
 
-function loadPlankBeams(){
-  const loader=new THREE.GLTFLoader();
-  loader.load(MODEL_PLANK,(gltf)=>{
-    const root=gltf.scene;
+  // вертикальные
+  const vGeo = new THREE.BoxGeometry(t, H - eps, t);
+  const v1 = new THREE.Mesh(vGeo, mat); v1.position.set(-W/2 + t/2, (H-eps)/2, -D/2 + t/2);
+  const v2 = new THREE.Mesh(vGeo, mat); v2.position.set( W/2 - t/2, (H-eps)/2, -D/2 + t/2);
+  const v3 = new THREE.Mesh(vGeo, mat); v3.position.set(-W/2 + t/2, (H-eps)/2,  D/2 - t/2);
+  const v4 = new THREE.Mesh(vGeo, mat); v4.position.set( W/2 - t/2, (H-eps)/2,  D/2 - t/2);
+  [v1,v2,v3,v4].forEach(m=>{ m.castShadow=false; m.receiveShadow=false; scene.add(m); });
 
-    function prepareUnit(src){
-      const box=new THREE.Box3().setFromObject(src);
-      src.position.sub(box.getCenter(new THREE.Vector3()));
-
-      const s=box.getSize(new THREE.Vector3());
-      let axis='y'; if(s.x>=s.y && s.x>=s.z) axis='x'; else if(s.z>=s.y && s.z>=s.x) axis='z';
-      if(axis==='x') src.rotation.set(0,0,Math.PI/2);
-      if(axis==='z') src.rotation.set(-Math.PI/2,0,0);
-
-      const box2=new THREE.Box3().setFromObject(src), lenY=Math.max(box2.getSize(new THREE.Vector3()).y,1e-6);
-      src.scale.multiplyScalar(1/lenY);
-
-      const base=new THREE.Box3().setFromObject(src).getSize(new THREE.Vector3());
-      const baseX=Math.max(base.x,1e-6), baseZ=Math.max(base.z,1e-6);
-
-      const unit=new THREE.Group(); unit.add(src);
-
-      function spawnBetween(a,b,th=BEAM_THICK){
-        const clone=unit.clone(true);
-        const dir=new THREE.Vector3().subVectors(b,a); const len=dir.length(); if(len<1e-6) return null;
-        const mid=new THREE.Vector3().addVectors(a,b).multiplyScalar(0.5);
-        clone.position.copy(mid);
-        const q=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), dir.clone().normalize());
-        clone.quaternion.copy(q);
-        clone.scale.set(th/baseX, len + BEAM_MITER_OVERLAP*2, th/baseZ);
-        clone.traverse(o=>{ if(o.isMesh){ o.castShadow=false; o.receiveShadow=false; }});
-        scene.add(clone);
-        return clone;
-      }
-      return {spawnBetween};
-    }
-
-    const {spawnBetween}=prepareUnit(root);
-
-    const half=BEAM_THICK*0.5;
-    const xL = -W/2 + half;
-    const xR =  W/2 - half;
-    const zB = -D/2 + half; // задняя
-    const zF =  D/2 - half; // передняя
-
-    // верт. стойки: от пола +POST_FLOOR_GAP до потолка - EPS
-    const yBottom = POST_FLOOR_GAP + half;
-    const yTop    = H - EPS - half;
-
-    // гор. под потолком: центр на высоте H - half - EPS
-    const yHoriz  = H - EPS - half;
-
-    // 4 вертикальные
-    spawnBetween(new THREE.Vector3(xL,yBottom,zB), new THREE.Vector3(xL,yTop,zB));
-    spawnBetween(new THREE.Vector3(xR,yBottom,zB), new THREE.Vector3(xR,yTop,zB));
-    spawnBetween(new THREE.Vector3(xL,yBottom,zF), new THREE.Vector3(xL,yTop,zF));
-    spawnBetween(new THREE.Vector3(xR,yBottom,zF), new THREE.Vector3(xR,yTop,zF));
-
-    // 4 горизонтальные под потолком (периметр), с нахлёстом
-    spawnBetween(new THREE.Vector3(xL - BEAM_MITER_OVERLAP, yHoriz, zB),
-                 new THREE.Vector3(xR + BEAM_MITER_OVERLAP, yHoriz, zB));
-    spawnBetween(new THREE.Vector3(xL - BEAM_MITER_OVERLAP, yHoriz, zF),
-                 new THREE.Vector3(xR + BEAM_MITER_OVERLAP, yHoriz, zF));
-    spawnBetween(new THREE.Vector3(xL, yHoriz, zB - BEAM_MITER_OVERLAP),
-                 new THREE.Vector3(xL, yHoriz, zF + BEAM_MITER_OVERLAP));
-    spawnBetween(new THREE.Vector3(xR, yHoriz, zB - BEAM_MITER_OVERLAP),
-                 new THREE.Vector3(xR, yHoriz, zF + BEAM_MITER_OVERLAP));
-  }, undefined, (e)=>console.warn('Ошибка plank.glb', e));
+  // горизонтальные под потолком
+  const y = H - t/2 - eps;
+  const hX = new THREE.Mesh(new THREE.BoxGeometry(W + t, t, t), mat); // задняя
+  hX.position.set(0, y, -D/2 + t/2);
+  const hX2= new THREE.Mesh(new THREE.BoxGeometry(W + t, t, t), mat); // передняя
+  hX2.position.set(0, y,  D/2 - t/2);
+  const hZ = new THREE.Mesh(new THREE.BoxGeometry(t, t, D + t), mat); // левая
+  hZ.position.set(-W/2 + t/2, y, 0);
+  const hZ2= new THREE.Mesh(new THREE.BoxGeometry(t, t, D + t), mat); // правая
+  hZ2.position.set( W/2 - t/2, y, 0);
+  [hX,hX2,hZ,hZ2].forEach(m=>{ m.castShadow=false; m.receiveShadow=false; scene.add(m); });
 }
 
 /* ===== загрузка мебели/декора/двери ===== */
@@ -248,7 +195,7 @@ function loadModels(){
     scene.add(m);
   });
 
-  // СУНДУК — как раньше (по диагонали ×1.5)
+  // СУНДУК — как раньше
   L.load(MODEL_CHEST,(g)=>{
     const chest=g.scene;
     chest.traverse(o=>{ if(o.isMesh){ o.castShadow=o.receiveShadow=true; } });
@@ -272,11 +219,11 @@ function loadModels(){
     scene.add(chest);
   });
 
-  // БОЧКА ~ 1.0 м — СПРАВА от сундука вдоль ЛЕВОЙ стены (тот же X, другой Z)
+  // БОЧКА ~ 1.0 м — СПРАВА от сундука к зеркалу (минус Z), та же левая стена
   L.load(MODEL_BARREL,(g)=>{
     const m=g.scene; fitByHeight(m, 1.00);
     m.position.set(POS_BARREL_X, 0, POS_BARREL_Z);
-    m.rotation.y=Math.PI; // идём вдоль стены — ориентация как у сундука
+    m.rotation.y=Math.PI;
     scene.add(m);
   });
 
@@ -288,11 +235,10 @@ function loadModels(){
     scene.add(m);
   });
 
-  // ДВЕРЬ ~ 2.1 м — АВТО-ориентация в плоскость стены + утоп
+  // ДВЕРЬ ~ 2.1 м — ориентируем в плоскость стены + утопление на 5 мм
   L.load(MODEL_DOOR,(g)=>{
     const m=g.scene; fitByHeight(m, 2.10);
 
-    // Подберём поворот по Y так, чтобы толщина была по оси Z (минимальная Z)
     const rotations=[0, Math.PI/2, Math.PI, -Math.PI/2];
     let bestR = 0, bestZ = Infinity;
     rotations.forEach(r=>{
@@ -302,8 +248,6 @@ function loadModels(){
       if(size.z < bestZ){ bestZ=size.z; bestR=r; }
     });
     m.rotation.set(0,bestR,0);
-
-    // ставим в плоскость передней стены, утопляем на 5 мм
     m.position.copy(POS_DOOR);
     scene.add(m);
   });
