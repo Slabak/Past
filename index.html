@@ -68,13 +68,13 @@ const TEX_CEIL  ='assets/textures/potolok.jpg?v=3';
 const TEX_MIRROR='assets/textures/mirror.jpg';
 
 // Модели
-const MODEL_CHEST  ='assets/models/chest.glb?v=2';   // новый сундук
+const MODEL_CHEST  ='assets/models/chest.glb?v=2';
 const MODEL_BARREL ='assets/models/barrel.glb';
 const MODEL_TABLE  ='assets/models/table.glb';
 const MODEL_GLOBUS ='assets/models/globus.glb';
 const MODEL_DOOR   ='assets/models/door.glb';
 const MODEL_SHIELD ='assets/models/shield.glb';
-const MODEL_BENCH  ='assets/models/bench.glb?v=1';   // ← скамейка
+const MODEL_BENCH  ='assets/models/bench.glb?v=1';
 
 // Позиции
 const POS_CHEST_X = -W/2 + 0.45;
@@ -84,9 +84,9 @@ const POS_TABLE    = new THREE.Vector3( 0.0, 0, -D/2 + 0.55);        // у за�
 const POS_GLOBUS   = new THREE.Vector3( W/2 - 0.55, 0, -D/2 + 0.90); // правая часть задней стены
 const POS_SHIELD   = new THREE.Vector3( W/2 - 0.07, 1.55, -0.40);    // над глобусом на правой стене
 
-// Скамейка — перед столом, чуть под углом
-const POS_BENCH    = new THREE.Vector3( POS_TABLE.x + 0.05, 0, POS_TABLE.z + 0.42 );
-const ROT_BENCH_Y  = 0.22; // ~12.6° вправо, будто отодвинули
+// Скамейка — перед столом, ЧУТЬ ДАЛЬШЕ от стола (увеличил зазор с 0.42 до 0.62)
+const POS_BENCH    = new THREE.Vector3( POS_TABLE.x + 0.05, 0, POS_TABLE.z + 0.62 );
+const ROT_BENCH_Y  = 0.22; // ~12.6° вправо
 
 // Музыка (опционально)
 const MUSIC_MP3='assets/music/music.mp3';
@@ -286,13 +286,13 @@ async function loadModels(manager){
     scene.add(m); res();
   }));
 
-  // Скамейка — перед столом, чуть под углом
+  // Скамейка — перед столом, теперь дальше от стола
   await new Promise((res)=>L.load(MODEL_BENCH,(g)=>{
     const m=g.scene; fitByHeight(m,0.48);       // высота сиденья ~0.48 м
     m.position.copy(POS_BENCH);
     m.rotation.y = ROT_BENCH_Y;
-    // лёгкий сдвиг от стены, чтобы не «залазила»
-    m.position.z = Math.min(m.position.z, -D/2 + 0.95);
+    // лёгкий сдвиг от задней стены, если вдруг близко
+    m.position.z = Math.min(m.position.z, -D/2 + 1.05);
     scene.add(m); res();
   }));
 
