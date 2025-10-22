@@ -12,22 +12,20 @@
   .btn{cursor:pointer;border:0;border-radius:10px;padding:12px 16px;background:#6b3c1e;color:#fff;font-weight:600}
   .btn.secondary{background:#3a2a22}
   .note{font-size:12px;opacity:.75}
+
   #loading{position:fixed;inset:0;display:none;place-items:center;z-index:12;background:radial-gradient(ellipse at center,rgba(0,0,0,.88),rgba(0,0,0,.98));color:#fff}
   .loadbox{display:flex;flex-direction:column;align-items:center;gap:12px}
   .ring{width:110px;height:110px;border-radius:50%;background:conic-gradient(#ffb366 var(--p,0%), rgba(255,255,255,.08) 0);-webkit-mask:radial-gradient(circle at center, transparent 58%, #000 60%);mask:radial-gradient(circle at center, transparent 58%, #000 60%);box-shadow:0 0 0 1px rgba(255,255,255,.1) inset}
   .percent{font:18px/1.1 monospace}
   .hint{font:14px;opacity:.85;animation:pulse 1.6s ease-in-out infinite}
   @keyframes pulse{0%{opacity:.55}50%{opacity:1}100%{opacity:.55}}
+
   #black{position:fixed;inset:0;background:#000;pointer-events:none;z-index:11;opacity:0;transition:opacity .5s ease}
   #black.on{opacity:1}
   #black .msg{position:absolute;left:0;right:0;bottom:20%;text-align:center;color:#fff;font-size:16px;opacity:.9}
-  canvas.fade-in{animation:fi .5s ease forwards}@keyframes fi{from{opacity:0}to{opacity:1}}
 
-  /* VR HUD */
-  #hud{position:fixed;right:10px;bottom:10px;z-index:20;background:rgba(0,0,0,.55);color:#fff;font:12px/1.35 monospace;border:1px solid rgba(255,255,255,.2);border-radius:8px;padding:8px 10px;display:none;max-width:60vw}
-  #hud.show{display:block}
-  #hud .hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;opacity:.9}
-  #hud button{font:12px monospace;border:1px solid rgba(255,255,255,.25);background:rgba(255,255,255,.07);color:#fff;border-radius:6px;cursor:pointer;padding:2px 6px}
+  canvas.fade-in{animation:fi .5s ease forwards}
+  @keyframes fi{from{opacity:0}to{opacity:1}}
 </style>
 </head>
 <body>
@@ -50,12 +48,7 @@
 
   <div id="black"><div class="msg">переносим материю…</div></div>
 
-  <!-- VR HUD -->
-  <div id="hud">
-    <div class="hdr">VR-HUD <button id="hudToggle">hide</button></div>
-    <div id="hudLog">…</div>
-  </div>
-
+  <!-- three.js -->
   <script src="assets/js/three.min.js"></script>
   <script src="assets/js/OrbitControls.js"></script>
   <script src="assets/js/GLTFLoader.js"></script>
@@ -79,7 +72,7 @@ const MODEL_LANTERN='assets/models/lantern.glb'; // опционально
 
 const MUSIC='assets/music/music.mp3';
 
-/* проверенные позы */
+/* проверенные позиции */
 const POS_CHEST_X=-W/2+0.45, POS_CHEST_Z=1.10;
 const POS_BARREL=new THREE.Vector3(-W/2+0.55,0,-D/2+0.65);
 const POS_TABLE =new THREE.Vector3(0,0,-D/2+0.55);
@@ -88,40 +81,33 @@ const POS_SHIELD=new THREE.Vector3(W/2-0.07,1.55,-0.40);
 const POS_BENCH =new THREE.Vector3(POS_TABLE.x+0.05,0,POS_TABLE.z+0.62);
 const ROT_BENCH_Y=0.22;
 
-/* UI refs */
+/* UI */
 const overlay=document.getElementById('overlay');
 const loading=document.getElementById('loading');
 const ring=document.getElementById('ring');
 const percent=document.getElementById('percent');
 const black=document.getElementById('black');
-
-const hud=document.getElementById('hud');
-const hudLog=document.getElementById('hudLog');
-document.getElementById('hudToggle').onclick=()=>hud.classList.toggle('show');
-
-/* helpers */
 const setProgress=(p)=>{ring.style.setProperty('--p',p+'%');percent.textContent=Math.round(p)+'%';};
 const showLoading=(p=0)=>{loading.style.display='grid';setProgress(p);};
 const hideLoading=()=>{loading.style.display='none';};
 const fadeBlack=(on)=>black.classList.toggle('on',!!on);
-const log=(...a)=>{ hudLog.textContent = (hudLog.textContent+'\n'+a.join(' ')).trim().slice(-1400); };
 
 /* three globals */
 let scene,camera,renderer,controls,tl,manager;
-let amb,hemi,sun,fl1,fl2;
+let amb,hemi,sun,c1,c2;
 let listener,music;
-let holdTimer=null,holding=false;
-let vrPlanned=false, fullyLoaded=false;
+let vrPlanned=false, fullyLoaded=false, firstVRFrame=false;
 
 /* фонарь */
 let lanternLights=[], lanternNodes=[];
-const LANTERN_INT=3.0, LANTERN_DIST=8.0;
-const LANTERN_SIZE_M=0.28;
+const LANTERN_INT=6.0, LANTERN_DIST=12.0, LANTERN_SIZE_M=0.28;
+
+/* удержание для выхода */
+let holdTimer=null, holding=false, holdMs=1500;
 
 /* старт */
 document.getElementById('btnVR').addEventListener('click',startVR,{once:true});
 document.getElementById('btnFlat').addEventListener('click',startFlat,{once:true});
-window.addEventListener('keydown',e=>{ if(e.key.toLowerCase()==='h') hud.classList.toggle('show'); });
 
 async function startVR(){
   overlay.style.display='none';
@@ -130,34 +116,44 @@ async function startVR(){
 
   let canVR=false;
   try{ canVR = !!navigator.xr && await navigator.xr.isSessionSupported('immersive-vr'); }catch(_){}
-  if(!canVR){ log('no XR support → flat'); await boot(false); fadeBlack(false); return; }
+  if(!canVR){ await boot(false); fadeBlack(false); return; }
 
   try{
     const session=await navigator.xr.requestSession('immersive-vr',{requiredFeatures:['local-floor']});
     await renderer.xr.setSession(session);
-  }catch(e){ log('requestSession error'); await boot(false); fadeBlack(false); return; }
+  }catch(e){ await boot(false); fadeBlack(false); return; }
 
   await boot(true);
-  // ждём полной загрузки и sessionstart → снимаем завесу чуть позже
-  const safeDrop = ()=>{ if(fullyLoaded){ setTimeout(()=>fadeBlack(false),500); } else { setTimeout(safeDrop,100); } };
-  safeDrop();
+
+  // ждать: полная загрузка + первый кадр в VR
+  const waitReady = ()=> {
+    if (fullyLoaded && firstVRFrame) setTimeout(()=>fadeBlack(false), 250);
+    else requestAnimationFrame(waitReady);
+  };
+  waitReady();
 }
 
 async function startFlat(){
   overlay.style.display='none'; showLoading(0); vrPlanned=false;
-  initRenderer(); await boot(false);
+  initRenderer(); await boot(false); fadeBlack(false);
 }
 
+/* ---------- BOOT ---------- */
 async function boot(isVR){
   manager=new THREE.LoadingManager();
   manager.onProgress=(_,l,t)=>setProgress(t?l/t*100:0);
-  manager.onLoad=()=>{ setProgress(100); fullyLoaded=true; log('assets loaded'); };
+  manager.onLoad=()=>{ setProgress(100); fullyLoaded=true; };
 
   initScene(isVR);
   buildRoom();
   await loadModels();
-
   startMusic();
+
+  // запуск цикла рендера ПОСЛЕ инициализации сцены
+  if (!renderer.getAnimationLoop()) {
+    renderer.setAnimationLoop(()=>{ animate(); });
+  }
+
   hideLoading();
 }
 
@@ -183,7 +179,20 @@ function initRenderer(){
     renderer.setSize(innerWidth,innerHeight);
   });
 
-  renderer.setAnimationLoop(()=>{ animate(); });
+  // отметка первого кадра в XR
+  renderer.xr.addEventListener('sessionstart', ()=>{
+    firstVRFrame=false;
+    // как только пошли кадры — отметим
+    const mark=()=>{
+      if(renderer.xr.isPresenting){ firstVRFrame=true; }
+    };
+    renderer.setAnimationLoop(()=>{ mark(); animate(); });
+  });
+  renderer.xr.addEventListener('sessionend', ()=>{
+    firstVRFrame=false;
+    // вернём обычный цикл
+    renderer.setAnimationLoop(()=>{ animate(); });
+  });
 }
 
 function initScene(isVR){
@@ -201,38 +210,37 @@ function initScene(isVR){
 
   tl=new THREE.TextureLoader(manager);
 
-  const k = isVR ? 0.22 : 1.0; // VR очень темно
-  amb = new THREE.AmbientLight(0xffe0bd,0.22*k);
-  hemi= new THREE.HemisphereLight(0xffd4a8,0x120806,0.24*k);
-  sun = new THREE.DirectionalLight(0xffa864,0.65*k);
+  const k = isVR ? 0.18 : 1.0; // VR — почти темно
+  amb = new THREE.AmbientLight(0xffe0bd,0.20*k);
+  hemi= new THREE.HemisphereLight(0xffd4a8,0x120806,0.22*k);
+  sun = new THREE.DirectionalLight(0xffa864,0.55*k);
   sun.position.set(-2.4,3.1,1.2);
   sun.castShadow=true; sun.shadow.mapSize.set(1024,1024); sun.shadow.radius=5; sun.shadow.bias=-0.00015;
   scene.add(amb,hemi,sun);
 
-  fl1=new THREE.PointLight(0xffa860,0.30*k,5.5); fl1.position.set(-1.2,1.15,1.15);
-  fl2=new THREE.PointLight(0xff9a58,0.24*k,4.8);  fl2.position.set(0.25,1.05,-1.55);
-  scene.add(fl1,fl2);
+  c1=new THREE.PointLight(0xffa860,0.26*k,5.5); c1.position.set(-1.2,1.15,1.15);
+  c2=new THREE.PointLight(0xff9a58,0.20*k,4.8);  c2.position.set(0.25,1.05,-1.55);
+  scene.add(c1,c2);
 
   renderer.xr.addEventListener('sessionstart',onXRStart);
   renderer.xr.addEventListener('sessionend',onXREnd);
 }
 
 function animate(){
+  if(!scene || !camera || !renderer) return;
   if(controls && controls.update) controls.update();
-  const t=performance.now()*0.0025;
-  if(fl1) fl1.intensity = 0.30 + Math.sin(t*3.2)*0.06 + Math.sin(t*5.3)*0.04;
-  if(fl2) fl2.intensity = 0.24 + Math.sin(t*3.7)*0.05 + Math.sin(t*4.7)*0.03;
 
-  // страховка: если VR включен и фонарей нет — слабая аварийная подсветка от головы
-  if(vrPlanned && renderer.xr.isPresenting && lanternLights.length===0){
-    const headLight = scene.getObjectByName('__head_fallback');
-    if(!headLight){
-      const l=new THREE.PointLight(0xffd0a0,0.18,2.5); l.name='__head_fallback';
-      scene.add(l);
-    }
+  const t=performance.now()*0.0025;
+  if(c1) c1.intensity = 0.26 + Math.sin(t*3.2)*0.06 + Math.sin(t*5.3)*0.04;
+  if(c2) c2.intensity = 0.20 + Math.sin(t*3.7)*0.05 + Math.sin(t*4.7)*0.03;
+
+  // аварийная подсветка от головы, если фонаря нет
+  if(vrPlanned && renderer.xr.isPresenting && lanternLights.length===0 && scene){
+    let hl = scene.getObjectByName('__head_fallback');
+    if(!hl){ hl = new THREE.PointLight(0xffd0a0,0.35,3.2); hl.name='__head_fallback'; scene.add(hl); }
     const camPos=new THREE.Vector3(); camera.getWorldPosition(camPos);
-    scene.getObjectByName('__head_fallback').position.copy(camPos);
-  }else{
+    hl.position.copy(camPos);
+  }else if(scene){
     const hl=scene.getObjectByName('__head_fallback'); if(hl) hl.parent.remove(hl);
   }
 
@@ -241,7 +249,6 @@ function animate(){
 
 /* ---------- комната ---------- */
 function buildRoom(){
-  const tl = new THREE.TextureLoader(manager);
   const floorTex=tl.load(TEX_FLOOR); floorTex.wrapS=floorTex.wrapT=THREE.RepeatWrapping; floorTex.repeat.set(2,2); floorTex.colorSpace=THREE.SRGBColorSpace;
   const wallTex =tl.load(TEX_WALL ); wallTex.wrapS=wallTex.wrapT=THREE.ClampToEdgeWrapping; wallTex.colorSpace=THREE.SRGBColorSpace;
   const ceilTex =tl.load(TEX_CEIL ); ceilTex.wrapS=ceilTex.wrapT=THREE.RepeatWrapping; ceilTex.repeat.set(2,2); ceilTex.colorSpace=THREE.SRGBColorSpace;
@@ -342,83 +349,83 @@ function startMusic(){
 }
 
 /* ---------- XR: фонарь и выход ---------- */
-function attachLanternTo(object3D, label){
-  // свет
-  const light=new THREE.PointLight(0xffb680, LANTERN_INT, LANTERN_DIST);
+function hapticsPulse(ctrl, ms=30){
+  try{
+    const gp=ctrl?.inputSource?.gamepad;
+    const h = gp?.hapticActuators?.[0] || gp?.vibrationActuator;
+    if(h?.pulse) h.pulse(1, ms); else navigator.vibrate?.(ms);
+  }catch(_){ navigator.vibrate?.(ms); }
+}
+
+function attachLanternTo(target){
+  // свет фонаря
+  const light=new THREE.PointLight(0xffb680, LANTERN_INT, LANTERN_DIST, 2.0);
   light.castShadow=true; light.shadow.mapSize.set(512,512);
   light.position.set(0,-0.02,-0.12);
-  object3D.add(light); lanternLights.push(light);
+  target.add(light); lanternLights.push(light);
 
-  // модель (если есть)
+  // модель фонаря (опционально)
   new THREE.GLTFLoader(manager).load(MODEL_LANTERN,(g)=>{
     const node=g.scene; fitByHeight(node,LANTERN_SIZE_M);
     node.position.set(0,-0.04,-0.12);
-    object3D.add(node); lanternNodes.push(node);
-  }, undefined, ()=>{/* нет модели — норм */});
-
-  log('lantern attached →', label);
-  hud.classList.add('show'); // показать HUD в VR по умолчанию
+    target.add(node); lanternNodes.push(node);
+  },undefined,()=>{});
 }
 
 function addHoldExit(ctrl){
-  const start=()=>{ if(holding) return; holding=true; navigator.vibrate?.(20); holdTimer=setTimeout(async ()=>{ navigator.vibrate?.([40,40,40]); await renderer.xr.getSession()?.end(); },1500); };
-  const end =()=>{ holding=false; clearTimeout(holdTimer); };
-  ctrl.addEventListener('squeezestart',start);
-  ctrl.addEventListener('squeezeend',end);
-  ctrl.addEventListener('selectstart',start);
-  ctrl.addEventListener('selectend',end);
+  let t0=0, active=false;
+  const start=()=>{ if(active) return; active=true; t0=performance.now(); hapticsPulse(ctrl,20);
+    holdTimer=setTimeout(async ()=>{ hapticsPulse(ctrl,60); hapticsPulse(ctrl,60); hapticsPulse(ctrl,60);
+      await renderer.xr.getSession()?.end(); active=false; }, holdMs);
+  };
+  const end=()=>{ active=false; clearTimeout(holdTimer); };
+  ctrl.addEventListener('squeezestart', start);
+  ctrl.addEventListener('squeezeend',   end);
+  ctrl.addEventListener('selectstart',  start);
+  ctrl.addEventListener('selectend',    end);
 }
 
 function onXRStart(){
-  log('sessionstart');
-  // ещё затемним общий свет
+  // затемнить ещё
   [amb,hemi,sun].forEach(l=> l.intensity*=0.35);
 
   const c0=renderer.xr.getController(0), c1=renderer.xr.getController(1);
   scene.add(c0); scene.add(c1);
   addHoldExit(c0); addHoldExit(c1);
 
-  // пробуем найти правый
   const session=renderer.xr.getSession();
-  let rightCtrl=null;
-  const pickRight=()=>{
+
+  // попробуем найти правый контроллер
+  const tryAttach=()=>{
     const inputs=session.inputSources||[];
     const right=inputs.find(i=>i.handedness==='right' && i.targetRayMode!=='gaze');
     if(right){
-      rightCtrl = (right===inputs[0])?c0:c1;
-      if(rightCtrl) attachLanternTo(rightCtrl,'right controller');
+      const ctrl = (right===inputs[0])?c0:c1;
+      if(ctrl && lanternLights.length===0) attachLanternTo(ctrl);
     }
-    log('inputs:', inputs.length, 'right found:', !!right);
   };
+  tryAttach();
 
-  session.addEventListener('inputsourceschange', ()=>{
-    log('inputsourceschange');
-    if(lanternLights.length===0) pickRight();
-  });
-
-  // если за 300мс правый так и не определился — вешаем на любой доступный
+  // если за 300мс не нашли — повесим на любой доступный
   setTimeout(()=>{
     if(lanternLights.length===0){
-      if(c1) attachLanternTo(c1,'controller#1');
-      else if(c0) attachLanternTo(c0,'controller#0');
-      else { attachLanternTo(camera,'camera (fallback)'); } // совсем без контроллеров
+      if(c1) attachLanternTo(c1);
+      else if(c0) attachLanternTo(c0);
+      else attachLanternTo(camera); // вообще без контроллеров
     }
   },300);
 
-  // дубль-страховка: если через 2с всё равно нет фонаря — точно вешаем на голову
-  setTimeout(()=>{
-    if(lanternLights.length===0) attachLanternTo(camera,'camera (late fallback)');
-  },2000);
+  session.addEventListener('inputsourceschange', ()=>{
+    if(lanternLights.length===0) tryAttach();
+  });
 }
 
 function onXREnd(){
-  log('sessionend');
   clearTimeout(holdTimer); holding=false;
   [amb,hemi,sun].forEach(l=> l.intensity/=0.35);
   lanternLights.forEach(l=>l.parent?.remove(l));
   lanternNodes.forEach(n=>n.parent?.remove(n));
   lanternLights.length=0; lanternNodes.length=0;
-  hud.classList.remove('show');
 }
 </script>
 </body>
