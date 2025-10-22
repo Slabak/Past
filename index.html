@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Комната прошлого — портал</title>
+<title>Комната прошлого — разлом</title>
 <style>
   html,body{height:100%;margin:0;overflow:hidden;background:#000;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
 
@@ -36,9 +36,9 @@
   <!-- Старт -->
   <div id="overlay">
     <div class="panel">
-      <div class="title">портал готов. куда направимся?</div>
-      <button id="btnVR" class="btn">Войти через портал (VR)</button>
-      <button id="btnFlat" class="btn secondary">Оглядеться без портала</button>
+      <div class="title">портал открыт. как войдём?</div>
+      <button id="btnVR" class="btn">Войти в разлом (VR)</button>
+      <button id="btnFlat" class="btn secondary">Оглядеться со стороны</button>
       <div class="note">переход займёт несколько секунд</div>
     </div>
   </div>
@@ -68,23 +68,23 @@ const TEX_CEIL  ='assets/textures/potolok.jpg?v=3';
 const TEX_MIRROR='assets/textures/mirror.jpg';
 
 // Модели
-const MODEL_CHEST ='assets/models/chest.glb?v=2'; // новый сундук (кашем безопасно)
+const MODEL_CHEST ='assets/models/chest.glb?v=2'; // новый сундук
 const MODEL_BARREL='assets/models/barrel.glb';
 const MODEL_TABLE ='assets/models/table.glb';
 const MODEL_GLOBUS='assets/models/globus.glb';
 const MODEL_DOOR  ='assets/models/door.glb';
 const MODEL_SHIELD='assets/models/shield.glb';
 
-// Позиции (как в твоей стабильной версии)
+// Позиции (как в стабильной версии)
 const POS_CHEST_X = -W/2 + 0.45;
 const POS_CHEST_Z =  1.10;
-const POS_BARREL   = new THREE.Vector3(-W/2 + 0.55, 0, -D/2 + 0.65); // у задней левой стены
-const POS_TABLE    = new THREE.Vector3( 0.0, 0, -D/2 + 0.55);        // у задней стены по центру/чуть вправо
-const POS_GLOBUS   = new THREE.Vector3( W/2 - 0.55, 0, -D/2 + 0.90); // правая часть задней стены
-const POS_SHIELD   = new THREE.Vector3( W/2 - 0.07, 1.55, -0.40);    // над глобусом на правой стене
+const POS_BARREL   = new THREE.Vector3(-W/2 + 0.55, 0, -D/2 + 0.65);
+const POS_TABLE    = new THREE.Vector3( 0.0, 0, -D/2 + 0.55);
+const POS_GLOBUS   = new THREE.Vector3( W/2 - 0.55, 0, -D/2 + 0.90);
+const POS_SHIELD   = new THREE.Vector3( W/2 - 0.07, 1.55, -0.40);
 
-// Дверь — на передней стене (по твоему рабочему индексу), утоплена
-const DOOR_ROT_Y = Math.PI/2;     // плоскостью к комнате (90° вокруг Y)
+// Музыка (опционально)
+const MUSIC_MP3='assets/music/music.mp3';
 
 /* ===================== UI ===================== */
 const overlay = document.getElementById('overlay');
@@ -100,36 +100,63 @@ function setProgress(p){ ring.style.setProperty('--p', p+'%'); percent.textConte
 let scene,camera,renderer,controls,tl,manager;
 let candle1,candle2; // «свечи»
 let audioListener,music;
-let wantVR=false, xrSession=null;
+let xrSession=null;
 
 /* ===================== СТАРТ КНОПКИ ===================== */
-document.getElementById('btnVR').addEventListener('click',()=>start(true),{once:true});
-document.getElementById('btnFlat').addEventListener('click',()=>start(false),{once:true});
-
-async function start(vr){
-  wantVR=!!vr;
+/* ВАЖНО: запрос XR делаем СРАЗУ в обработчике клика — это жест пользователя */
+document.getElementById('btnVR').addEventListener('click', async ()=>{
   overlay.style.display='none';
   showLoading(0);
 
-  // Рендерер заранее — чтобы менеджер прогресса видел всё
+  // 1) Создаём renderer заранее (до запроса XR можно, но нам надо setSession позже)
   initRenderer();
 
-  // Менеджер загрузки (проценты)
+  // 2) Пытаемся сразу запросить XR-сеанс (жест пользователя)
+  let wantXR = false;
+  if (navigator.xr) {
+    try {
+      xrSession = await navigator.xr.requestSession('immersive-vr',{requiredFeatures:['local-floor']});
+      await renderer.xr.setSession(xrSession);
+      wantXR = true; // успех
+    } catch(e) {
+      // тихо падаем в 2D
+      wantXR = false;
+    }
+  }
+
+  // 3) Загружаем сцену с LoadingManager (проценты)
+  bootSceneAndAssets().then(()=>{
+    // уже идёт setAnimationLoop, просто прячем лоадер
+    hideLoading();
+  });
+},{once:true});
+
+document.getElementById('btnFlat').addEventListener('click', ()=>{
+  overlay.style.display='none';
+  showLoading(0);
+  // обычный режим
+  initRenderer();
+  bootSceneAndAssets().then(()=>{ hideLoading(); });
+},{once:true});
+
+/* ===================== Загрузка сцены/ассетов с прогрессом ===================== */
+async function bootSceneAndAssets(){
+  // менеджер для процентов
   manager = new THREE.LoadingManager();
   let done=0,total=0;
-  manager.onStart    = (_, l, t)=>{ done=l; total=t; setProgress(total?done/total*100:0); };
-  manager.onProgress = (_, l, t)=>{ done=l; total=t; setProgress(total?done/total*100:0); };
-  manager.onLoad     = ()=>{ setProgress(100); enterWorld(); };
+  manager.onStart    = (_,l,t)=>{ done=l; total=t; setProgress(total?done/total*100:0); };
+  manager.onProgress = (_,l,t)=>{ done=l; total=t; setProgress(total?done/total*100:0); };
+  manager.onLoad     = ()=>{ setProgress(100); };
 
-  // Старт сцены и загрузок
   initScene(manager);
   buildRoom(manager);
-  loadModels(manager);
-  startMusic(); // не мешает автоплею — уже был пользовательский клик
+  await loadModels(manager);
+  startMusic(); // можно после клика
 }
 
 /* ===================== РЕНДЕРЕР ===================== */
 function initRenderer(){
+  if (renderer) return; // уже создан
   renderer=new THREE.WebGLRenderer({antialias:true});
   const isMobile=/Android|iPhone|iPad|iPod|Quest|Oculus/i.test(navigator.userAgent);
   renderer.setPixelRatio(isMobile?1:Math.min(devicePixelRatio,2));
@@ -139,7 +166,7 @@ function initRenderer(){
   renderer.toneMappingExposure=0.92; // ламповый тон
   renderer.shadowMap.enabled=true;
   renderer.shadowMap.type=THREE.PCFSoftShadowMap;
-  renderer.xr.enabled=true;
+  renderer.xr.enabled=true; // XR включён; сессию уже могли выдать в клике
   document.body.appendChild(renderer.domElement);
   renderer.domElement.classList.add('fade-in');
 
@@ -180,9 +207,18 @@ function initScene(manager){
   candle1=new THREE.PointLight(0xffaa66,0.46,5.0); candle1.position.set(-1.2,1.15,1.15); scene.add(candle1);
   candle2=new THREE.PointLight(0xffa260,0.34,4.0); candle2.position.set(0.25,1.05,-1.55); scene.add(candle2);
 
-  // Музыка
+  // музыка
   audioListener=new THREE.AudioListener(); camera.add(audioListener);
   music=new THREE.Audio(audioListener);
+
+  // рендер-цикл (поддерживает и 2D, и XR)
+  renderer.setAnimationLoop(()=>{
+    const t=performance.now()*0.0025;
+    if(candle1) candle1.intensity=0.46+Math.sin(t*3.2)*0.06+Math.sin(t*5.3)*0.04;
+    if(candle2) candle2.intensity=0.34+Math.sin(t*3.7)*0.05+Math.sin(t*4.7)*0.03;
+    controls.update();
+    renderer.render(scene,camera);
+  });
 }
 
 /* ===================== КОМНАТА ===================== */
@@ -209,15 +245,6 @@ function buildRoom(manager){
   const mirror=new THREE.Mesh(new THREE.PlaneGeometry(.9,.6),
     new THREE.MeshStandardMaterial({map:mirrorTex,metalness:.8,roughness:.25}));
   mirror.position.set(0,1.5,-D/2+0.01); scene.add(mirror);
-
-  // лёгкое «дыхание» свечей
-  renderer.setAnimationLoop(()=>{
-    const t=performance.now()*0.0025;
-    if(candle1) candle1.intensity=0.46+Math.sin(t*3.2)*0.06+Math.sin(t*5.3)*0.04;
-    if(candle2) candle2.intensity=0.34+Math.sin(t*3.7)*0.05+Math.sin(t*4.7)*0.03;
-    controls.update();
-    renderer.render(scene,camera);
-  });
 }
 
 /* ===================== УТИЛИТЫ МОДЕЛЕЙ ===================== */
@@ -242,60 +269,54 @@ function snapToFrontWall(mesh, inset=-0.018){
 }
 
 /* ===================== ЗАГРУЗКА МОДЕЛЕЙ ===================== */
-function loadModels(manager){
+async function loadModels(manager){
   const L=new THREE.GLTFLoader(manager);
 
-  // Сундук — ПОВЁРНУТ К КОМНАТЕ (ВАЖНО: rotation.y = 0)
-  L.load(MODEL_CHEST,(g)=>{
-    const m=g.scene;
-    fitByHeight(m,0.95);
+  // Сундук — ПОВЁРНУТ К КОМНАТЕ (rotation.y = 0)
+  await new Promise((res)=>L.load(MODEL_CHEST,(g)=>{
+    const m=g.scene; fitByHeight(m,0.95);
     m.position.set(POS_CHEST_X,0,POS_CHEST_Z);
-    m.rotation.y = 0; // << развернули на 180°, замок в комнату
-    scene.add(m);
-  });
+    m.rotation.y = 0;
+    scene.add(m); res();
+  }));
 
-  // Бочка — как было
-  L.load(MODEL_BARREL,(g)=>{
+  await new Promise((res)=>L.load(MODEL_BARREL,(g)=>{
     const m=g.scene; fitByHeight(m,1.15);
     m.position.copy(POS_BARREL);
-    scene.add(m);
-  });
+    scene.add(m); res();
+  }));
 
-  // Стол — как было
-  L.load(MODEL_TABLE,(g)=>{
+  await new Promise((res)=>L.load(MODEL_TABLE,(g)=>{
     const m=g.scene; fitByHeight(m,0.78);
     m.position.copy(POS_TABLE);
-    scene.add(m);
-  });
+    scene.add(m); res();
+  }));
 
-  // Глобус — как было
-  L.load(MODEL_GLOBUS,(g)=>{
+  await new Promise((res)=>L.load(MODEL_GLOBUS,(g)=>{
     const m=g.scene; fitByHeight(m,1.2);
     m.position.copy(POS_GLOBUS);
     m.rotation.y=-Math.PI/2;
-    scene.add(m);
-  });
+    scene.add(m); res();
+  }));
 
-  // Дверь — на передней стене, утоплена без щели
-  L.load(MODEL_DOOR,(g)=>{
+  await new Promise((res)=>L.load(MODEL_DOOR,(g)=>{
     const m=g.scene; fitByHeight(m,2.1);
-    m.rotation.set(0, DOOR_ROT_Y, 0);       // 90° вокруг Y — плоскостью к комнате
-    // примерно к стене:
+    m.rotation.set(0, Math.PI/2, 0);       // плоскостью к комнате
+    // приблизительно к стене:
     const b0=new THREE.Box3().setFromObject(m);
     const depth=b0.getSize(new THREE.Vector3()).z;
     m.position.set(0,0, D/2 - depth*0.5);
-    // точная подгонка:
+    // точная подгонка (слегка утопим внутрь)
     snapToFrontWall(m, -0.018);
-    scene.add(m);
-  });
+    scene.add(m); res();
+  }));
 
-  // Щит — как было
-  L.load(MODEL_SHIELD,(g)=>{
+  await new Promise((res)=>L.load(MODEL_SHIELD,(g)=>{
     const m=g.scene; fitByHeight(m,0.8);
     m.rotation.y=-Math.PI/2;
     m.position.copy(POS_SHIELD);
-    scene.add(m);
-  });
+    scene.add(m); res();
+  }));
 }
 
 /* ===================== МУЗЫКА ===================== */
@@ -304,22 +325,8 @@ function startMusic(){
     audioListener=new THREE.AudioListener(); camera.add(audioListener);
     music=new THREE.Audio(audioListener);
     const a=new THREE.AudioLoader(manager);
-    a.load('assets/music/music.mp3',(buf)=>{ music.setBuffer(buf); music.setLoop(true); music.setVolume(.35); music.play(); },undefined,()=>{});
+    a.load(MUSIC_MP3,(buf)=>{ music.setBuffer(buf); music.setLoop(true); music.setVolume(.35); music.play(); },undefined,()=>{});
   }catch(e){}
-}
-
-/* ===================== ВХОД В МИР ===================== */
-async function enterWorld(){
-  // Если выбрали VR — пытаемся запустить XR-сессию
-  if(wantVR && navigator.xr){
-    try{
-      xrSession = await navigator.xr.requestSession('immersive-vr',{requiredFeatures:['local-floor']});
-      await renderer.xr.setSession(xrSession);
-    }catch(e){
-      // тихо остаёмся в обычном режиме
-    }
-  }
-  hideLoading();
 }
 </script>
 </body>
