@@ -18,7 +18,7 @@
   .btn.secondary{background:#3a2a22}
   .note{font-size:12px;opacity:.75;text-align:center;max-width:380px}
 
-  /* Кольцевой прогресс (общая загрузка ассетов ДО входа) */
+  /* Кольцевой прогресс (обычный вход) */
   #loading{position:fixed;inset:0;display:none;place-items:center;z-index:12;
     background:radial-gradient(ellipse at center,rgba(0,0,0,.8),rgba(0,0,0,.95));color:#fff}
   .loadbox{display:flex;flex-direction:column;align-items:center;gap:12px}
@@ -30,7 +30,7 @@
   .percent{font:18px/1.1 monospace}
   .hint{font:14px;opacity:.85}
 
-  /* Портальный затемняющий оверлей (для VR входа/выхода) */
+  /* Портальный затемняющий оверлей (VR вход/выход) */
   #portalOverlay{
     position:fixed; inset:0; display:none;
     align-items:center; justify-content:center;
@@ -71,7 +71,7 @@
     </div>
   </div>
 
-  <!-- Портальный затемняющий оверлей (для VR входа/выхода) -->
+  <!-- Портальный затемняющий оверлей (VR вход/выход) -->
   <div id="portalOverlay">
     <div class="msg pulse">Материя формируется… удерживайте связь с реальностью… 0%</div>
   </div>
@@ -82,7 +82,7 @@
   <script src="assets/js/GLTFLoader.js"></script>
 
 <script>
-(() => {
+(function(){
   let scene, camera, renderer, controls;
   let listener, music;
   let controller1=null, controller2=null;
@@ -90,45 +90,52 @@
   // размеры комнаты (м)
   const W=4, D=4, H=3;
 
-  // ===== ЛАМПОВЫЙ ФОНАРЬ (правый контроллер) =====
+  // ===== фонарь (для VR) =====
   let lanternLight = null;     // PointLight — тёплый
   let lanternModel = null;     // glb-модель
-  const LANTERN_INTENS = 2.0;  // базовая яркость
-  const LANTERN_DIST   = 5.5;  // радиус освещения
-  const LANTERN_DECAY  = 2.0;  // физическое затухание
-  const LANTERN_FLICKER = 0.06;// амплитуда мерцания
+  const LANTERN_INTENS = 2.0;
+  const LANTERN_DIST   = 5.5;
+  const LANTERN_DECAY  = 2.0;
+  const LANTERN_FLICKER = 0.06;
   const LANTERN_COLOR = 0xffe6b3;
 
-  // приглушение общей сцены
+  // приглушение общей сцены (только VR)
   const DIM_MULT = 0.42;
 
-  // ------- портальный UI --------
-  const portalUI = (() => {
-    const el = document.getElementById('portalOverlay');
-    const msg = el.querySelector('.msg');
-    return {
-      ensureShown(text){
-        if(text) msg.textContent=text;
-        el.classList.remove('hide'); el.style.display='flex';
-        el.classList.add('show');
-      },
-      setProgress(p){
-        const pct = Math.max(0, Math.min(1, p));
-        msg.textContent = `Материя формируется… удерживайте связь с реальностью… ${Math.round(pct*100)}%`;
-      },
-      hideNow(){ el.style.display='none'; el.style.opacity='0'; el.classList.remove('show','hide'); },
-      hide(){
-        el.classList.remove('show'); el.classList.add('hide');
-        setTimeout(()=>this.hideNow(),520);
-      }
-    };
-  })();
+  // режим
+  let isVrPlanned = false;
+
+  // ------- портальный UI (VR) --------
+  const portalOverlayEl = document.getElementById('portalOverlay');
+  const portalMsgEl = portalOverlayEl.querySelector('.msg');
+  const portalUI = {
+    ensureShown: function(text){
+      if(text) portalMsgEl.textContent=text;
+      portalOverlayEl.classList.remove('hide');
+      portalOverlayEl.style.display='flex';
+      portalOverlayEl.classList.add('show');
+    },
+    setProgress: function(p){
+      const pct = Math.max(0, Math.min(1, p));
+      portalMsgEl.textContent = 'Материя формируется… удерживайте связь с реальностью… ' + Math.round(pct*100) + '%';
+    },
+    hideNow: function(){
+      portalOverlayEl.style.display='none';
+      portalOverlayEl.style.opacity='0';
+      portalOverlayEl.classList.remove('show');
+      portalOverlayEl.classList.remove('hide');
+    },
+    hide: function(){
+      portalOverlayEl.classList.remove('show');
+      portalOverlayEl.classList.add('hide');
+      var self=this;
+      setTimeout(function(){ self.hideNow(); }, 520);
+    }
+  };
 
   // ------- общий менеджер загрузки ассетов --------
   const manager = new THREE.LoadingManager();
-  let isVrPlanned = false;
-
-  manager.onStart = () => {
+  manager.onStart = function(){
     if (!isVrPlanned) {
       document.getElementById('loading').style.display='grid';
       updateRing(0);
@@ -137,34 +144,36 @@
       portalUI.setProgress(0);
     }
   };
-  manager.onProgress = (url, loaded, total) => {
-    const prog = total ? loaded/total : 0.95;
+  manager.onProgress = function(url, loaded, total){
+    var prog = total ? loaded/total : 0.95;
     if (!isVrPlanned) {
       updateRing(prog);
     } else {
       portalUI.setProgress(prog);
     }
   };
-  manager.onLoad = () => {
+  manager.onLoad = function(){
     if (!isVrPlanned) {
-      setTimeout(()=>document.getElementById('loading').style.display='none',150);
+      setTimeout(function(){ document.getElementById('loading').style.display='none'; }, 150);
     } else {
-      setTimeout(()=>portalUI.hide(),350);
+      setTimeout(function(){ portalUI.hide(); }, 350);
     }
   };
 
   function updateRing(p){
-    const ring=document.getElementById('ring'); const pct=document.getElementById('pct');
-    ring.style.setProperty('--p', Math.round(p*100) + '%'); pct.textContent = Math.round(p*100) + '%';
+    var ring=document.getElementById('ring');
+    var pct=document.getElementById('pct');
+    ring.style.setProperty('--p', Math.round(p*100) + '%');
+    pct.textContent = Math.round(p*100) + '%';
   }
 
   // ------- аудио -------
   function safeMusicStart(){
     try{
-      const ctx = (listener && listener.context) ? listener.context : null;
+      var ctx = (listener && listener.context) ? listener.context : null;
       if (ctx && ctx.state==='suspended') ctx.resume();
-      const loader = new THREE.AudioLoader();
-      loader.load('assets/music/music.mp3', (buffer)=>{
+      var loader = new THREE.AudioLoader();
+      loader.load('assets/music/music.mp3', function(buffer){
         music.setBuffer(buffer);
         music.setLoop(true);
         music.setVolume(0.30);
@@ -173,26 +182,34 @@
     }catch(e){ console.warn('Audio error',e); }
   }
 
-  const texLoader = new THREE.TextureLoader(manager);
-  const gltfLoader = new THREE.GLTFLoader(manager);
+  var texLoader = new THREE.TextureLoader(manager);
+  var gltfLoader = new THREE.GLTFLoader(manager);
 
-  // UI кнопки
-  document.getElementById('btn-flat').addEventListener('click', ()=>{
+  // кнопки
+  document.getElementById('btn-flat').addEventListener('click', function(){
     document.getElementById('overlay').style.display='none';
     isVrPlanned = false;
-    init();
+    init(null); // обычный вход
   });
 
-  document.getElementById('btn-vr').addEventListener('click', async ()=>{
+  document.getElementById('btn-vr').addEventListener('click', function(){
     isVrPlanned = true;
     portalUI.ensureShown();
-    init(async ()=>{
+    init(function(){ // VR вход
       try{
         if (!navigator.xr){ portalUI.hide(); return; }
-        const session = await navigator.xr.requestSession('immersive-vr',{ requiredFeatures:['local-floor'] });
-        await renderer.xr.setSession(session);
+        navigator.xr.requestSession('immersive-vr',{ requiredFeatures:['local-floor'] })
+        .then(function(session){
+          renderer.xr.setSession(session).then(function(){
+            // ок
+          });
+        })
+        .catch(function(e){
+          console.warn('XR error', e);
+          portalUI.hide();
+        });
       }catch(e){
-        console.warn('XR error', e);
+        console.warn('XR init error', e);
         portalUI.hide();
       }
     });
@@ -200,8 +217,8 @@
 
   function init(readyCb){
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0b0705);
-    scene.fog = new THREE.Fog(0x120a07, 6, 15.5);
+    scene.background = new THREE.Color(0x0c0705);
+    scene.fog = new THREE.Fog(isVrPlanned ? 0x120a07 : 0x140b08, 6, 16);
 
     camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.05, 50);
     camera.position.set(0, 1.6, 2.8);
@@ -213,7 +230,7 @@
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 0.95;
+    renderer.toneMappingExposure = isVrPlanned ? 0.95 : 1.05;
     document.body.appendChild(renderer.domElement);
     renderer.domElement.classList.add('fade-in');
 
@@ -222,36 +239,29 @@
     controls.target.set(0,1.25,0);
 
     renderer.xr.enabled = true;
-    setupXRControllers();
+    setupXRControllers(); // создаём контроллеры сразу (в flat они просто не активны)
 
-    // свет — приглушённый
-    const hemi = new THREE.HemisphereLight(0xffe4bd, 0x0e0906, 0.22*DIM_MULT); scene.add(hemi);
-    const ambient = new THREE.AmbientLight(0xffd7aa, 0.12*DIM_MULT); scene.add(ambient);
-    const sun = new THREE.DirectionalLight(0xffb366, 0.65*DIM_MULT);
-    sun.position.set(-2.4, 3.7, 1.6);
-    sun.castShadow = true; sun.shadow.mapSize.set(1024,1024); sun.shadow.radius = 5; sun.shadow.bias=-0.0002;
-    scene.add(sun);
-    const flame = new THREE.PointLight(0xffa860, 0.45*DIM_MULT, 5.5);
-    flame.position.set(-1.5, 1.2, 1.2); scene.add(flame);
+    // свет
+    buildLights(isVrPlanned);
 
     // ПОЛ/СТЕНЫ/ПОТОЛОК
-    const floorTex = texLoader.load('assets/textures/floor.jpg'); floorTex.wrapS=floorTex.wrapT=THREE.RepeatWrapping; floorTex.repeat.set(2,2); floorTex.colorSpace=THREE.SRGBColorSpace;
-    const wallTex  = texLoader.load('assets/textures/wall.jpg?v=3'); wallTex.wrapS=wallTex.wrapT=THREE.ClampToEdgeWrapping; wallTex.colorSpace=THREE.SRGBColorSpace;
-    const ceilTex  = texLoader.load('assets/textures/potolok.jpg'); ceilTex.wrapS=ceilTex.wrapT=THREE.RepeatWrapping; ceilTex.repeat.set(2,2); ceilTex.colorSpace=THREE.SRGBColorSpace;
-    const mirrorTex= texLoader.load('assets/textures/mirror.jpg'); mirrorTex.colorSpace=THREE.SRGBColorSpace;
+    var floorTex = texLoader.load('assets/textures/floor.jpg'); floorTex.wrapS=floorTex.wrapT=THREE.RepeatWrapping; floorTex.repeat.set(2,2); floorTex.colorSpace=THREE.SRGBColorSpace;
+    var wallTex  = texLoader.load('assets/textures/wall.jpg?v=3'); wallTex.wrapS=wallTex.wrapT=THREE.ClampToEdgeWrapping; wallTex.colorSpace=THREE.SRGBColorSpace;
+    var ceilTex  = texLoader.load('assets/textures/potolok.jpg'); ceilTex.wrapS=ceilTex.wrapT=THREE.RepeatWrapping; ceilTex.repeat.set(2,2); ceilTex.colorSpace=THREE.SRGBColorSpace;
+    var mirrorTex= texLoader.load('assets/textures/mirror.jpg'); mirrorTex.colorSpace=THREE.SRGBColorSpace;
 
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(W, D), new THREE.MeshStandardMaterial({map:floorTex, roughness:.9}));
+    var floor = new THREE.Mesh(new THREE.PlaneGeometry(W, D), new THREE.MeshStandardMaterial({map:floorTex, roughness:.9}));
     floor.rotation.x = -Math.PI/2; floor.receiveShadow = true; scene.add(floor);
 
-    const wallMat = new THREE.MeshStandardMaterial({map:wallTex, roughness:1.0});
-    const back  = new THREE.Mesh(new THREE.PlaneGeometry(W, H), wallMat); back.position.set(0,H/2,-D/2);
-    const front = new THREE.Mesh(new THREE.PlaneGeometry(W, H), wallMat); front.position.set(0,H/2, D/2); front.rotation.y=Math.PI;
-    const left  = new THREE.Mesh(new THREE.PlaneGeometry(D, H), wallMat); left.position.set(-W/2,H/2,0);  left.rotation.y=Math.PI/2;
-    const right = new THREE.Mesh(new THREE.PlaneGeometry(D, H), wallMat); right.position.set( W/2,H/2,0);  right.rotation.y=-Math.PI/2;
-    [back,front,left,right].forEach(w=>w.receiveShadow=true);
+    var wallMat = new THREE.MeshStandardMaterial({map:wallTex, roughness:1.0});
+    var back  = new THREE.Mesh(new THREE.PlaneGeometry(W, H), wallMat); back.position.set(0,H/2,-D/2);
+    var front = new THREE.Mesh(new THREE.PlaneGeometry(W, H), wallMat); front.position.set(0,H/2, D/2); front.rotation.y=Math.PI;
+    var left  = new THREE.Mesh(new THREE.PlaneGeometry(D, H), wallMat); left.position.set(-W/2,H/2,0);  left.rotation.y=Math.PI/2;
+    var right = new THREE.Mesh(new THREE.PlaneGeometry(D, H), wallMat); right.position.set( W/2,H/2,0);  right.rotation.y=-Math.PI/2;
+    back.receiveShadow=front.receiveShadow=left.receiveShadow=right.receiveShadow=true;
     scene.add(back,front,left,right);
 
-    const mirror = new THREE.Mesh(new THREE.PlaneGeometry(0.92,0.62),
+    var mirror = new THREE.Mesh(new THREE.PlaneGeometry(0.92,0.62),
       new THREE.MeshStandardMaterial({map:mirrorTex, metalness:.85, roughness:.22}));
     mirror.position.set(-1.2, 1.25, -D/2 + 0.01);
     scene.add(mirror);
@@ -261,42 +271,42 @@
     music = new THREE.Audio(listener);
 
     // модели
-    loadGLB('assets/models/chest.glb', (obj)=>{
+    loadGLB('assets/models/chest.glb', function(obj){
       basicBake(obj); placeOnFloor(obj);
       obj.rotation.y = Math.PI;
       obj.position.set(-1.35, 0, -1.15);
       scene.add(obj);
     });
 
-    loadGLB('assets/models/barrel.glb', (obj)=>{
+    loadGLB('assets/models/barrel.glb', function(obj){
       basicBake(obj); placeOnFloor(obj);
       obj.scale.multiplyScalar(0.9);
       obj.position.set( 1.65, 0, -0.95);
       scene.add(obj);
     });
 
-    loadGLB('assets/models/table.glb', (obj)=>{
+    loadGLB('assets/models/table.glb', function(obj){
       basicBake(obj); placeOnFloor(obj);
       obj.position.set(0.15,0,-0.6);
       obj.rotation.y = -0.08;
       scene.add(obj);
     });
 
-    loadGLB('assets/models/bench.glb', (obj)=>{
+    loadGLB('assets/models/bench.glb', function(obj){
       basicBake(obj); placeOnFloor(obj);
       obj.position.set(0.05,0,-0.15);
       obj.rotation.y = -0.08;
       scene.add(obj);
     });
 
-    loadGLB('assets/models/globus.glb', (obj)=>{
+    loadGLB('assets/models/globus.glb', function(obj){
       basicBake(obj); placeOnFloor(obj);
       obj.position.set(1.15,0,-0.25);
       obj.rotation.y = 0.25;
       scene.add(obj);
     });
 
-    loadGLB('assets/models/shield.glb', (obj)=>{
+    loadGLB('assets/models/shield.glb', function(obj){
       basicBake(obj);
       obj.scale.multiplyScalar(0.8);
       obj.rotation.y = -Math.PI/2;
@@ -304,47 +314,78 @@
       scene.add(obj);
     });
 
-    loadGLB('assets/models/door.glb', (obj)=>{
+    loadGLB('assets/models/door.glb', function(obj){
       basicBake(obj); placeOnFloor(obj);
-      obj.rotation.y = 0; // плоскостью к комнате
-      obj.position.set(0,0,-D/2 + 0.02); // вровень со стеной
+      obj.rotation.y = 0;
+      obj.position.set(0,0,-D/2 + 0.02);
       scene.add(obj);
     });
 
-    // === ФОНАРЬ НА ПРАВОМ КОНТРОЛЛЕРЕ ===
-    lanternLight = new THREE.PointLight(LANTERN_COLOR, LANTERN_INTENS, LANTERN_DIST, LANTERN_DECAY);
-    lanternLight.castShadow = false; // экономим FPS (PointLight-тени очень дорогие)
-    scene.add(lanternLight);
+    // фонарь (Только VR)
+    if (isVrPlanned){
+      lanternLight = new THREE.PointLight(LANTERN_COLOR, LANTERN_INTENS, LANTERN_DIST, LANTERN_DECAY);
+      lanternLight.castShadow = false; // экономия FPS
+      scene.add(lanternLight);
 
-    // модель фонаря (необязательно — если файла нет, всё равно будет свет)
-    loadGLB('assets/models/lantern.glb', (lantern)=>{
-      lanternModel = lantern;
-      basicBake(lanternModel);
-      lanternModel.scale.multiplyScalar(0.6);
-      // чуть сместим относительно хватки
-      lanternModel.position.set(0, -0.02, -0.03);
-      if (controller2) controller2.add(lanternModel);
-    });
+      // модель фонаря — опционально
+      loadGLB('assets/models/lantern.glb', function(lantern){
+        lanternModel = lantern;
+        basicBake(lanternModel);
+        lanternModel.scale.multiplyScalar(0.6);
+        lanternModel.position.set(0, -0.02, -0.03);
+        if (controller2) controller2.add(lanternModel);
+      });
+    }
 
-    // события
     window.addEventListener('resize', onResize);
-    document.addEventListener('click', () => safeMusicStart(), { once:true });
+    document.addEventListener('click', function(){ safeMusicStart(); }, { once:true });
 
-    if(typeof readyCb === 'function') readyCb();
+    if (typeof readyCb === 'function') readyCb();
 
-    renderer.setAnimationLoop(()=>{
-      // лёгкое мерцание фонаря
-      if (lanternLight){
-        const t = performance.now() * 0.002;
+    renderer.setAnimationLoop(function(){
+      // фонарь ведёт себя только в VR
+      if (isVrPlanned && lanternLight){
+        // мерцание
+        var t = performance.now() * 0.002;
         lanternLight.intensity = LANTERN_INTENS * (1.0 + Math.sin(t*3.1)*LANTERN_FLICKER + Math.sin(t*4.7)*LANTERN_FLICKER*0.6);
+
+        // позиция фонаря = позиция правого контроллера (или камеры, если контроллера нет)
+        if (controller2){
+          var p = new THREE.Vector3();
+          controller2.getWorldPosition(p);
+          lanternLight.position.copy(p);
+        } else {
+          lanternLight.position.copy(camera.position);
+        }
       }
-      // привязка фонаря к положению правого контроллера
-      if (controller2 && lanternLight){
-        controller2.getWorldPosition(lanternLight.position);
-      }
+
       controls.update();
       renderer.render(scene, camera);
     });
+  }
+
+  function buildLights(vrMode){
+    if (vrMode){
+      // приглушённо
+      var hemi = new THREE.HemisphereLight(0xffe4bd, 0x0e0906, 0.22*DIM_MULT); scene.add(hemi);
+      var ambient = new THREE.AmbientLight(0xffd7aa, 0.12*DIM_MULT); scene.add(ambient);
+      var sun = new THREE.DirectionalLight(0xffb366, 0.65*DIM_MULT);
+      sun.position.set(-2.4, 3.7, 1.6);
+      sun.castShadow = true; sun.shadow.mapSize.set(1024,1024); sun.shadow.radius = 5; sun.shadow.bias=-0.0002;
+      scene.add(sun);
+      var flame = new THREE.PointLight(0xffa860, 0.45*DIM_MULT, 5.5);
+      flame.position.set(-1.5, 1.2, 1.2); scene.add(flame);
+    } else {
+      // прежний «мягкий» свет
+      var hemi2 = new THREE.HemisphereLight(0xffe4bd, 0x0e0906, 0.35); scene.add(hemi2);
+      var ambient2 = new THREE.AmbientLight(0xffd7aa, 0.18); scene.add(ambient2);
+      var sun2 = new THREE.DirectionalLight(0xffb366, 1.15);
+      sun2.position.set(-2.4, 3.7, 1.6);
+      sun2.castShadow = true; sun2.shadow.mapSize.set(2048,2048); sun2.shadow.radius = 6;
+      scene.add(sun2);
+      var flame2 = new THREE.PointLight(0xffa860, 0.7, 7);
+      flame2.position.set(-1.5, 1.2, 1.2); scene.add(flame2);
+    }
   }
 
   // ------- helpers -------
@@ -353,9 +394,8 @@
     camera.updateProjectionMatrix();
     renderer.setSize(innerWidth, innerHeight);
   }
-
   function basicBake(root){
-    root.traverse(o=>{
+    root.traverse(function(o){
       if(o.isMesh){
         o.castShadow = true;
         o.receiveShadow = true;
@@ -364,11 +404,11 @@
     });
   }
   function placeOnFloor(root){
-    const b = new THREE.Box3().setFromObject(root);
+    var b = new THREE.Box3().setFromObject(root);
     root.position.y -= b.min.y;
   }
   function loadGLB(path, onReady){
-    gltfLoader.load(path, (g)=>onReady(g.scene), undefined, (e)=>console.warn('GLB err', path, e));
+    gltfLoader.load(path, function(g){ onReady(g.scene); }, undefined, function(e){ console.warn('GLB err', path, e); });
   }
 
   // ---------- XR контроллеры + выход ----------
@@ -378,46 +418,46 @@
     if(controller1) scene.add(controller1);
     if(controller2){
       scene.add(controller2);
-      // свет цепляем к контроллеру, чтобы он ездил вместе с рукой
-      if (lanternLight) controller2.add(lanternLight);
-      // модель фонаря добавляем после загрузки (см. выше)
+      // фонарь привяжем к правому контроллеру только в VR
+      if (isVrPlanned && lanternLight) controller2.add(lanternLight);
     }
 
-    const HOLD_MS = 1200;
-    let t1=null, t2=null;
+    // «долгое нажатие» для выхода из VR
+    var HOLD_MS = 1200;
+    var t1=null, t2=null;
 
-    function vibrate(ctrl, ms=200, amp=0.6){
+    function vibrate(ctrl, ms, amp){
       try{
-        const gp = ctrl && ctrl.gamepad;
+        var gp = ctrl ? ctrl.gamepad : null;
         if(!gp) return;
         if (gp.hapticActuators && gp.hapticActuators[0]){
-          gp.hapticActuators[0].pulse(amp, ms);
+          gp.hapticActuators[0].pulse(amp||0.6, ms||200);
         } else if (gp.vibrationActuator && gp.vibrationActuator.playEffect){
           gp.vibrationActuator.playEffect('dual-rumble', {
-            duration: ms, strongMagnitude: amp, weakMagnitude: amp
+            duration: ms||200, strongMagnitude: amp||0.6, weakMagnitude: amp||0.6
           });
         }
       }catch(e){}
     }
 
-    function beginHold(i){ return ()=>{ (i===1? t1 : t2) = performance.now(); }; }
+    function beginHold(i){ return function(){ if(i===1) t1=performance.now(); else t2=performance.now(); }; }
     function endHold(i){
-      return ()=>{
-        const t0 = (i===1? t1 : t2); (i===1? t1 : t2) = null;
+      return function(){
+        var t0 = (i===1? t1 : t2);
+        if(i===1) t1=null; else t2=null;
         if(!t0) return;
         if (performance.now() - t0 >= HOLD_MS){
-          // вибрация обоих, затем плавный выход
-          vibrate(controller1, 220, 0.8);
-          vibrate(controller2, 220, 0.8);
+          vibrate(controller1,220,0.8); vibrate(controller2,220,0.8);
           portalUI.ensureShown('Разрыв связи… сохраняйте тишину…');
-          const xrMgr = renderer && renderer.xr;
-          const s = (xrMgr && typeof xrMgr.getSession === 'function') ? xrMgr.getSession() : null;
-          if (s){
-            s.addEventListener('end', ()=>{
+          // безопасное завершение XR без опц. цепочек
+          var xrMgr = renderer ? renderer.xr : null;
+          var session = (xrMgr && typeof xrMgr.getSession==='function') ? xrMgr.getSession() : null;
+          if (session){
+            session.addEventListener('end', function(){
               document.getElementById('overlay').style.display='grid';
               portalUI.hide();
             }, { once:true });
-            s.end();
+            session.end();
           } else {
             document.getElementById('overlay').style.display='grid';
             portalUI.hide();
