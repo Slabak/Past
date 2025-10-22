@@ -48,13 +48,12 @@
 
   <div id="black"><div class="msg">переносим материю…</div></div>
 
-  <!-- three.js -->
   <script src="assets/js/three.min.js"></script>
   <script src="assets/js/OrbitControls.js"></script>
   <script src="assets/js/GLTFLoader.js"></script>
 
 <script>
-/* ---------- пути/константы ---------- */
+/* ---------- константы ---------- */
 const W=4,D=4,H=3;
 const TEX_FLOOR='assets/textures/floor.jpg';
 const TEX_WALL ='assets/textures/wall.jpg?v=9';
@@ -68,11 +67,10 @@ const MODEL_GLOBUS='assets/models/globus.glb';
 const MODEL_DOOR  ='assets/models/door.glb';
 const MODEL_SHIELD='assets/models/shield.glb';
 const MODEL_BENCH ='assets/models/bench.glb?v=1';
-const MODEL_LANTERN='assets/models/lantern.glb'; // опционально
+const MODEL_LANTERN='assets/models/lantern.glb';
 
 const MUSIC='assets/music/music.mp3';
 
-/* проверенные позиции */
 const POS_CHEST_X=-W/2+0.45, POS_CHEST_Z=1.10;
 const POS_BARREL=new THREE.Vector3(-W/2+0.55,0,-D/2+0.65);
 const POS_TABLE =new THREE.Vector3(0,0,-D/2+0.55);
@@ -87,10 +85,10 @@ const loading=document.getElementById('loading');
 const ring=document.getElementById('ring');
 const percent=document.getElementById('percent');
 const black=document.getElementById('black');
-const setProgress=(p)=>{ring.style.setProperty('--p',p+'%');percent.textContent=Math.round(p)+'%';};
+const setProgress=p=>{ring.style.setProperty('--p',p+'%');percent.textContent=Math.round(p)+'%';};
 const showLoading=(p=0)=>{loading.style.display='grid';setProgress(p);};
 const hideLoading=()=>{loading.style.display='none';};
-const fadeBlack=(on)=>black.classList.toggle('on',!!on);
+const fadeBlack=on=>black.classList.toggle('on',!!on);
 
 /* three globals */
 let scene,camera,renderer,controls,tl,manager;
@@ -100,15 +98,16 @@ let vrPlanned=false, fullyLoaded=false, firstVRFrame=false;
 
 /* фонарь */
 let lanternLights=[], lanternNodes=[];
-const LANTERN_INT=6.0, LANTERN_DIST=12.0, LANTERN_SIZE_M=0.28;
+const LANTERN_INT=8.0, LANTERN_DIST=14.0, LANTERN_SIZE_M=0.30;
 
-/* удержание для выхода */
-let holdTimer=null, holding=false, holdMs=1500;
+/* выход удержанием */
+let holdTimer=null;
 
 /* старт */
 document.getElementById('btnVR').addEventListener('click',startVR,{once:true});
 document.getElementById('btnFlat').addEventListener('click',startFlat,{once:true});
 
+/* ---------- входы ---------- */
 async function startVR(){
   overlay.style.display='none';
   showLoading(0); fadeBlack(true); vrPlanned=true;
@@ -125,9 +124,9 @@ async function startVR(){
 
   await boot(true);
 
-  // ждать: полная загрузка + первый кадр в VR
-  const waitReady = ()=> {
-    if (fullyLoaded && firstVRFrame) setTimeout(()=>fadeBlack(false), 250);
+  // ждём полную загрузку + первый кадр VR, чтобы не видеть «подгрузку»
+  const waitReady=()=>{
+    if(fullyLoaded && firstVRFrame){ setTimeout(()=>fadeBlack(false),250); }
     else requestAnimationFrame(waitReady);
   };
   waitReady();
@@ -149,10 +148,8 @@ async function boot(isVR){
   await loadModels();
   startMusic();
 
-  // запуск цикла рендера ПОСЛЕ инициализации сцены
-  if (!renderer.getAnimationLoop()) {
-    renderer.setAnimationLoop(()=>{ animate(); });
-  }
+  // цикл рендера — без getAnimationLoop
+  renderer.setAnimationLoop(animate);
 
   hideLoading();
 }
@@ -179,20 +176,13 @@ function initRenderer(){
     renderer.setSize(innerWidth,innerHeight);
   });
 
-  // отметка первого кадра в XR
+  // отметим первый xr-кадр простым RAF после sessionstart
   renderer.xr.addEventListener('sessionstart', ()=>{
     firstVRFrame=false;
-    // как только пошли кадры — отметим
-    const mark=()=>{
-      if(renderer.xr.isPresenting){ firstVRFrame=true; }
-    };
-    renderer.setAnimationLoop(()=>{ mark(); animate(); });
+    requestAnimationFrame(()=>{ firstVRFrame=true; });
+    onXRStart();
   });
-  renderer.xr.addEventListener('sessionend', ()=>{
-    firstVRFrame=false;
-    // вернём обычный цикл
-    renderer.setAnimationLoop(()=>{ animate(); });
-  });
+  renderer.xr.addEventListener('sessionend', onXREnd);
 }
 
 function initScene(isVR){
@@ -210,7 +200,7 @@ function initScene(isVR){
 
   tl=new THREE.TextureLoader(manager);
 
-  const k = isVR ? 0.18 : 1.0; // VR — почти темно
+  const k = isVR ? 0.18 : 1.0;
   amb = new THREE.AmbientLight(0xffe0bd,0.20*k);
   hemi= new THREE.HemisphereLight(0xffd4a8,0x120806,0.22*k);
   sun = new THREE.DirectionalLight(0xffa864,0.55*k);
@@ -221,9 +211,6 @@ function initScene(isVR){
   c1=new THREE.PointLight(0xffa860,0.26*k,5.5); c1.position.set(-1.2,1.15,1.15);
   c2=new THREE.PointLight(0xff9a58,0.20*k,4.8);  c2.position.set(0.25,1.05,-1.55);
   scene.add(c1,c2);
-
-  renderer.xr.addEventListener('sessionstart',onXRStart);
-  renderer.xr.addEventListener('sessionend',onXREnd);
 }
 
 function animate(){
@@ -234,13 +221,13 @@ function animate(){
   if(c1) c1.intensity = 0.26 + Math.sin(t*3.2)*0.06 + Math.sin(t*5.3)*0.04;
   if(c2) c2.intensity = 0.20 + Math.sin(t*3.7)*0.05 + Math.sin(t*4.7)*0.03;
 
-  // аварийная подсветка от головы, если фонаря нет
-  if(vrPlanned && renderer.xr.isPresenting && lanternLights.length===0 && scene){
+  // аварийная подсветка от головы, если фонарь не успел повеситься
+  if(vrPlanned && renderer.xr.isPresenting && lanternLights.length===0){
     let hl = scene.getObjectByName('__head_fallback');
-    if(!hl){ hl = new THREE.PointLight(0xffd0a0,0.35,3.2); hl.name='__head_fallback'; scene.add(hl); }
+    if(!hl){ hl = new THREE.PointLight(0xffd0a0,0.40,3.2); hl.name='__head_fallback'; scene.add(hl); }
     const camPos=new THREE.Vector3(); camera.getWorldPosition(camPos);
     hl.position.copy(camPos);
-  }else if(scene){
+  }else{
     const hl=scene.getObjectByName('__head_fallback'); if(hl) hl.parent.remove(hl);
   }
 
@@ -358,13 +345,11 @@ function hapticsPulse(ctrl, ms=30){
 }
 
 function attachLanternTo(target){
-  // свет фонаря
   const light=new THREE.PointLight(0xffb680, LANTERN_INT, LANTERN_DIST, 2.0);
   light.castShadow=true; light.shadow.mapSize.set(512,512);
   light.position.set(0,-0.02,-0.12);
   target.add(light); lanternLights.push(light);
 
-  // модель фонаря (опционально)
   new THREE.GLTFLoader(manager).load(MODEL_LANTERN,(g)=>{
     const node=g.scene; fitByHeight(node,LANTERN_SIZE_M);
     node.position.set(0,-0.04,-0.12);
@@ -373,12 +358,12 @@ function attachLanternTo(target){
 }
 
 function addHoldExit(ctrl){
-  let t0=0, active=false;
-  const start=()=>{ if(active) return; active=true; t0=performance.now(); hapticsPulse(ctrl,20);
+  const start=()=>{ hapticsPulse(ctrl,20);
     holdTimer=setTimeout(async ()=>{ hapticsPulse(ctrl,60); hapticsPulse(ctrl,60); hapticsPulse(ctrl,60);
-      await renderer.xr.getSession()?.end(); active=false; }, holdMs);
+      await renderer.xr.getSession()?.end();
+    },1500);
   };
-  const end=()=>{ active=false; clearTimeout(holdTimer); };
+  const end=()=>{ clearTimeout(holdTimer); };
   ctrl.addEventListener('squeezestart', start);
   ctrl.addEventListener('squeezeend',   end);
   ctrl.addEventListener('selectstart',  start);
@@ -386,7 +371,6 @@ function addHoldExit(ctrl){
 }
 
 function onXRStart(){
-  // затемнить ещё
   [amb,hemi,sun].forEach(l=> l.intensity*=0.35);
 
   const c0=renderer.xr.getController(0), c1=renderer.xr.getController(1);
@@ -395,7 +379,6 @@ function onXRStart(){
 
   const session=renderer.xr.getSession();
 
-  // попробуем найти правый контроллер
   const tryAttach=()=>{
     const inputs=session.inputSources||[];
     const right=inputs.find(i=>i.handedness==='right' && i.targetRayMode!=='gaze');
@@ -406,12 +389,11 @@ function onXRStart(){
   };
   tryAttach();
 
-  // если за 300мс не нашли — повесим на любой доступный
   setTimeout(()=>{
     if(lanternLights.length===0){
       if(c1) attachLanternTo(c1);
       else if(c0) attachLanternTo(c0);
-      else attachLanternTo(camera); // вообще без контроллеров
+      else attachLanternTo(camera);
     }
   },300);
 
@@ -421,7 +403,7 @@ function onXRStart(){
 }
 
 function onXREnd(){
-  clearTimeout(holdTimer); holding=false;
+  clearTimeout(holdTimer);
   [amb,hemi,sun].forEach(l=> l.intensity/=0.35);
   lanternLights.forEach(l=>l.parent?.remove(l));
   lanternNodes.forEach(n=>n.parent?.remove(n));
