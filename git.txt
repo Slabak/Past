@@ -1,4 +1,5 @@
 git status	
 git add .
+git commit -m "track GLB via LFS"
 git push origin main
 
