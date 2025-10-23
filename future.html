@@ -5,14 +5,10 @@
   <title>VR Room — Будущее</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-  <!-- ЛОКАЛЬНЫЕ (из Past/assets/js) -->
+  <!-- ТОЛЬКО локальные скрипты из assets/js -->
   <script src="./assets/js/three.min.js"></script>
   <script src="./assets/js/OrbitControls.js"></script>
   <script src="./assets/js/GLTFLoader.js"></script>
-
-  <!-- НЕ-модульные аддоны с CDN (совместимы с window.THREE) -->
-  <script src="https://unpkg.com/three@0.160.0/examples/js/loaders/DRACOLoader.js"></script>
-  <script src="https://unpkg.com/three@0.160.0/examples/js/loaders/KTX2Loader.js"></script>
 
   <style>
     html,body{margin:0;height:100%;background:#000;color:#fff;font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif}
@@ -33,7 +29,7 @@
     <div id="loadingText">Загрузка…</div>
   </div>
 
-  <!-- Выбор режима -->
+  <!-- Меню выбора -->
   <div id="menu" class="menu">
     <h1>Комната будущего</h1>
     <button id="btnVR" class="btn">Войти в VR</button>
@@ -62,16 +58,22 @@
   renderer.setPixelRatio(isMobile ? 1 : Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.xr.enabled = true;
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+  // Совместимость: старые/новые версии three
+  if ('outputColorSpace' in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace;
+  else renderer.outputEncoding = THREE.sRGBEncoding;
+
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   if (renderer.xr.setFoveation) renderer.xr.setFoveation(1.0);
+
   document.body.appendChild(renderer.domElement);
 
   // ===== Scene / Camera =====
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0e0f18);
+
   const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 100);
   camera.position.set(0, 1.6, ROOM.size * 0.6);
 
@@ -84,8 +86,15 @@
     const geom = new THREE.PlaneGeometry(2, 2);
     const mat  = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 1, depthTest: false });
     const mesh = new THREE.Mesh(geom, mat);
-    mesh.renderOrder = 9999; mesh.position.z = -0.3; camera.add(mesh); scene.add(camera);
-    return { show:()=>mat.opacity=1, fadeOut:(ms=700)=>{ const t0=performance.now(); (function step(t){const k=Math.min(1,(t-t0)/ms); mat.opacity=1-k; if(k<1) requestAnimationFrame(step);})(t0);} };
+    mesh.renderOrder = 9999; mesh.position.z = -0.3;
+    camera.add(mesh); scene.add(camera);
+    return {
+      show: ()=> mat.opacity = 1,
+      fadeOut: (ms=700)=>{
+        const t0 = performance.now();
+        (function step(t){ const k=Math.min(1,(t-t0)/ms); mat.opacity = 1-k; if(k<1) requestAnimationFrame(step); })(t0);
+      }
+    };
   }
   const screenFade = makeScreenFade();
 
@@ -99,16 +108,23 @@
 
   // ===== Текстуры пола/стен/потолка =====
   const texLoader = new THREE.TextureLoader();
-  function loadT(url, isSRGB=true){
+  function setSRGB(t){
+    if (!t) return t;
+    if ('colorSpace' in t) t.colorSpace = THREE.SRGBColorSpace;
+    else t.encoding = THREE.sRGBEncoding;
+    return t;
+  }
+  function loadT(url){
     const t = texLoader.load(url);
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    t.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy?.() || 8);
-    if (isSRGB) t.colorSpace = THREE.SRGBColorSpace;
-    return t;
+    t.anisotropy = 8;
+    return setSRGB(t);
   }
   const tFloor   = loadT(PATH.textures + FILES.floor);
   const tWall    = loadT(PATH.textures + FILES.wall);
   const tCeiling = loadT(PATH.textures + FILES.ceiling);
+
+  // Тайлинг — подправишь по вкусу
   tFloor.repeat.set(2,2);
   tWall.repeat.set(2,1);
   tCeiling.repeat.set(2,2);
@@ -140,7 +156,7 @@
     });
   }
 
-  // ===== Загрузка future.glb с менеджером =====
+  // ===== Загрузка future.glb (без DRACO/KTX2) =====
   const loadingEl   = document.getElementById('loading');
   const loadingText = document.getElementById('loadingText');
   const menuEl      = document.getElementById('menu');
@@ -153,10 +169,6 @@
   manager.onError    = (url)=>{ loadingText.textContent = `Ошибка: ${url}`; };
 
   const gltf = new THREE.GLTFLoader(manager);
-  const draco = new THREE.DRACOLoader(); draco.setDecoderPath('https://unpkg.com/three@0.160.0/examples/jsm/libs/draco/'); // путь к wasm
-  gltf.setDRACOLoader(draco);
-  const ktx2 = new THREE.KTX2Loader(manager); ktx2.setTranscoderPath('https://unpkg.com/three@0.160.0/examples/jsm/libs/basis/'); ktx2.detectSupport(renderer);
-
   gltf.load(PATH.models + FILES.model, (g)=>{
     const obj = g.scene;
     obj.traverse(n=>{ if(n.isMesh){ n.castShadow = true; n.receiveShadow = true; }});
@@ -165,26 +177,22 @@
     renderer.compile(scene, camera);
   });
 
-  // ===== Ручной запуск XR (вместо VRButton) =====
+  // ===== Ручной запуск XR (без VRButton) =====
   async function startXR(){
     if (!navigator.xr) { alert('WebXR не поддерживается в этом браузере. Открой в Quest Browser.'); return; }
     try {
-      // Пара опций можно убрать, если что-то не поддерживается
-      const session = await navigator.xr.requestSession('immersive-vr', {
-        optionalFeatures: ['local-floor','bounded-floor','hand-tracking','layers']
-      });
+      const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor','bounded-floor'] });
       await renderer.xr.setSession(session);
     } catch (e) {
-      console.error(e);
-      alert('Не удалось запустить VR-сессию.');
+      console.error(e); alert('Не удалось запустить VR-сессию.');
     }
   }
 
-  // ===== UI (VR/наблюдатель) =====
+  // ===== UI =====
   document.getElementById('btnVR').onclick = async ()=>{
     menuEl.style.display = 'none';
     screenFade.show();
-    await startXR();           // запуск XR по пользовательскому клику
+    await startXR();
     await waitAssets();
     setTimeout(()=> screenFade.fadeOut(700), 200);
   };
@@ -213,5 +221,8 @@
     renderer.render(scene, camera);
   });
   </script>
+  <!-- Можешь добавить фавикон, чтобы убрать 404:
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Crect width='64' height='64' fill='%23000'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-size='40' fill='%23fff'%3E⌛%3C/text%3E%3C/svg%3E">
+  -->
 </body>
 </html>
