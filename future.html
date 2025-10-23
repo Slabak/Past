@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>VR Room — Будущее</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- three.js и базовые контролы (локально из assets/js) -->
+  <script src="./assets/js/three.min.js"></script>
+  <script src="./assets/js/OrbitControls.js"></script>
+  <script src="./assets/js/GLTFLoader.js"></script>
+
+  <!-- Декодеры и VRButton (через CDN, т.к. их нет в assets/js) -->
+  <script src="https://unpkg.com/three@0.160.0/examples/jsm/loaders/DRACOLoader.js"></script>
+  <script src="https://unpkg.com/three@0.160.0/examples/jsm/loaders/MeshoptDecoder.js"></script>
+  <script src="https://unpkg.com/three@0.160.0/examples/jsm/loaders/KTX2Loader.js"></script>
+  <script src="https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js"></script>
+
+  <style>
+    html,body{margin:0;height:100%;background:#000;color:#fff;font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif}
+    .loading{position:fixed;inset:0;background:#000;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;z-index:30}
+    .spinner{width:38px;height:38px;border-radius:50%;border:3px solid #333;border-top-color:#fff;animation:spin 1s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .menu{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;flex-direction:column;gap:12px;z-index:20}
+    .menu h1{margin:0 0 8px;font-size:20px;font-weight:600}
+    .btn{appearance:none;border:0;padding:12px 16px;border-radius:12px;font-weight:600;cursor:pointer;font-size:15px;background:#14b8a6;color:#00100e;box-shadow:0 4px 20px rgba(0,0,0,.35)}
+    .btn.secondary{background:#1f2937;color:#cbd5e1}
+    .hud{position:fixed;left:12px;bottom:12px;background:rgba(0,0,0,.5);padding:8px 10px;border-radius:10px;font-size:13px;z-index:5}
+  </style>
+</head>
+<body>
+  <!-- Чёрный экран до загрузки ассетов -->
+  <div id="loading" class="loading">
+    <div class="spinner"></div>
+    <div id="loadingText">Загрузка…</div>
+  </div>
+
+  <!-- Выбор режима -->
+  <div id="menu" class="menu">
+    <h1>Комната будущего</h1>
+    <button id="btnVR" class="btn">Войти в VR</button>
+    <button id="btnSpectate" class="btn secondary">Режим наблюдателя</button>
+  </div>
+
+  <div class="hud">Комната: 4×4×3 м. Без лучей и телепорта. Чёрный экран до полной готовности.</div>
+
+  <script>
+  // ===== ПУТИ/ФАЙЛЫ ПОД ТВОЮ СТРУКТУРУ =====
+  const PATH = {
+    js:       './assets/js/',
+    models:   './assets/models/',
+    textures: './assets/textures/'
+  };
+  const FILES = {
+    model:   'future.glb',
+    floor:   'floorf.jpg',
+    wall:    'wallf.jpg',
+    ceiling: 'potolokf.jpg'
+  };
+  const ROOM = { size: 4, height: 3 };
+
+  // ===== Renderer / XR =====
+  const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false, powerPreference:'high-performance' });
+  const isMobile = /Android|iPhone|iPad|iPod|Quest|Oculus/i.test(navigator.userAgent);
+  renderer.setPixelRatio(isMobile ? 1 : Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.xr.enabled = true;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  if (renderer.xr.setFoveation) renderer.xr.setFoveation(1.0);
+  document.body.appendChild(renderer.domElement);
+
+  // Скрытая стандартная XR-кнопка — запускаем через свой UI
+  const hiddenVRBtn = THREE.VRButton.createButton(renderer);
+  hiddenVRBtn.style.display = 'none';
+  document.body.appendChild(hiddenVRBtn);
+
+  // ===== Scene / Camera =====
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0e0f18);
+  const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 100);
+  camera.position.set(0, 1.6, ROOM.size * 0.6);
+
+  // Наблюдатель (телефон/ПК)
+  const controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enabled = false;
+  controls.target.set(0, 1.6, 0);
+
+  // ===== Внутрикамерная «шторка» (чёрный в VR/наблюдателе) =====
+  function makeScreenFade(){
+    const geom = new THREE.PlaneGeometry(2, 2);
+    const mat  = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 1, depthTest: false });
+    const mesh = new THREE.Mesh(geom, mat);
+    mesh.renderOrder = 9999; mesh.position.z = -0.3; camera.add(mesh); scene.add(camera);
+    return {
+      show: ()=> mat.opacity = 1,
+      fadeOut: (ms=700)=>{
+        const t0 = performance.now();
+        function step(t){ const k = Math.min(1, (t - t0)/ms); mat.opacity = 1 - k; if(k<1) requestAnimationFrame(step); }
+        requestAnimationFrame(step);
+      }
+    };
+  }
+  const screenFade = makeScreenFade();
+  renderer.xr.addEventListener('sessionstart', ()=> { screenFade.show(); controls.enabled = false; });
+  renderer.xr.addEventListener('sessionend',   ()=> { controls.enabled = false; });
+
+  // ===== Свет =====
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x223355, 1.0));
+  const dir = new THREE.DirectionalLight(0xffffff, 0.7);
+  dir.position.set(2.5, 4, 1.5);
+  dir.castShadow = true; dir.shadow.mapSize.set(1024,1024);
+  dir.shadow.camera.near = 0.1; dir.shadow.camera.far = 10;
+  scene.add(dir);
+
+  // ===== Текстуры: пол/стены/потолок =====
+  const texLoader = new THREE.TextureLoader();
+  function loadT(url, isSRGB=true){
+    const t = texLoader.load(url);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy?.() || 8);
+    if (isSRGB) t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  }
+  const tFloor   = loadT(PATH.textures + FILES.floor);
+  const tWall    = loadT(PATH.textures + FILES.wall);
+  const tCeiling = loadT(PATH.textures + FILES.ceiling);
+
+  // Тайлинг — подправишь по вкусу
+  tFloor.repeat.set(2,2);
+  tWall.repeat.set(2,1);
+  tCeiling.repeat.set(2,2);
+
+  // Геометрия комнаты (поверхности; мебель – в future.glb)
+  { // пол
+    const g = new THREE.PlaneGeometry(ROOM.size, ROOM.size);
+    const m = new THREE.MeshStandardMaterial({ map:tFloor, roughness:1, metalness:0 });
+    const mesh = new THREE.Mesh(g, m);
+    mesh.rotation.x = -Math.PI/2; mesh.receiveShadow = true; scene.add(mesh);
+  }
+  { // потолок
+    const g = new THREE.PlaneGeometry(ROOM.size, ROOM.size);
+    const m = new THREE.MeshStandardMaterial({ map:tCeiling, roughness:.9, metalness:0 });
+    const ceil = new THREE.Mesh(g, m);
+    ceil.rotation.x =  Math.PI/2; ceil.position.y = ROOM.height; scene.add(ceil);
+  }
+  { // стены
+    const g = new THREE.PlaneGeometry(ROOM.size, ROOM.height);
+    const m = new THREE.MeshStandardMaterial({ map:tWall, roughness:.95, metalness:0 });
+    [
+      {pos:[0,ROOM.height/2,-ROOM.size/2], rot:[0,0,0]},
+      {pos:[0,ROOM.height/2, ROOM.size/2], rot:[0,Math.PI,0]},
+      {pos:[-ROOM.size/2,ROOM.height/2,0], rot:[0, Math.PI/2, 0]},
+      {pos:[ ROOM.size/2,ROOM.height/2,0], rot:[0,-Math.PI/2, 0]},
+    ].forEach(s=>{
+      const w = new THREE.Mesh(g, m);
+      w.position.set(...s.pos); w.rotation.set(...s.rot); w.receiveShadow = true; scene.add(w);
+    });
+  }
+
+  // ===== Загрузка future.glb с менеджером =====
+  const loadingEl   = document.getElementById('loading');
+  const loadingText = document.getElementById('loadingText');
+  const menuEl      = document.getElementById('menu');
+
+  const manager = new THREE.LoadingManager();
+  let assetsReady = false;
+  manager.onStart    = ()=>{ loadingText.textContent = 'Загрузка…'; };
+  manager.onProgress = (url, loaded, total)=>{ loadingText.textContent = `Загрузка… ${loaded}/${total}`; };
+  manager.onLoad     = ()=>{ assetsReady = true; loadingEl.style.display='none'; menuEl.style.display='flex'; };
+  manager.onError    = (url)=>{ loadingText.textContent = `Ошибка: ${url}`; };
+
+  const gltf = new THREE.GLTFLoader(manager);
+  const draco = new THREE.DRACOLoader(); draco.setDecoderPath('https://unpkg.com/three@0.160.0/examples/jsm/libs/draco/');
+  gltf.setDRACOLoader(draco);
+  if (window.MeshoptDecoder) gltf.setMeshoptDecoder(window.MeshoptDecoder);
+  const ktx2 = new THREE.KTX2Loader(manager); ktx2.setTranscoderPath('https://unpkg.com/three@0.160.0/examples/jsm/libs/basis/'); ktx2.detectSupport(renderer);
+
+  gltf.load(PATH.models + FILES.model, (g)=>{
+    const obj = g.scene;
+    obj.traverse(n=>{ if(n.isMesh){ n.castShadow = true; n.receiveShadow = true; }});
+    obj.position.set(0,0,0);
+    scene.add(obj);
+    renderer.compile(scene, camera);
+  });
+
+  // ===== UI (VR/наблюдатель) =====
+  document.getElementById('btnVR').onclick = async ()=>{
+    menuEl.style.display = 'none';
+    screenFade.show(); hiddenVRBtn.click();
+    await waitAssets(); setTimeout(()=> screenFade.fadeOut(700), 200);
+  };
+  document.getElementById('btnSpectate').onclick = async ()=>{
+    menuEl.style.display = 'none';
+    controls.enabled = true;
+    screenFade.show(); await waitAssets(); setTimeout(()=> screenFade.fadeOut(700), 200);
+  };
+  function waitAssets(){
+    return new Promise(r=>{
+      if (assetsReady) return r();
+      const t = setInterval(()=>{ if(assetsReady){ clearInterval(t); r(); }}, 50);
+    });
+  }
+
+  // ===== Resize / Loop =====
+  window.addEventListener('resize', ()=>{
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+  renderer.setAnimationLoop(()=>{
+    if (controls.enabled) controls.update();
+    renderer.render(scene, camera);
+  });
+  </script>
+</body>
+</html>
