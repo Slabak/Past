@@ -100,7 +100,6 @@
 
     <!-- Кнопки управления -->
     <nav class="controls">
-      <button id="btnReplay">Повтор речи</button>
       <button id="btnMute">Звук: выкл</button>
     </nav>
 
@@ -108,8 +107,8 @@
   </main>
 
   <!-- Аудио -->
-  <audio id="music" src="assets/ambient.mp3" preload="auto" loop></audio>
-  <audio id="voice" src="assets/voiceover.mp3" preload="auto"></audio>
+      <!-- Аудио (playsinline для iOS, чтобы не лезло в полноэкранный плеер) -->
+  <audio id="music" src="assets/ambient.mp3" preload="auto" loop playsinline></audio>
 
   <script>
     // Утилита: плавное изменение громкости
@@ -122,31 +121,11 @@
           audio.volume = to; clearInterval(interval);
         }
       }, tick);
-      setTimeout(() => clearInterval(interval), ms + 2000);
-    }
-
-    const intro   = document.getElementById('intro');
-    const startBtn= document.getElementById('startBtn');
-    const music   = document.getElementById('music');
-    const voice   = document.getElementById('voice');
-    const btnReplay = document.getElementById('btnReplay');
-    const btnMute   = document.getElementById('btnMute');
-    const toast   = document.getElementById('toast');
-    const subtitle= document.getElementById('subtitle');
-    const glitch  = document.querySelector('.glitch');
-
-    let muted = true; // стартуем без звука до клика
-    music.volume = 0; voice.volume = 1;
-
-    function showToast(msg){ toast.textContent = msg; toast.classList.add('show'); setTimeout(()=>toast.classList.remove('show'), 3400); }
-
-    // Инициализация по клику: запускаем музыку и затем голос
-    async function startExperience(){
-      try{
-        await music.play();
-        muted = false; btnMute.textContent = 'Звук: вкл';
-        fadeAudio(music, 0.4, 1500);
-        setTimeout(async () => { try{ await voice.play(); } catch(e){ showToast('Нажмите «Повтор речи», чтобы услышать сообщение.'); } }, 2200);
+      00 + Math.random()*2400);
+      }catch(e){
+        showToast('Браузер заблокировал автоплей или файл не найден. Проверьте громкость и пути к файлам.');
+      }
+    } catch(e){ showToast('Нажмите «Повтор речи», чтобы услышать сообщение.'); } }, 2200);
         intro.classList.add('hidden');
         // периодические короткие глитчи
         setInterval(()=>{ glitch.classList.toggle('pulse'); setTimeout(()=>glitch.classList.toggle('pulse'), 240); }, 3800 + Math.random()*2400);
@@ -158,8 +137,7 @@
     startBtn.addEventListener('click', startExperience);
 
     // Повтор речи
-    btnReplay.addEventListener('click', async () => {
-      try{ voice.currentTime = 0; await voice.play(); }catch(e){ showToast('Голос не может проиграться. Проверьте громкость.'); }
+     }catch(e){ showToast('Голос не может проиграться. Проверьте громкость.'); }
     });
 
     // Мьют/анмьют фоновой музыки (голос никогда не мутим полностью)
@@ -179,9 +157,16 @@
     }
 
     // Текстовая подсказка, когда голос закончит
-    voice.addEventListener('ended', ()=>{
-      subtitle.textContent = 'Следуйте указаниям. Ключ — там, где время засыпает.'; // замените на свою фразу или удалите
-    });
+    
+  // Быстрая проверка, что файлы существуют (404) — сообщим сразу
+    ;(async()=>{
+      try{
+        const m = await fetch('assets/ambient.mp3', {method:'HEAD'});
+        if(!m.ok) showToast('Не найден файл музыки: assets/ambient.mp3');
+      }catch(_){ /* оффлайн или file:// — HEAD может быть недоступен */ }
+    })();
+      }catch(_){ /* оффлайн или file:// — HEAD может быть недоступен */ }
+    })();
   </script>
 </body>
 </html>
