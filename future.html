@@ -5,16 +5,14 @@
   <title>VR Room — Будущее</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-  <!-- three.js и базовые контролы (локально из assets/js) -->
+  <!-- ЛОКАЛЬНЫЕ (из Past/assets/js) -->
   <script src="./assets/js/three.min.js"></script>
   <script src="./assets/js/OrbitControls.js"></script>
   <script src="./assets/js/GLTFLoader.js"></script>
 
-  <!-- Декодеры и VRButton (через CDN, т.к. их нет в assets/js) -->
-  <script src="https://unpkg.com/three@0.160.0/examples/jsm/loaders/DRACOLoader.js"></script>
-  <script src="https://unpkg.com/three@0.160.0/examples/jsm/loaders/MeshoptDecoder.js"></script>
-  <script src="https://unpkg.com/three@0.160.0/examples/jsm/loaders/KTX2Loader.js"></script>
-  <script src="https://unpkg.com/three@0.160.0/examples/jsm/webxr/VRButton.js"></script>
+  <!-- НЕ-модульные аддоны с CDN (совместимы с window.THREE) -->
+  <script src="https://unpkg.com/three@0.160.0/examples/js/loaders/DRACOLoader.js"></script>
+  <script src="https://unpkg.com/three@0.160.0/examples/js/loaders/KTX2Loader.js"></script>
 
   <style>
     html,body{margin:0;height:100%;background:#000;color:#fff;font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif}
@@ -42,12 +40,11 @@
     <button id="btnSpectate" class="btn secondary">Режим наблюдателя</button>
   </div>
 
-  <div class="hud">Комната: 4×4×3 м. Без лучей и телепорта. Чёрный экран до полной готовности.</div>
+  <div class="hud">Комната: 4×4×3 м. Без лучей/телепорта. Чёрный экран до полной готовности.</div>
 
   <script>
-  // ===== ПУТИ/ФАЙЛЫ ПОД ТВОЮ СТРУКТУРУ =====
+  // ===== Пути под твою структуру =====
   const PATH = {
-    js:       './assets/js/',
     models:   './assets/models/',
     textures: './assets/textures/'
   };
@@ -72,40 +69,25 @@
   if (renderer.xr.setFoveation) renderer.xr.setFoveation(1.0);
   document.body.appendChild(renderer.domElement);
 
-  // Скрытая стандартная XR-кнопка — запускаем через свой UI
-  const hiddenVRBtn = THREE.VRButton.createButton(renderer);
-  hiddenVRBtn.style.display = 'none';
-  document.body.appendChild(hiddenVRBtn);
-
   // ===== Scene / Camera =====
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0e0f18);
   const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 100);
   camera.position.set(0, 1.6, ROOM.size * 0.6);
 
-  // Наблюдатель (телефон/ПК)
   const controls = new THREE.OrbitControls(camera, renderer.domElement);
   controls.enabled = false;
   controls.target.set(0, 1.6, 0);
 
-  // ===== Внутрикамерная «шторка» (чёрный в VR/наблюдателе) =====
+  // ===== Встроенная «шторка» (чёрный внутри VR/наблюдателя) =====
   function makeScreenFade(){
     const geom = new THREE.PlaneGeometry(2, 2);
     const mat  = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 1, depthTest: false });
     const mesh = new THREE.Mesh(geom, mat);
     mesh.renderOrder = 9999; mesh.position.z = -0.3; camera.add(mesh); scene.add(camera);
-    return {
-      show: ()=> mat.opacity = 1,
-      fadeOut: (ms=700)=>{
-        const t0 = performance.now();
-        function step(t){ const k = Math.min(1, (t - t0)/ms); mat.opacity = 1 - k; if(k<1) requestAnimationFrame(step); }
-        requestAnimationFrame(step);
-      }
-    };
+    return { show:()=>mat.opacity=1, fadeOut:(ms=700)=>{ const t0=performance.now(); (function step(t){const k=Math.min(1,(t-t0)/ms); mat.opacity=1-k; if(k<1) requestAnimationFrame(step);})(t0);} };
   }
   const screenFade = makeScreenFade();
-  renderer.xr.addEventListener('sessionstart', ()=> { screenFade.show(); controls.enabled = false; });
-  renderer.xr.addEventListener('sessionend',   ()=> { controls.enabled = false; });
 
   // ===== Свет =====
   scene.add(new THREE.HemisphereLight(0xffffff, 0x223355, 1.0));
@@ -115,7 +97,7 @@
   dir.shadow.camera.near = 0.1; dir.shadow.camera.far = 10;
   scene.add(dir);
 
-  // ===== Текстуры: пол/стены/потолок =====
+  // ===== Текстуры пола/стен/потолка =====
   const texLoader = new THREE.TextureLoader();
   function loadT(url, isSRGB=true){
     const t = texLoader.load(url);
@@ -127,13 +109,11 @@
   const tFloor   = loadT(PATH.textures + FILES.floor);
   const tWall    = loadT(PATH.textures + FILES.wall);
   const tCeiling = loadT(PATH.textures + FILES.ceiling);
-
-  // Тайлинг — подправишь по вкусу
   tFloor.repeat.set(2,2);
   tWall.repeat.set(2,1);
   tCeiling.repeat.set(2,2);
 
-  // Геометрия комнаты (поверхности; мебель – в future.glb)
+  // ===== Геометрия комнаты (поверхности) =====
   { // пол
     const g = new THREE.PlaneGeometry(ROOM.size, ROOM.size);
     const m = new THREE.MeshStandardMaterial({ map:tFloor, roughness:1, metalness:0 });
@@ -173,9 +153,8 @@
   manager.onError    = (url)=>{ loadingText.textContent = `Ошибка: ${url}`; };
 
   const gltf = new THREE.GLTFLoader(manager);
-  const draco = new THREE.DRACOLoader(); draco.setDecoderPath('https://unpkg.com/three@0.160.0/examples/jsm/libs/draco/');
+  const draco = new THREE.DRACOLoader(); draco.setDecoderPath('https://unpkg.com/three@0.160.0/examples/jsm/libs/draco/'); // путь к wasm
   gltf.setDRACOLoader(draco);
-  if (window.MeshoptDecoder) gltf.setMeshoptDecoder(window.MeshoptDecoder);
   const ktx2 = new THREE.KTX2Loader(manager); ktx2.setTranscoderPath('https://unpkg.com/three@0.160.0/examples/jsm/libs/basis/'); ktx2.detectSupport(renderer);
 
   gltf.load(PATH.models + FILES.model, (g)=>{
@@ -186,16 +165,35 @@
     renderer.compile(scene, camera);
   });
 
+  // ===== Ручной запуск XR (вместо VRButton) =====
+  async function startXR(){
+    if (!navigator.xr) { alert('WebXR не поддерживается в этом браузере. Открой в Quest Browser.'); return; }
+    try {
+      // Пара опций можно убрать, если что-то не поддерживается
+      const session = await navigator.xr.requestSession('immersive-vr', {
+        optionalFeatures: ['local-floor','bounded-floor','hand-tracking','layers']
+      });
+      await renderer.xr.setSession(session);
+    } catch (e) {
+      console.error(e);
+      alert('Не удалось запустить VR-сессию.');
+    }
+  }
+
   // ===== UI (VR/наблюдатель) =====
   document.getElementById('btnVR').onclick = async ()=>{
     menuEl.style.display = 'none';
-    screenFade.show(); hiddenVRBtn.click();
-    await waitAssets(); setTimeout(()=> screenFade.fadeOut(700), 200);
+    screenFade.show();
+    await startXR();           // запуск XR по пользовательскому клику
+    await waitAssets();
+    setTimeout(()=> screenFade.fadeOut(700), 200);
   };
   document.getElementById('btnSpectate').onclick = async ()=>{
     menuEl.style.display = 'none';
     controls.enabled = true;
-    screenFade.show(); await waitAssets(); setTimeout(()=> screenFade.fadeOut(700), 200);
+    screenFade.show();
+    await waitAssets();
+    setTimeout(()=> screenFade.fadeOut(700), 200);
   };
   function waitAssets(){
     return new Promise(r=>{
