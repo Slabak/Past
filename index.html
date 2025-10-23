@@ -7,19 +7,9 @@
 <style>
   html,body{height:100%;margin:0;overflow:hidden;background:#000;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
 
-  /* Стартовый экран */
-  #overlay{position:fixed;inset:0;display:grid;place-items:center;z-index:10;
-    background:radial-gradient(ellipse at center,rgba(0,0,0,.82),rgba(0,0,0,.96));color:#fff}
-  .panel{display:flex;flex-direction:column;gap:14px;align-items:center;padding:22px 26px;border-radius:14px;
-    background:rgba(20,10,6,.55);backdrop-filter:blur(3px);box-shadow:0 10px 30px rgba(0,0,0,.35)}
-  .title{font-size:18px;opacity:.92}
-  .btn{cursor:pointer;border:0;border-radius:10px;padding:12px 16px;background:#6b3c1e;color:#fff;font-weight:600}
-  .btn.secondary{background:#3a2a22}
-  .note{font-size:12px;opacity:.75}
-
-  /* Кольцевой прогресс */
-  #loading{position:fixed;inset:0;display:none;place-items:center;z-index:12;
-    background:radial-gradient(ellipse at center,rgba(0,0,0,.8),rgba(0,0,0,.95));color:#fff}
+  /* Экран ЗАГРУЗКИ (показывается сразу) */
+  #loading{position:fixed;inset:0;display:grid;place-items:center;z-index:12;
+    background:radial-gradient(ellipse at center,rgba(0,0,0,.85),rgba(0,0,0,.98));color:#fff}
   .loadbox{display:flex;flex-direction:column;align-items:center;gap:12px}
   .ring{width:110px;height:110px;border-radius:50%;
     background:conic-gradient(#ffb366 var(--p,0%), rgba(255,255,255,.08) 0);
@@ -29,26 +19,36 @@
   .percent{font:18px/1.1 monospace}
   .hint{font:14px;opacity:.85}
 
+  /* МЕНЮ (покажем ПОСЛЕ загрузки) */
+  #overlay{position:fixed;inset:0;display:none;place-items:center;z-index:10;
+    background:radial-gradient(ellipse at center,rgba(0,0,0,.82),rgba(0,0,0,.96));color:#fff}
+  .panel{display:flex;flex-direction:column;gap:14px;align-items:center;padding:22px 26px;border-radius:14px;
+    background:rgba(20,10,6,.55);backdrop-filter:blur(3px);box-shadow:0 10px 30px rgba(0,0,0,.35)}
+  .title{font-size:18px;opacity:.92}
+  .btn{cursor:pointer;border:0;border-radius:10px;padding:12px 16px;background:#6b3c1e;color:#fff;font-weight:600}
+  .btn.secondary{background:#3a2a22}
+  .note{font-size:12px;opacity:.75}
+
   canvas.fade-in{animation:fi .5s ease forwards}@keyframes fi{from{opacity:0}to{opacity:1}}
 </style>
 </head>
 <body>
-  <!-- Старт -->
-  <div id="overlay">
-    <div class="panel">
-      <div class="title">портал открыт. как войдём?</div>
-      <button id="btnVR" class="btn">Войти в разлом (VR)</button>
-      <button id="btnFlat" class="btn secondary">Оглядеться со стороны</button>
-      <div class="note">переход займёт несколько секунд</div>
-    </div>
-  </div>
-
-  <!-- Загрузка -->
+  <!-- Загрузка (сразу видна) -->
   <div id="loading">
     <div class="loadbox">
       <div class="ring" id="ring"></div>
       <div class="percent" id="percent">0%</div>
       <div class="hint">переносим материю…</div>
+    </div>
+  </div>
+
+  <!-- Меню (появится после 100%) -->
+  <div id="overlay">
+    <div class="panel">
+      <div class="title">портал открыт. как войдём?</div>
+      <button id="btnVR" class="btn">Войти в разлом (VR)</button>
+      <button id="btnFlat" class="btn secondary">Оглядеться со стороны</button>
+      <div class="note">всё уже подгружено</div>
     </div>
   </div>
 
@@ -79,16 +79,16 @@ const MODEL_BENCH  ='assets/models/bench.glb?v=1';
 // Позиции
 const POS_CHEST_X = -W/2 + 0.45;
 const POS_CHEST_Z =  1.10;
-const POS_BARREL   = new THREE.Vector3(-W/2 + 0.55, 0, -D/2 + 0.65); // у задней левой стены
-const POS_TABLE    = new THREE.Vector3( 0.0, 0, -D/2 + 0.55);        // у задней стены по центру
-const POS_GLOBUS   = new THREE.Vector3( W/2 - 0.55, 0, -D/2 + 0.90); // правая часть задней стены
-const POS_SHIELD   = new THREE.Vector3( W/2 - 0.07, 1.55, -0.40);    // над глобусом на правой стене
+const POS_BARREL   = new THREE.Vector3(-W/2 + 0.55, 0, -D/2 + 0.65);
+const POS_TABLE    = new THREE.Vector3( 0.0, 0, -D/2 + 0.55);
+const POS_GLOBUS   = new THREE.Vector3( W/2 - 0.55, 0, -D/2 + 0.90);
+const POS_SHIELD   = new THREE.Vector3( W/2 - 0.07, 1.55, -0.40);
 
-// Скамейка — перед столом, ЧУТЬ ДАЛЬШЕ от стола (увеличил зазор с 0.42 до 0.62)
+// Скамейка
 const POS_BENCH    = new THREE.Vector3( POS_TABLE.x + 0.05, 0, POS_TABLE.z + 0.62 );
-const ROT_BENCH_Y  = 0.22; // ~12.6° вправо
+const ROT_BENCH_Y  = 0.22;
 
-// Музыка (опционально)
+// Музыка
 const MUSIC_MP3='assets/music/music.mp3';
 
 /* ===================== UI ===================== */
@@ -99,6 +99,7 @@ const percent = document.getElementById('percent');
 
 function showLoading(p){ loading.style.display='grid'; setProgress(p); }
 function hideLoading(){ loading.style.display='none'; }
+function showMenu(){ overlay.style.display='grid'; }
 function setProgress(p){ ring.style.setProperty('--p', p+'%'); percent.textContent = Math.round(p)+'%'; }
 
 /* ===================== СТЕЙТ ===================== */
@@ -107,43 +108,71 @@ let candle1,candle2; // «свечи»
 let audioListener,music;
 let xrSession=null;
 
-/* ===================== СТАРТ КНОПКИ ===================== */
+let assetsReady=false;
+let xrStarted=false;
+
+/* ===================== УТИЛИТЫ ОЖИДАНИЯ ===================== */
+function waitUntil(cond, timeoutMs=6000){
+  return new Promise((resolve,reject)=>{
+    const t0=performance.now();
+    (function tick(){
+      if (cond()) return resolve();
+      if (performance.now()-t0>timeoutMs) return reject(new Error('timeout'));
+      requestAnimationFrame(tick);
+    })();
+  });
+}
+
+/* ===================== ШТОРКА ВНУТРИ КАМЕРЫ ===================== */
+function makeScreenFade(cam){
+  const g=new THREE.PlaneGeometry(2,2);
+  const m=new THREE.MeshBasicMaterial({color:0x000000,transparent:true,opacity:1,depthTest:false});
+  const mesh=new THREE.Mesh(g,m); mesh.renderOrder=9999; mesh.position.z=-0.3;
+  cam.add(mesh); scene.add(cam);
+  return {
+    show:()=>{m.opacity=1},
+    fadeOut:(ms=700)=>{ const t0=performance.now(); (function f(t){const k=Math.min(1,(t-t0)/ms); m.opacity=1-k; if(k<1) requestAnimationFrame(f);})(t0); }
+  };
+}
+let screenFade=null;
+
+/* ===================== КНОПКИ ===================== */
 document.getElementById('btnVR').addEventListener('click', async ()=>{
+  // Меню скрываем; XR стартуем, шторку держим — снимем её после sessionstart + assetsReady
   overlay.style.display='none';
-  showLoading(0);
-  initRenderer();
-
-  // Запрос XR сразу в клике (требование шлема)
-  if (navigator.xr) {
-    try {
-      xrSession = await navigator.xr.requestSession('immersive-vr',{requiredFeatures:['local-floor']});
-      await renderer.xr.setSession(xrSession);
-    } catch(e) {
-      // тихо остаёмся в 2D
-    }
-  }
-  bootSceneAndAssets().then(hideLoading);
+  screenFade && screenFade.show();
+  await startXR(); // fadeOut произойдёт в sessionstart
 },{once:true});
 
-document.getElementById('btnFlat').addEventListener('click', ()=>{
+document.getElementById('btnFlat').addEventListener('click', async ()=>{
   overlay.style.display='none';
-  showLoading(0);
-  initRenderer();
-  bootSceneAndAssets().then(hideLoading);
+  // Наблюдатель: просто плавно открываемся, ассеты уже готовы
+  controls.enabled=true;
+  screenFade && screenFade.show();
+  setTimeout(()=> screenFade && screenFade.fadeOut(700), 150);
 },{once:true});
+
+/* ===================== ПЕРВИЧНЫЙ СТАРТ: СНАЧАЛА ЗАГРУЗКА ===================== */
+initRenderer();
+bootSceneAndAssets()
+  .then(()=>{ hideLoading(); showMenu(); })
+  .catch(()=>{ hideLoading(); showMenu(); });
 
 /* ===================== Загрузка сцены/ассетов с прогрессом ===================== */
 async function bootSceneAndAssets(){
+  showLoading(0);
+
   manager = new THREE.LoadingManager();
   let done=0,total=0;
   manager.onStart    = (_,l,t)=>{ done=l; total=t; setProgress(total?done/total*100:0); };
   manager.onProgress = (_,l,t)=>{ done=l; total=t; setProgress(total?done/total*100:0); };
-  manager.onLoad     = ()=>{ setProgress(100); };
+  manager.onLoad     = ()=>{ setProgress(100); assetsReady=true; };
 
-  initScene(manager);
-  buildRoom(manager);
-  await loadModels(manager);
-  startMusic();
+  initScene(manager);                           // сцена, свет, камера
+  screenFade = makeScreenFade(camera);          // шторка перед камерой
+  buildRoom(manager);                           // пол/стены/потолок/зеркало
+  await loadModels(manager);                    // glb модели
+  startMusic();                                 // музыка (мягко)
 }
 
 /* ===================== РЕНДЕРЕР ===================== */
@@ -167,6 +196,23 @@ function initRenderer(){
     camera.aspect=innerWidth/innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(innerWidth,innerHeight);
+  });
+
+  // XR события — снимаем шторку только ПОСЛЕ старта XR и если ассеты готовы
+  renderer.xr.addEventListener('sessionstart', async ()=>{
+    xrStarted=true;
+    controls.enabled=false;
+    try{
+      await waitUntil(()=>assetsReady);
+      await new Promise(r=>setTimeout(r,100));
+      screenFade && screenFade.fadeOut(700);
+    }catch(e){
+      screenFade && screenFade.fadeOut(300);
+    }
+  });
+  renderer.xr.addEventListener('sessionend', ()=>{
+    xrStarted=false;
+    controls.enabled=false;
   });
 }
 
@@ -264,74 +310,32 @@ function snapToFrontWall(mesh, inset=-0.018){
 async function loadModels(manager){
   const L=new THREE.GLTFLoader(manager);
 
-  // Сундук — повернут в зал
-  await new Promise((res)=>L.load(MODEL_CHEST,(g)=>{
-   const m=g.scene; fitByHeight(m,0.95);
-   m.position.set(POS_CHEST_X,0,POS_CHEST_Z);
-   m.rotation.y = 0;
-   scene.add(m); res();
-  }));
-
-  // Бочка — задний левый угол
-  await new Promise((res)=>L.load(MODEL_BARREL,(g)=>{
-    const m=g.scene; fitByHeight(m,1.15);
-    m.position.copy(POS_BARREL);
-    scene.add(m); res();
-  }));
-
-  // Стол — у задней стены по центру
-  await new Promise((res)=>L.load(MODEL_TABLE,(g)=>{
-    const m=g.scene; fitByHeight(m,0.78);
-    m.position.copy(POS_TABLE);
-    scene.add(m); res();
-  }));
-
-  // Скамейка — перед столом, теперь дальше от стола
-  await new Promise((res)=>L.load(MODEL_BENCH,(g)=>{
-    const m=g.scene; fitByHeight(m,0.48);       // высота сиденья ~0.48 м
-    m.position.copy(POS_BENCH);
-    m.rotation.y = ROT_BENCH_Y;
-    // лёгкий сдвиг от задней стены, если вдруг близко
-    m.position.z = Math.min(m.position.z, -D/2 + 1.05);
-    scene.add(m); res();
-  }));
-
-  // Глобус — справа
-  await new Promise((res)=>L.load(MODEL_GLOBUS,(g)=>{
-    const m=g.scene; fitByHeight(m,1.2);
-    m.position.copy(POS_GLOBUS);
-    m.rotation.y=-Math.PI/2;
-    scene.add(m); res();
-  }));
-
-  // Дверь — на передней стене, утоплена без щели
-  await new Promise((res)=>L.load(MODEL_DOOR,(g)=>{
-    const m=g.scene; fitByHeight(m,2.1);
-    m.rotation.set(0, Math.PI/2, 0);
-    const b0=new THREE.Box3().setFromObject(m);
-    const depth=b0.getSize(new THREE.Vector3()).z;
-    m.position.set(0,0, D/2 - depth*0.5);
-    snapToFrontWall(m, -0.018);
-    scene.add(m); res();
-  }));
-
-  // Щит — на правой стене
-  await new Promise((res)=>L.load(MODEL_SHIELD,(g)=>{
-    const m=g.scene; fitByHeight(m,0.8);
-    m.rotation.y=-Math.PI/2;
-    m.position.copy(POS_SHIELD);
-    scene.add(m); res();
-  }));
+  await new Promise((res)=>L.load(MODEL_CHEST,(g)=>{ const m=g.scene; fitByHeight(m,0.95); m.position.set(POS_CHEST_X,0,POS_CHEST_Z); m.rotation.y=0; scene.add(m); res(); }));
+  await new Promise((res)=>L.load(MODEL_BARREL,(g)=>{ const m=g.scene; fitByHeight(m,1.15); m.position.copy(POS_BARREL); scene.add(m); res(); }));
+  await new Promise((res)=>L.load(MODEL_TABLE,(g)=>{ const m=g.scene; fitByHeight(m,0.78); m.position.copy(POS_TABLE); scene.add(m); res(); }));
+  await new Promise((res)=>L.load(MODEL_BENCH,(g)=>{ const m=g.scene; fitByHeight(m,0.48); m.position.copy(POS_BENCH); m.rotation.y=ROT_BENCH_Y; m.position.z=Math.min(m.position.z,-D/2+1.05); scene.add(m); res(); }));
+  await new Promise((res)=>L.load(MODEL_GLOBUS,(g)=>{ const m=g.scene; fitByHeight(m,1.2); m.position.copy(POS_GLOBUS); m.rotation.y=-Math.PI/2; scene.add(m); res(); }));
+  await new Promise((res)=>L.load(MODEL_DOOR,(g)=>{ const m=g.scene; fitByHeight(m,2.1); m.rotation.set(0,Math.PI/2,0); const b0=new THREE.Box3().setFromObject(m); const depth=b0.getSize(new THREE.Vector3()).z; m.position.set(0,0, D/2 - depth*0.5); snapToFrontWall(m,-0.018); scene.add(m); res(); }));
+  await new Promise((res)=>L.load(MODEL_SHIELD,(g)=>{ const m=g.scene; fitByHeight(m,0.8); m.rotation.y=-Math.PI/2; m.position.copy(POS_SHIELD); scene.add(m); res(); }));
 }
 
 /* ===================== МУЗЫКА ===================== */
 function startMusic(){
   try{
     const a=new THREE.AudioLoader(manager);
-    a.load(MUSIC_MP3,(buf)=>{
-      music.setBuffer(buf); music.setLoop(true); music.setVolume(.35); music.play();
-    },undefined,()=>{});
+    a.load(MUSIC_MP3,(buf)=>{ music.setBuffer(buf); music.setLoop(true); music.setVolume(.35); music.play(); },undefined,()=>{});
   }catch(e){}
+}
+
+/* ===================== XR ===================== */
+async function startXR(){
+  if (!navigator.xr) { alert('WebXR не поддерживается. Открой в Quest Browser.'); return; }
+  try{
+    xrSession = await navigator.xr.requestSession('immersive-vr', { requiredFeatures:['local-floor'] });
+    await renderer.xr.setSession(xrSession);
+  }catch(e){
+    console.error(e); alert('Не удалось запустить VR-сессию.');
+  }
 }
 </script>
 </body>
