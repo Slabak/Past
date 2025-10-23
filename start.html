@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Хранитель времени — Квест</title>
+  <meta name="description" content="Одностраничный квест с фоновым изображением, музыкой и эффектом помех." />
+  <style>
+    /* --- CSS reset (минимально) --- */
+    *,*::before,*::after{box-sizing:border-box}
+    html,body{height:100%;margin:0}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif;background:#000;color:#e6e6e6;overflow:hidden}
+
+    /* --- Контейнер сцены --- */
+    .stage{position:fixed;inset:0;}
+
+    /* --- Фоновая картинка --- */
+    .bg{position:absolute;inset:0;background:#000 center/cover no-repeat fixed;filter:brightness(0.88) contrast(1.05) saturate(1.05);transform:scale(1.02);}
+    /* лёгкое плавание фона для живости */
+    @keyframes drift{0%{transform:scale(1.02) translate3d(0,0,0)}50%{transform:scale(1.03) translate3d(0,-10px,0)}100%{transform:scale(1.02) translate3d(0,0,0)}}
+    .bg{animation:drift 18s ease-in-out infinite}
+
+    /* --- Затенение краёв (виньетка) --- */
+    .vignette{position:absolute;inset:0;pointer-events:none;background:radial-gradient(90% 70% at 50% 40%, rgba(0,0,0,0) 45%, rgba(0,0,0,0.35) 80%, rgba(0,0,0,0.75) 100%)}
+
+    /* --- Сканлайны/статическое зерно поверх --- */
+    .scanlines{position:absolute;inset:0;pointer-events:none;mix-blend-mode:soft-light;opacity:0.5;background:repeating-linear-gradient(to bottom, rgba(255,255,255,0.03), rgba(255,255,255,0.03) 2px, rgba(0,0,0,0.03) 3px, rgba(0,0,0,0.03) 4px)}
+
+    /* --- Глитч/помехи вспышками --- */
+    .glitch{position:absolute;inset:0;pointer-events:none}
+    .glitch::before,.glitch::after{content:"";position:absolute;inset:0;background:inherit;opacity:0;mix-blend-mode:screen;}
+    @keyframes glitchShift {
+      0% { transform:translate(0,0); opacity:0 }
+      1% { transform:translate(8px,-2px); opacity:0.35 }
+      2% { transform:translate(-6px,2px); opacity:0.45 }
+      3% { transform:translate(3px,-1px); opacity:0.2 }
+      4% { transform:translate(0,0); opacity:0 }
+    }
+    @keyframes glitchRGB {
+      0%, 96%, 100% { filter:none; opacity:0 }
+      97% { filter:drop-shadow(0 0 0 #f00) drop-shadow(0 0 0 #0ff); opacity:0.3 }
+      98% { filter:drop-shadow(2px 0 0 #f00) drop-shadow(-2px 0 0 #0ff); opacity:0.45 }
+      99% { filter:drop-shadow(-1px 0 0 #f00) drop-shadow(1px 0 0 #0ff); opacity:0.25 }
+    }
+    .glitch::before{animation:glitchShift 7s steps(1,end) infinite}
+    .glitch::after{animation:glitchRGB 5.6s steps(1,end) infinite}
+
+    /* --- Контентный слой (текст/подсказки) --- */
+    .content{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:24px}
+    .content .box{max-width:900px;background:rgba(0,0,0,0.32);backdrop-filter:blur(3px);border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:20px 22px}
+    h1{font-weight:600;letter-spacing:.02em;margin:0 0 .25rem;font-size:clamp(28px,4vw,40px)}
+    p{margin:.25rem 0 .5rem;opacity:.9;font-size:clamp(14px,2.2vw,18px);line-height:1.55}
+
+    /* --- Экран запуска для обхода запрета автоплея --- */
+    .intro{position:fixed;inset:0;background:#000;display:grid;place-items:center;z-index:3;transition:opacity .7s ease}
+    .intro.hidden{opacity:0;pointer-events:none}
+    .intro .btn{cursor:pointer;background:#111;border:1px solid #2a2a2a;color:#eaeaea;border-radius:12px;padding:14px 18px;font-size:18px;letter-spacing:.02em}
+    .intro .btn:hover{background:#171717}
+
+    /* --- Кнопки управления --- */
+    .controls{position:fixed;left:14px;bottom:14px;display:flex;gap:8px;z-index:2}
+    .controls button{background:rgba(0,0,0,0.55);border:1px solid rgba(255,255,255,0.1);color:#eaeaea;border-radius:12px;padding:10px 12px;font-size:14px;backdrop-filter:blur(2px);cursor:pointer}
+    .controls button:hover{background:rgba(0,0,0,0.7)}
+
+    /* --- Подсказка «включите звук» для мобильных --- */
+    .toast{position:fixed;right:12px;bottom:12px;background:rgba(0,0,0,0.7);border:1px solid rgba(255,255,255,0.1);padding:10px 12px;border-radius:10px;font-size:13px;opacity:0;transform:translateY(6px);transition:.4s;z-index:2}
+    .toast.show{opacity:1;transform:translateY(0)}
+
+    /* Респонсив для очень узких экранов */
+    @media (max-width:520px){
+      .content .box{padding:14px}
+    }
+  </style>
+</head>
+<body>
+  <!-- Экран запуска (нужен для старта аудио кликом) -->
+  <div class="intro" id="intro">
+    <button class="btn" id="startBtn">Войти в связь</button>
+  </div>
+
+  <!-- Сцена -->
+  <main class="stage" aria-label="Квест">
+    <!-- Фоновое изображение (замените путь на ваш файл) -->
+    <div class="bg" id="bg" style="background-image:url('assets/keeper-1920x1080.jpg');"></div>
+
+    <!-- Виньетка и сканлайны -->
+    <div class="vignette"></div>
+    <div class="scanlines"></div>
+
+    <!-- Глитч-слой (использует фон сверху через inherit) -->
+    <div class="glitch"></div>
+
+    <!-- Контент сверху (можно выключить после релиза) -->
+    <section class="content" id="content">
+      <div class="box">
+        <h1>Сигнал нестабилен…</h1>
+        <p id="subtitle">Ожидайте обращения Хранителя. Связь может прерываться.</p>
+      </div>
+    </section>
+
+    <!-- Кнопки управления -->
+    <nav class="controls">
+      <button id="btnReplay">Повтор речи</button>
+      <button id="btnMute">Звук: выкл</button>
+    </nav>
+
+    <div class="toast" id="toast">Если нет звука — нажмите «Войти в связь» или включите громкость.</div>
+  </main>
+
+  <!-- Аудио -->
+  <audio id="music" src="assets/ambient.mp3" preload="auto" loop></audio>
+  <audio id="voice" src="assets/voiceover.mp3" preload="auto"></audio>
+
+  <script>
+    // Утилита: плавное изменение громкости
+    function fadeAudio(audio, to = 1, ms = 1200){
+      const step = 0.02 * Math.sign(to - audio.volume);
+      const tick = 16;
+      const interval = setInterval(() => {
+        audio.volume = +(audio.volume + step).toFixed(3);
+        if ((step > 0 && audio.volume >= to) || (step < 0 && audio.volume <= to)){
+          audio.volume = to; clearInterval(interval);
+        }
+      }, tick);
+      setTimeout(() => clearInterval(interval), ms + 2000);
+    }
+
+    const intro   = document.getElementById('intro');
+    const startBtn= document.getElementById('startBtn');
+    const music   = document.getElementById('music');
+    const voice   = document.getElementById('voice');
+    const btnReplay = document.getElementById('btnReplay');
+    const btnMute   = document.getElementById('btnMute');
+    const toast   = document.getElementById('toast');
+    const subtitle= document.getElementById('subtitle');
+    const glitch  = document.querySelector('.glitch');
+
+    let muted = true; // стартуем без звука до клика
+    music.volume = 0; voice.volume = 1;
+
+    function showToast(msg){ toast.textContent = msg; toast.classList.add('show'); setTimeout(()=>toast.classList.remove('show'), 3400); }
+
+    // Инициализация по клику: запускаем музыку и затем голос
+    async function startExperience(){
+      try{
+        await music.play();
+        muted = false; btnMute.textContent = 'Звук: вкл';
+        fadeAudio(music, 0.4, 1500);
+        setTimeout(async () => { try{ await voice.play(); } catch(e){ showToast('Нажмите «Повтор речи», чтобы услышать сообщение.'); } }, 2200);
+        intro.classList.add('hidden');
+        // периодические короткие глитчи
+        setInterval(()=>{ glitch.classList.toggle('pulse'); setTimeout(()=>glitch.classList.toggle('pulse'), 240); }, 3800 + Math.random()*2400);
+      }catch(e){
+        showToast('Браузер заблокировал автоплей. Нажмите ещё раз.');
+      }
+    }
+
+    startBtn.addEventListener('click', startExperience);
+
+    // Повтор речи
+    btnReplay.addEventListener('click', async () => {
+      try{ voice.currentTime = 0; await voice.play(); }catch(e){ showToast('Голос не может проиграться. Проверьте громкость.'); }
+    });
+
+    // Мьют/анмьют фоновой музыки (голос никогда не мутим полностью)
+    btnMute.addEventListener('click', () => {
+      if(muted){ fadeAudio(music, 0.4, 600); btnMute.textContent = 'Звук: вкл'; }
+      else { fadeAudio(music, 0, 600); btnMute.textContent = 'Звук: выкл'; }
+      muted = !muted;
+    });
+
+    // Подмена фоновой картинки под HiDPI/широкие экраны (опционально)
+    const mqUltra = window.matchMedia('(min-width:1800px)');
+    if(mqUltra.matches){
+      const bg = document.getElementById('bg');
+      // Замените на вашу 4K картинку
+      const hires = 'assets/keeper-4k.jpg';
+      const img = new Image(); img.onload = ()=>{ bg.style.backgroundImage = `url('${hires}')`; }; img.src = hires;
+    }
+
+    // Текстовая подсказка, когда голос закончит
+    voice.addEventListener('ended', ()=>{
+      subtitle.textContent = 'Следуйте указаниям. Ключ — там, где время засыпает.'; // замените на свою фразу или удалите
+    });
+  </script>
+</body>
+</html>
