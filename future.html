@@ -5,7 +5,7 @@
   <title>VR Room — Будущее</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-  <!-- ТОЛЬКО локальные скрипты из assets/js -->
+  <!-- ЛОКАЛЬНЫЕ скрипты -->
   <script src="./assets/js/three.min.js"></script>
   <script src="./assets/js/OrbitControls.js"></script>
   <script src="./assets/js/GLTFLoader.js"></script>
@@ -59,7 +59,6 @@
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.xr.enabled = true;
 
-  // Совместимость: старые/новые версии three
   if ('outputColorSpace' in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace;
   else renderer.outputEncoding = THREE.sRGBEncoding;
 
@@ -73,9 +72,10 @@
   // ===== Scene / Camera =====
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0e0f18);
+  scene.fog = new THREE.Fog(0x0e0f18, 6, 14); // лёгкий туман
 
   const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 100);
-  camera.position.set(0, 1.6, ROOM.size * 0.6);
+  camera.position.set(0, 1.6, ROOM.size * 0.45); // ближе к центру
 
   const controls = new THREE.OrbitControls(camera, renderer.domElement);
   controls.enabled = false;
@@ -98,16 +98,27 @@
   }
   const screenFade = makeScreenFade();
 
-  // ===== Свет =====
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x223355, 1.0));
-  const dir = new THREE.DirectionalLight(0xffffff, 0.7);
-  dir.position.set(2.5, 4, 1.5);
-  dir.castShadow = true; dir.shadow.mapSize.set(1024,1024);
-  dir.shadow.camera.near = 0.1; dir.shadow.camera.far = 10;
+  // ===== Свет (мягче, равномернее) =====
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x1a2030, 1.2));
+
+  const dir = new THREE.DirectionalLight(0xffffff, 0.45);
+  dir.position.set(-2.0, 3.5, 2.0);
+  dir.castShadow = true;
+  dir.shadow.mapSize.set(1024, 1024);
+  dir.shadow.camera.near = 0.1;
+  dir.shadow.camera.far  = 10;
+  dir.shadow.bias       = -0.0005;
+  dir.shadow.normalBias =  0.02;
   scene.add(dir);
+
+  const rim = new THREE.DirectionalLight(0xffffff, 0.18); // слабая контровая
+  rim.position.set(2.5, 2.5, -1.5);
+  scene.add(rim);
 
   // ===== Текстуры пола/стен/потолка =====
   const texLoader = new THREE.TextureLoader();
+  const ANISO = 4; // меньше ряби в шлеме
+
   function setSRGB(t){
     if (!t) return t;
     if ('colorSpace' in t) t.colorSpace = THREE.SRGBColorSpace;
@@ -117,17 +128,18 @@
   function loadT(url){
     const t = texLoader.load(url);
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    t.anisotropy = 8;
+    t.anisotropy = ANISO;
     return setSRGB(t);
   }
+
   const tFloor   = loadT(PATH.textures + FILES.floor);
   const tWall    = loadT(PATH.textures + FILES.wall);
   const tCeiling = loadT(PATH.textures + FILES.ceiling);
 
-  // Тайлинг — подправишь по вкусу
-  tFloor.repeat.set(2,2);
-  tWall.repeat.set(2,1);
-  tCeiling.repeat.set(2,2);
+  // Покрупнее тайлинг
+  tFloor.repeat.set(1.5, 1.5);
+  tWall.repeat.set(1.5, 1);
+  tCeiling.repeat.set(1.5, 1.5);
 
   // ===== Геометрия комнаты (поверхности) =====
   { // пол
@@ -144,7 +156,7 @@
   }
   { // стены
     const g = new THREE.PlaneGeometry(ROOM.size, ROOM.height);
-    const m = new THREE.MeshStandardMaterial({ map:tWall, roughness:.95, metalness:0 });
+    const m = new THREE.MeshStandardMaterial({ map:tWall, roughness:0.98, metalness:0.0 });
     [
       {pos:[0,ROOM.height/2,-ROOM.size/2], rot:[0,0,0]},
       {pos:[0,ROOM.height/2, ROOM.size/2], rot:[0,Math.PI,0]},
@@ -156,7 +168,7 @@
     });
   }
 
-  // ===== Загрузка future.glb (без DRACO/KTX2) =====
+  // ===== Загрузка future.glb =====
   const loadingEl   = document.getElementById('loading');
   const loadingText = document.getElementById('loadingText');
   const menuEl      = document.getElementById('menu');
@@ -221,8 +233,5 @@
     renderer.render(scene, camera);
   });
   </script>
-  <!-- Можешь добавить фавикон, чтобы убрать 404:
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64'%3E%3Crect width='64' height='64' fill='%23000'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-size='40' fill='%23fff'%3E⌛%3C/text%3E%3C/svg%3E">
-  -->
 </body>
 </html>
