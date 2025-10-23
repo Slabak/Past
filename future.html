@@ -95,4 +95,165 @@
   scene.add(key);
 
   // холодный заполняющий
-  const fill = new THREE.PointLigh
+  const fill = new THREE.PointLight(0x00e5ff, 0.8, 6.5);
+  fill.position.set(-1.8, 1.2, -1.6);
+  scene.add(fill);
+
+  // мягче и дальше от двери
+  const rim = new THREE.PointLight(0xff3ea5, 0.45, 6.0);
+  rim.position.set(1.4, 2.2, 0.8);
+  scene.add(rim);
+
+  // ===== Текстуры пола/стен/потолка =====
+  const texLoader = new THREE.TextureLoader();
+  const ANISO = 4;
+
+  function setSRGB(t){ if (!t) return t; if ('colorSpace' in t) t.colorSpace = THREE.SRGBColorSpace; else t.encoding = THREE.sRGBEncoding; return t; }
+  function loadT(url){ const t = texLoader.load(url); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = ANISO; return setSRGB(t); }
+
+  const tFloor   = loadT(PATH.textures + FILES.floor);
+  const tWall    = loadT(PATH.textures + FILES.wall);
+  const tCeiling = loadT(PATH.textures + FILES.ceiling);
+
+  tFloor.repeat.set(1.3, 1.3);
+  tWall.repeat.set(1.2, 1.0);
+  tCeiling.repeat.set(1.2, 1.2);
+
+  // ===== Геометрия комнаты =====
+  { // пол
+    const g = new THREE.PlaneGeometry(ROOM.size, ROOM.size);
+    const m = new THREE.MeshStandardMaterial({ map:tFloor, color:0x1c2126, roughness:0.95, metalness:0 });
+    const mesh = new THREE.Mesh(g, m);
+    mesh.rotation.x = -Math.PI/2; mesh.receiveShadow = true; scene.add(mesh);
+  }
+  { // потолок
+    const g = new THREE.PlaneGeometry(ROOM.size, ROOM.size);
+    const m = new THREE.MeshStandardMaterial({ map:tCeiling, color:0x0c0f14, roughness:0.98, metalness:0 });
+    const ceil = new THREE.Mesh(g, m);
+    ceil.rotation.x =  Math.PI/2; ceil.position.y = ROOM.height; scene.add(ceil);
+  }
+  { // стены
+    const g = new THREE.PlaneGeometry(ROOM.size, ROOM.height);
+    const m = new THREE.MeshStandardMaterial({ map:tWall, color:0x101217, roughness:0.98, metalness:0 });
+    [
+      {pos:[0,ROOM.height/2,-ROOM.size/2], rot:[0,0,0]},
+      {pos:[0,ROOM.height/2, ROOM.size/2], rot:[0,Math.PI,0]},
+      {pos:[-ROOM.size/2,ROOM.height/2,0], rot:[0, Math.PI/2, 0]},
+      {pos:[ ROOM.size/2,ROOM.height/2,0], rot:[0,-Math.PI/2, 0]},
+    ].forEach(s=>{
+      const w = new THREE.Mesh(g, m);
+      w.position.set(...s.pos); w.rotation.set(...s.rot); w.receiveShadow = true; scene.add(w);
+    });
+  }
+
+  // ===== Простые «неон-планки» =====
+  function addNeon({x=0,y=1.2,z=-ROOM.size/2+0.01,len=1.6,rotY=0,color=0x00e5ff,intensity=3}={}){
+    const geom = new THREE.BoxGeometry(len, 0.05, 0.02);
+    const mat  = new THREE.MeshStandardMaterial({ color:0x111, emissive: color, emissiveIntensity:intensity, roughness:0.4, metalness:0.0 });
+    const bar  = new THREE.Mesh(geom, mat);
+    bar.position.set(x,y,z); bar.rotation.y = rotY; scene.add(bar); return bar;
+  }
+
+  // Левая стена (холодный)
+  addNeon({
+    x: -ROOM.size/2 + 0.01,
+    y: 1.6,
+    z: 0,
+    len: 2.2,
+    rotY: Math.PI/2,
+    color: 0x00e5ff,
+    intensity: 2.2
+  });
+
+  // «Козырёк» над дверью (короче и слабее, тёплый)
+  addNeon({
+    x: 0,
+    y: 2.25,
+    z:  ROOM.size/2 - 0.02,
+    len: 1.4,
+    rotY: Math.PI,
+    color: 0xff3ea5,
+    intensity: 1.0
+  });
+
+  // ===== Загрузка future.glb и менеджер =====
+  const loadingEl   = document.getElementById('loading');
+  const loadingText = document.getElementById('loadingText');
+  const menuEl      = document.getElementById('menu');
+
+  const manager = new THREE.LoadingManager();
+  let assetsReady = false;
+
+  manager.onStart    = ()=>{ loadingText.textContent = 'Загрузка…'; };
+  manager.onProgress = (url, loaded, total)=>{ loadingText.textContent = `Загрузка… ${loaded}/${total}`; };
+  manager.onLoad     = ()=>{ assetsReady = true; loadingEl.style.display='none'; menuEl.style.display='flex';
+                              if (renderer.xr.isPresenting) { setTimeout(()=> screenFade.fadeOut(700), 150); } };
+  manager.onError    = (url)=>{ loadingText.textContent = `Ошибка: ${url}`; };
+
+  const gltf = new THREE.GLTFLoader(manager);
+  gltf.load(PATH.models + FILES.model, (g)=>{
+    const obj = g.scene;
+    obj.traverse(n=>{ if(n.isMesh){ n.castShadow = true; n.receiveShadow = true; }});
+    obj.position.set(0,0,0);
+    scene.add(obj);
+    renderer.compile(scene, camera);
+  });
+
+  // ===== Ручной запуск XR (устойчивый фейд) =====
+  function waitUntil(cond, timeoutMs=6000){
+    return new Promise((resolve,reject)=>{
+      const t0=performance.now();
+      (function tick(){
+        if (cond()) return resolve();
+        if (performance.now()-t0>timeoutMs) return reject(new Error('timeout'));
+        requestAnimationFrame(tick);
+      })();
+    });
+  }
+
+  async function startXR(){
+    if (!navigator.xr) { alert('WebXR не поддерживается. Открой в Quest Browser.'); return; }
+    try {
+      const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor','bounded-floor'] });
+      await renderer.xr.setSession(session);
+    } catch (e) { console.error(e); alert('Не удалось запустить VR-сессию.'); }
+  }
+
+  renderer.xr.addEventListener('sessionstart', async ()=>{
+    controls.enabled = false;
+    screenFade.show();
+    try {
+      await waitUntil(()=> assetsReady);
+      await new Promise(r=> setTimeout(r, 100));
+      screenFade.fadeOut(700);
+    } catch { screenFade.fadeOut(300); }
+  });
+  renderer.xr.addEventListener('sessionend', ()=>{ controls.enabled = false; });
+
+  // ===== UI =====
+  document.getElementById('btnVR').onclick = async ()=>{
+    menuEl.style.display = 'none';
+    screenFade.show();
+    await startXR(); // fadeOut сделается в sessionstart
+  };
+  document.getElementById('btnSpectate').onclick = async ()=>{
+    menuEl.style.display = 'none';
+    controls.enabled = true;
+    screenFade.show();
+    await waitUntil(()=> assetsReady);
+    setTimeout(()=> screenFade.fadeOut(700), 150);
+  };
+
+  // ===== Resize / Loop =====
+  window.addEventListener('resize', ()=>{
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+  renderer.setAnimationLoop(()=>{
+    if (controls.enabled) controls.update();
+    renderer.render(scene, camera);
+  });
+  </script>
+</body>
+</html>
