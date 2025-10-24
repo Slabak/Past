@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Вселенная — тест фона</title>
+
+  <!-- локальные three -->
+  <script src="./assets/js/three.min.js"></script>
+  <script src="./assets/js/OrbitControls.js"></script>
+
+  <style>
+    html,body{margin:0;height:100%;background:#000;color:#fff;font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif}
+    .loading{position:fixed;inset:0;background:#000;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;z-index:30}
+    .spinner{width:38px;height:38px;border-radius:50%;border:3px solid #333;border-top-color:#fff;animation:spin 1s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .menu{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;flex-direction:column;gap:12px;z-index:20}
+    .btn{appearance:none;border:0;padding:12px 16px;border-radius:12px;font-weight:600;cursor:pointer;font-size:15px;background:#14b8a6;color:#00100e;box-shadow:0 4px 20px rgba(0,0,0,.35)}
+    .btn.secondary{background:#1f2937;color:#cbd5e1}
+    .hud{position:fixed;left:12px;bottom:12px;background:rgba(0,0,0,.5);padding:8px 10px;border-radius:10px;font-size:13px;z-index:5}
+  </style>
+</head>
+<body>
+  <!-- загрузка -->
+  <div id="loading" class="loading">
+    <div class="spinner"></div>
+    <div id="loadingText">Загружаю небо…</div>
+  </div>
+
+  <!-- меню -->
+  <div id="menu" class="menu">
+    <button id="btnVR" class="btn">Войти в VR</button>
+    <button id="btnSpectate" class="btn secondary">Режим наблюдателя</button>
+  </div>
+
+  <div class="hud">Фон: space_sky.jpg · невидимый пол · мягкий фейд</div>
+
+<script>
+const TEX_PATH = './assets/textures/space_sky.jpg'; // твой файл
+
+// renderer
+const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
+const isMobile = /Android|iPhone|iPad|iPod|Quest|Oculus/i.test(navigator.userAgent);
+renderer.setPixelRatio(isMobile ? 1 : Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.xr.enabled = true;
+if ('outputColorSpace' in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace; else renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+document.body.appendChild(renderer.domElement);
+
+// scene/camera
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x000005);
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 500);
+camera.position.set(0, 1.6, 0.01);
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enabled = false; controls.target.set(0, 1.6, 0);
+
+// внутренняя шторка
+function makeScreenFade(){
+  const g=new THREE.PlaneGeometry(2,2);
+  const m=new THREE.MeshBasicMaterial({color:0x000000,transparent:true,opacity:1,depthTest:false});
+  const mesh=new THREE.Mesh(g,m); mesh.renderOrder=9999; mesh.position.z=-0.3;
+  camera.add(mesh); scene.add(camera);
+  return { show:()=>m.opacity=1, fadeOut:(ms=700)=>{const t0=performance.now();(function f(t){const k=Math.min(1,(t-t0)/ms);m.opacity=1-k;if(k<1)requestAnimationFrame(f)})(t0)} };
+}
+const screenFade = makeScreenFade();
+
+// невидимый пол (комфорт)
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(40,40), new THREE.MeshBasicMaterial({visible:false}));
+floor.rotation.x = -Math.PI/2; floor.position.y = 0; scene.add(floor);
+
+// загрузка текстуры и небо-сфера
+const texLoader = new THREE.TextureLoader();
+let assetsReady = false;
+
+texLoader.load(
+  TEX_PATH,
+  (tex)=>{
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const sky = new THREE.Mesh(
+      new THREE.SphereGeometry(80, 64, 64),
+      new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide })
+    );
+    scene.add(sky);
+    // лёгкое вращение для «жизни»
+    sky.userData.update = (t)=>{ sky.rotation.y = t * 0.005; };
+    finishLoading();
+  },
+  (xhr)=>{ const p = xhr.total ? Math.round((xhr.loaded/xhr.total)*100) : ''; document.getElementById('loadingText').textContent = `Загружаю небо… ${p}%`; },
+  ()=>{ finishLoading(); }
+);
+
+// анимация
+renderer.setAnimationLoop(()=>{
+  const t = performance.now()*0.001;
+  scene.traverse(o => o.userData && o.userData.update && o.userData.update(t));
+  if (controls.enabled) controls.update();
+  renderer.render(scene, camera);
+});
+
+// устойчивый фейд в XR
+function waitUntil(cond, timeoutMs=6000){
+  return new Promise((resolve,reject)=>{
+    const t0=performance.now();
+    (function tick(){
+      if (cond()) return resolve();
+      if (performance.now()-t0>timeoutMs) return reject(new Error('timeout'));
+      requestAnimationFrame(tick);
+    })();
+  });
+}
+renderer.xr.addEventListener('sessionstart', async ()=>{
+  controls.enabled=false; screenFade.show();
+  try{ await waitUntil(()=>assetsReady); await new Promise(r=>setTimeout(r,100)); screenFade.fadeOut(700);}catch{ screenFade.fadeOut(300); }
+});
+renderer.xr.addEventListener('sessionend', ()=>{ controls.enabled=false; });
+
+// UI
+const menu = document.getElementById('menu');
+document.getElementById('btnVR').onclick = async ()=>{
+  menu.style.display='none'; screenFade.show(); await startXR();
+};
+document.getElementById('btnSpectate').onclick = async ()=>{
+  menu.style.display='none'; controls.enabled=true; screenFade.show(); setTimeout(()=>screenFade.fadeOut(700),150);
+};
+
+// загрузка UI
+function finishLoading(){ assetsReady=true; document.getElementById('loading').style.display='none'; menu.style.display='flex'; }
+
+// XR запуск
+async function startXR(){
+  if (!navigator.xr) { alert('WebXR не поддерживается. Открой в Quest Browser.'); return; }
+  try{
+    const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures:['local-floor','bounded-floor'] });
+    await renderer.xr.setSession(session);
+  }catch(e){ console.error(e); alert('Не удалось запустить VR-сессию.'); }
+}
+
+// resize
+window.addEventListener('resize', ()=>{
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
