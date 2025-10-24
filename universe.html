@@ -3,13 +3,14 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Тессеракт — low + фикс чёрного старта</title>
+<title>Тессеракт — low, XR старт без чёрного</title>
 <script src="./assets/js/three.min.js"></script>
 <script src="./assets/js/OrbitControls.js"></script>
 <style>
   html,body{margin:0;height:100%;background:#000;color:#fff;font-family:system-ui,Segoe UI,Roboto,Arial}
-  .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#000;z-index:30}
-  .menu{position:fixed;inset:0;background:rgba(0,0,0,.88);display:none;align-items:center;justify-content:center;flex-direction:column;gap:12px;z-index:20}
+  #black{position:fixed;inset:0;background:#000;z-index:50;opacity:1;transition:opacity .7s ease}
+  .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#000;z-index:40}
+  .menu{position:fixed;inset:0;background:rgba(0,0,0,.88);display:none;align-items:center;justify-content:center;flex-direction:column;gap:12px;z-index:30}
   .btn{appearance:none;border:0;padding:12px 16px;border-radius:12px;font-weight:600;cursor:pointer;font-size:15px;background:#14b8a6;color:#00100e;box-shadow:0 4px 20px rgba(0,0,0,.35)}
   .btn.secondary{background:#1f2937;color:#cbd5e1}
   .hud{position:fixed;left:12px;bottom:12px;background:rgba(0,0,0,.45);padding:8px 10px;border-radius:10px;font-size:13px;z-index:5}
@@ -17,6 +18,7 @@
 </style>
 </head>
 <body>
+  <div id="black"></div>
   <div id="loading" class="overlay"><div>Собираю тессеракт…</div></div>
   <div id="menu" class="menu">
     <button id="btnVR" class="btn">Войти в VR</button>
@@ -28,7 +30,7 @@
 <script>
 /* ---------- настройки ---------- */
 const PHOTO_FILES = Array.from({length:15}, (_,i)=>`./assets/textures/${i+1}.jpg`);
-const GRID_COUNT = 4;            // 4 куба во все стороны, фиксированное low
+const GRID_COUNT = 4;            // 4 куба во все стороны, фикс low
 const PHOTO_SIZE = 1.05;
 const PHOTO_NEAR = 2.0;
 const PHOTO_POOL = 18;
@@ -45,6 +47,7 @@ const renderer = new THREE.WebGLRenderer({antialias:true, powerPreference:'high-
 renderer.setPixelRatio(isMobile ? 1 : Math.min(window.devicePixelRatio,2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.xr.enabled = true;
+if (renderer.xr.setReferenceSpaceType) renderer.xr.setReferenceSpaceType('local-floor');
 if ('outputColorSpace' in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace; else renderer.outputEncoding = THREE.sRGBEncoding;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.52;
@@ -58,19 +61,6 @@ const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.01, 200
 camera.position.set(0,1.6,0.01);
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
 controls.enabled = false; controls.target.set(0,1.6,0);
-
-/* -------- VR fade и экран-затемнение -------- */
-function makeFade(){
-  const g=new THREE.PlaneGeometry(2,2);
-  const m=new THREE.MeshBasicMaterial({color:0x000,transparent:true,opacity:1,depthTest:false});
-  const q=new THREE.Mesh(g,m); q.renderOrder=9999; q.position.z=-0.3;
-  camera.add(q); scene.add(camera);
-  return {
-    show: ()=>{ m.opacity=1; },
-    fade: (ms=700)=>{ const t0=performance.now(); (function f(t){ const k=Math.min(1,(t-t0)/ms); m.opacity=1-k; if(k<1)requestAnimationFrame(f); })(t0); }
-  };
-}
-const screen = makeFade();
 
 /* -------- свет -------- */
 scene.add(new THREE.AmbientLight(0x120e0b, 0.95));
@@ -196,12 +186,12 @@ function buildTesseractLayer(p, phase=0, tint=1.0){
 
   [frameX,frameY,frameZ,lineX,lineY,lineZ,iFrame].forEach(im=>{im.instanceMatrix.needsUpdate=true; group.add(im);});
 
-  const glows = new THREE.InstancedMesh(geoGlow, matGlow.clone(), glowCount);
+  const glows = new THREE.InstancedMesh(geoGlow, matGlow.clone(),  qualityParams().glowCount);
   const M2 = new THREE.Matrix4();
-  for(let i=0;i<glowCount;i++){
+  for(let i=0;i<qualityParams().glowCount;i++){
     const ax=(Math.random()*3)|0;
     const ring=(Math.random()*(GRID_COUNT*2+1)|0)-GRID_COUNT;
-    const base=ring*cell, h=half;
+    const base=ring*qualityParams().cell, h=qualityParams().cell/2;
     let x=0,y=1.6,z=0,rx=0,ry=0,rz=0;
     if(ax===0){ x=0; y=1.6+(Math.random()*2-1)*h; z=(Math.random()<.5?-1:1)*h + base; ry=Math.PI/2; }
     if(ax===1){ x=(Math.random()<.5?-1:1)*h + base; y=1.6; z=(Math.random()*2-1)*h; rx=Math.PI/2; }
@@ -222,6 +212,7 @@ function buildTesseractLayer(p, phase=0, tint=1.0){
 }
 
 /* -------- поле «боке» -------- */
+const bokehTex = makeBokehTexture();
 function buildBokehField(p){
   const n = isQuest ? 140 : 220;
   const geo = new THREE.PlaneGeometry(1,1);
@@ -244,10 +235,9 @@ function buildBokehField(p){
 
 /* -------- ВОСПОМИНАНИЯ — отдельный якорь -------- */
 function buildMemories(p){
-  const group = new THREE.Group(); // добавим прямо в scene (не в root)
+  const group = new THREE.Group();
   const loader = new THREE.TextureLoader();
   const textures = [];
-
   PHOTO_FILES.forEach(path=>{
     const tex = loader.load(path);
     if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace; else tex.encoding = THREE.sRGBEncoding;
@@ -262,7 +252,7 @@ function buildMemories(p){
   const pick = arr => arr[(Math.random()*arr.length)|0];
 
   function placeRandom(m){
-    const axis = (Math.random()*3)|0; // 0:x,1:y,2:z
+    const axis = (Math.random()*3)|0;
     const ring = ((Math.random()*(GRID_COUNT*2+1))|0) - GRID_COUNT;
     const base = ring * p.cell;
     const half = p.cell/2;
@@ -343,13 +333,11 @@ function buildMemories(p){
 /* -------- сборка сцены -------- */
 let root=null, memoriesAnchor=null, memories=null;
 function rebuild(){
-  // очистка
   if(root){ scene.remove(root); root.traverse(o=>{ if(o.dispose) o.dispose(); }); root=null; }
   if(memoriesAnchor){ scene.remove(memoriesAnchor); memoriesAnchor=null; memories=null; }
 
   const P = qualityParams();
 
-  // тессеракт (с дрейфом)
   root = new THREE.Group();
   const layers = Math.max(2, P.layers||2);
   for(let i=0;i<layers;i++){
@@ -360,7 +348,6 @@ function rebuild(){
   root.add( buildBokehField(P) );
   scene.add(root);
 
-  // отдельный якорь для фото (не дрейфует)
   memoriesAnchor = new THREE.Group();
   memories = buildMemories(P);
   memoriesAnchor.add(memories);
@@ -392,65 +379,75 @@ const loading=document.getElementById('loading');
 const menu=document.getElementById('menu');
 requestAnimationFrame(()=>{ rebuild(); loading.style.display='none'; menu.style.display='flex'; });
 
-/* -------- XR старт без чёрного экрана -------- */
+/* ================= XR старт без чёрного: DOM-оверлей + XR-кадры ================= */
 let xrSession = null;
-let xrFramesToFade = 0;
+let hideTimeout = null;
+
+function showBlack(){ const b=document.getElementById('black'); b.style.opacity='1'; b.style.display='block'; }
+function hideBlack(){ const b=document.getElementById('black'); b.style.opacity='0'; setTimeout(()=>{ b.style.display='none'; }, 750); }
+
+// ждём N XR-кадров именно из session
+function waitXRFrames(session, n, done){
+  let i=0;
+  function onFrame(){
+    i++;
+    if(i>=n){ done(); }
+    else { session.requestAnimationFrame(onFrame); }
+  }
+  session.requestAnimationFrame(onFrame);
+}
 
 async function startXR(){
   if(!navigator.xr){ alert('WebXR не поддерживается. Открой в Quest Browser.'); return; }
 
-  // Прогрев до VR, чтобы материалы/текстуры попали в GPU
+  // прогрев до VR
   renderer.render(scene, camera);
 
-  // Запрашиваем сессию
+  // показываем чёрный слой СРАЗУ
+  showBlack();
+
   const session = await navigator.xr.requestSession('immersive-vr', {
     requiredFeatures: ['local-floor'],
     optionalFeatures: ['bounded-floor']
   });
-
-  // Включаем фейд до первого стабильного XR-кадра
-  screen.show();
 
   await renderer.xr.setSession(session);
   xrSession = session;
 
   if (renderer.xr.setFoveation) { try{ renderer.xr.setFoveation(0.5); }catch(_){} }
 
-  xrFramesToFade = 8; // ждём несколько XR-кадров
-
+  // как только session видим — ждём пару кадров и прячем чёрный
   const onVis = ()=>{
-    if (session.visibilityState === 'visible') {
-      xrFramesToFade = Math.max(xrFramesToFade, 6);
+    if (session.visibilityState === 'visible'){
+      // перестраховка — на кик с предыдущего статуса
+      if (hideTimeout){ clearTimeout(hideTimeout); hideTimeout=null; }
+      waitXRFrames(session, 2, hideBlack);
+    } else {
+      // если ушли в системное меню — держим чёрный
+      showBlack();
     }
   };
   session.addEventListener('visibilitychange', onVis);
+  onVis(); // вызвать для текущего состояния
+
+  // запасной план: через 2 секунды точно скрываем (если почему-то не пришли кадры)
+  hideTimeout = setTimeout(hideBlack, 2000);
 
   session.addEventListener('end', ()=>{
     xrSession = null;
+    showBlack(); // чтоб при выходе не мигнул канвас
     const menu = document.getElementById('menu');
     if (menu) menu.style.display='flex';
   });
 }
 
-/* -------- основной цикл с управлением фейдом -------- */
+/* -------- основной цикл -------- */
 let lastTS = performance.now()*0.001;
 renderer.setAnimationLoop(()=>{
   const now=performance.now()*0.001, dt=Math.min(0.05, now-lastTS); lastTS=now;
-
   if(root) root.traverse(o=>{ if(o.userData && o.userData.tick) o.userData.tick(now,dt); });
   if(memories && memories.userData && memories.userData.tick) memories.userData.tick(dt, now);
   if(controls.enabled) controls.update();
-
-  if (renderer.xr.isPresenting && xrSession) {
-    const vs = xrSession.visibilityState || 'visible';
-    if (vs === 'visible' && xrFramesToFade > 0) {
-      xrFramesToFade--;
-      if (xrFramesToFade === 0) {
-        screen.fade(700);
-      }
-    }
-  }
-
   renderer.render(scene,camera);
 });
 
@@ -460,12 +457,12 @@ document.getElementById('btnVR').addEventListener('click', async ()=>{
   ensureMusic();
   await startXR();
 });
-
 document.getElementById('btnSpectate').addEventListener('click', ()=>{
   menu.style.display='none';
   controls.enabled=true;
   ensureMusic();
-  screen.show(); setTimeout(()=>screen.fade(700),150);
+  // лёгкий фейд через DOM-оверлей
+  showBlack(); setTimeout(hideBlack,150);
 });
 document.getElementById('mute').addEventListener('click', ()=>{ ensureMusic(); toggleMute(); });
 
