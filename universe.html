@@ -1,44 +1,33 @@
 <!doctype html>
 <html lang="ru">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Вселенная — тест фона</title>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Вселенная — warp без швов</title>
 
-  <!-- локальные three -->
-  <script src="./assets/js/three.min.js"></script>
-  <script src="./assets/js/OrbitControls.js"></script>
+<!-- Локальные three -->
+<script src="./assets/js/three.min.js"></script>
+<script src="./assets/js/OrbitControls.js"></script>
 
-  <style>
-    html,body{margin:0;height:100%;background:#000;color:#fff;font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif}
-    .loading{position:fixed;inset:0;background:#000;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;z-index:30}
-    .spinner{width:38px;height:38px;border-radius:50%;border:3px solid #333;border-top-color:#fff;animation:spin 1s linear infinite}
-    @keyframes spin{to{transform:rotate(360deg)}}
-    .menu{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;flex-direction:column;gap:12px;z-index:20}
-    .btn{appearance:none;border:0;padding:12px 16px;border-radius:12px;font-weight:600;cursor:pointer;font-size:15px;background:#14b8a6;color:#00100e;box-shadow:0 4px 20px rgba(0,0,0,.35)}
-    .btn.secondary{background:#1f2937;color:#cbd5e1}
-    .hud{position:fixed;left:12px;bottom:12px;background:rgba(0,0,0,.5);padding:8px 10px;border-radius:10px;font-size:13px;z-index:5}
-  </style>
+<style>
+  html,body{margin:0;height:100%;background:#000;color:#fff;font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif}
+  .loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#000;z-index:30}
+  .menu{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;flex-direction:column;gap:12px;z-index:20}
+  .btn{appearance:none;border:0;padding:12px 16px;border-radius:12px;font-weight:600;cursor:pointer;font-size:15px;background:#14b8a6;color:#00100e;box-shadow:0 4px 20px rgba(0,0,0,.35)}
+  .btn.secondary{background:#1f2937;color:#cbd5e1}
+  .hud{position:fixed;left:12px;bottom:12px;background:rgba(0,0,0,.5);padding:8px 10px;border-radius:10px;font-size:13px;z-index:5}
+</style>
 </head>
 <body>
-  <!-- загрузка -->
-  <div id="loading" class="loading">
-    <div class="spinner"></div>
-    <div id="loadingText">Загружаю небо…</div>
-  </div>
-
-  <!-- меню -->
+  <div id="loading" class="loading">Собираю пространство…</div>
   <div id="menu" class="menu">
     <button id="btnVR" class="btn">Войти в VR</button>
-    <button id="btnSpectate" class="btn secondary">Режим наблюдателя</button>
+    <button id="btnSpectate" class="btn secondary">Наблюдатель</button>
   </div>
-
-  <div class="hud">Фон: space_sky.jpg · невидимый пол · мягкий фейд</div>
+  <div class="hud">Процедурный космос · без швов · невидимый пол</div>
 
 <script>
-const TEX_PATH = './assets/textures/space_sky.jpg'; // твой файл
-
-// renderer
+// ===== Renderer =====
 const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
 const isMobile = /Android|iPhone|iPad|iPod|Quest|Oculus/i.test(navigator.userAgent);
 renderer.setPixelRatio(isMobile ? 1 : Math.min(window.devicePixelRatio, 2));
@@ -46,90 +35,164 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.xr.enabled = true;
 if ('outputColorSpace' in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace; else renderer.outputEncoding = THREE.sRGBEncoding;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.05;
+renderer.toneMappingExposure = 1.0;
 document.body.appendChild(renderer.domElement);
 
-// scene/camera
+// ===== Scene / Camera =====
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x000005);
-const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 500);
-camera.position.set(0, 1.6, 0.01);
-const controls = new THREE.OrbitControls(camera, renderer.domElement);
-controls.enabled = false; controls.target.set(0, 1.6, 0);
+const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.01, 500);
+camera.position.set(0,1.6,0.01);
 
-// внутренняя шторка
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enabled = false;
+controls.target.set(0,1.6,0);
+
+// ===== Fade overlay =====
 function makeScreenFade(){
   const g=new THREE.PlaneGeometry(2,2);
-  const m=new THREE.MeshBasicMaterial({color:0x000000,transparent:true,opacity:1,depthTest:false});
-  const mesh=new THREE.Mesh(g,m); mesh.renderOrder=9999; mesh.position.z=-0.3;
-  camera.add(mesh); scene.add(camera);
-  return { show:()=>m.opacity=1, fadeOut:(ms=700)=>{const t0=performance.now();(function f(t){const k=Math.min(1,(t-t0)/ms);m.opacity=1-k;if(k<1)requestAnimationFrame(f)})(t0)} };
+  const m=new THREE.MeshBasicMaterial({color:0x000,transparent:true,opacity:1,depthTest:false});
+  const q=new THREE.Mesh(g,m); q.renderOrder=9999; q.position.z=-0.3;
+  camera.add(q); scene.add(camera);
+  return { show:()=>m.opacity=1, fade:(ms=700)=>{const t0=performance.now();(function f(t){const k=Math.min(1,(t-t0)/ms);m.opacity=1-k;if(k<1)requestAnimationFrame(f)})(t0)} };
 }
-const screenFade = makeScreenFade();
+const screen = makeScreenFade();
 
-// невидимый пол (комфорт)
+// ===== Comfort floor =====
 const floor = new THREE.Mesh(new THREE.PlaneGeometry(40,40), new THREE.MeshBasicMaterial({visible:false}));
 floor.rotation.x = -Math.PI/2; floor.position.y = 0; scene.add(floor);
 
-// загрузка текстуры и небо-сфера
-const texLoader = new THREE.TextureLoader();
-let assetsReady = false;
-
-texLoader.load(
-  TEX_PATH,
-  (tex)=>{
-    tex.colorSpace = THREE.SRGBColorSpace;
-    const sky = new THREE.Mesh(
-      new THREE.SphereGeometry(80, 64, 64),
-      new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide })
-    );
-    scene.add(sky);
-    // лёгкое вращение для «жизни»
-    sky.userData.update = (t)=>{ sky.rotation.y = t * 0.005; };
-    finishLoading();
+// ===== SKY (Shader — no textures, no seams) =====
+const skyGeom = new THREE.SphereGeometry(80, 64, 64); // нормали нам не нужны, шейдер берёт направление из позиции
+const skyMat = new THREE.ShaderMaterial({
+  side: THREE.BackSide,
+  uniforms: {
+    uTime: { value: 0 },
+    uWarp: { value: 0.22 },     // интенсивность «ворпа» (0…0.5)
+    uStars: { value: 0.85 },    // количество звёзд (0…1.2)
+    uNebula: { value: 0.9 },    // сила туманностей (0…1.5)
+    uTintA: { value: new THREE.Color(0x0b1a3a) }, // холодный
+    uTintB: { value: new THREE.Color(0xff7ad5) }, // тёплый
+    uExposure: { value: 1.0 }
   },
-  (xhr)=>{ const p = xhr.total ? Math.round((xhr.loaded/xhr.total)*100) : ''; document.getElementById('loadingText').textContent = `Загружаю небо… ${p}%`; },
-  ()=>{ finishLoading(); }
-);
+  vertexShader: `
+    varying vec3 vDir;
+    void main(){
+      vDir = normalize(position);          // направление луча, без UV => нет швов
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
+    }
+  `,
+  fragmentShader: `
+    precision highp float;
+    varying vec3 vDir;
+    uniform float uTime, uWarp, uStars, uNebula, uExposure;
+    uniform vec3 uTintA, uTintB;
 
-// анимация
-renderer.setAnimationLoop(()=>{
-  const t = performance.now()*0.001;
-  scene.traverse(o => o.userData && o.userData.update && o.userData.update(t));
-  if (controls.enabled) controls.update();
-  renderer.render(scene, camera);
+    // ---- Hash/Noise ----
+    float hash(vec3 p){ p = fract(p*0.3183099 + vec3(0.1,0.2,0.3)); p *= 17.0; return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }
+    float n3(vec3 p){
+      vec3 i = floor(p); vec3 f = fract(p);
+      float n000 = hash(i+vec3(0,0,0));
+      float n100 = hash(i+vec3(1,0,0));
+      float n010 = hash(i+vec3(0,1,0));
+      float n110 = hash(i+vec3(1,1,0));
+      float n001 = hash(i+vec3(0,0,1));
+      float n101 = hash(i+vec3(1,0,1));
+      float n011 = hash(i+vec3(0,1,1));
+      float n111 = hash(i+vec3(1,1,1));
+      vec3 u = f*f*(3.0-2.0*f);
+      return mix(mix(mix(n000,n100,u.x), mix(n010,n110,u.x), u.y),
+                 mix(mix(n001,n101,u.x), mix(n011,n111,u.x), u.y), u.z);
+    }
+    float fbm(vec3 p){
+      float s=0.0, a=0.55; 
+      for(int i=0;i<5;i++){ s += a*n3(p); p = p*2.0 + 1.37; a *= 0.55; }
+      return s;
+    }
+
+    // star pseudo-random
+    float stars(vec3 d){
+      // проектируем направление в 3D клетку и берём «искры»
+      vec3 p = d*50.0;
+      float s = 0.0;
+      // несколько частот, дешёвых
+      s += step(0.997, n3(p*0.95)) * 0.8;
+      s += step(0.9992, n3(p*1.75)) * 1.6;
+      s += step(0.99975, n3(p*3.1)) * 2.6;
+      return s;
+    }
+
+    // цветовой микс
+    vec3 tone(vec3 c){
+      c = pow(c, vec3(1.0/2.2));
+      return c;
+    }
+
+    void main(){
+      // базовое направление
+      vec3 d = normalize(vDir);
+
+      // ось «ворпа» (по умолчанию к "вперёд" по -Z камеры)
+      vec3 axis = normalize(vec3(0.0, 0.07, -1.0));
+      float warp = uWarp;
+
+      // поле смещения вдоль оси (радиальный «интерстеллар»)
+      float cosA = dot(d, axis);
+      float k = pow(max(0.0, 1.0 - abs(cosA)), 1.2); // вокруг перпендикуляра к оси
+      vec3 bend = normalize(mix(d, axis, warp*k));
+      d = mix(d, bend, 0.6); // мягко
+
+      // туманности — fbm на искривлённом пространстве
+      float t = uTime*0.03;
+      float neb = fbm(d*1.6 + vec3(t, -t*0.5, t*0.7));
+      neb = pow(neb, 1.6);
+
+      // окраска
+      vec3 colNeb = mix(uTintA, uTintB, neb);
+      colNeb *= (0.25 + 1.35*neb) * uNebula;
+
+      // звёзды (редкие яркие + bloom)
+      float s = stars(d);
+      float bloom = smoothstep(0.8, 2.6, s);
+      vec3 colStars = vec3(1.0) * (0.35*s + 1.2*bloom) * uStars;
+
+      // лёгкая виньетка по Y, чтобы «пол» не бил в глаза
+      float v = 1.0 - pow(abs(d.y), 3.0)*0.25;
+
+      vec3 col = (colNeb + colStars) * v;
+      col *= uExposure;
+
+      gl_FragColor = vec4(tone(col), 1.0);
+    }
+  `
 });
+const sky = new THREE.Mesh(skyGeom, skyMat);
+scene.add(sky);
 
-// устойчивый фейд в XR
-function waitUntil(cond, timeoutMs=6000){
-  return new Promise((resolve,reject)=>{
-    const t0=performance.now();
-    (function tick(){
-      if (cond()) return resolve();
-      if (performance.now()-t0>timeoutMs) return reject(new Error('timeout'));
-      requestAnimationFrame(tick);
-    })();
-  });
-}
-renderer.xr.addEventListener('sessionstart', async ()=>{
-  controls.enabled=false; screenFade.show();
-  try{ await waitUntil(()=>assetsReady); await new Promise(r=>setTimeout(r,100)); screenFade.fadeOut(700);}catch{ screenFade.fadeOut(300); }
-});
-renderer.xr.addEventListener('sessionend', ()=>{ controls.enabled=false; });
+// ===== Minimal lights (почти ноль, чтобы шейдер был главным) =====
+scene.add(new THREE.HemisphereLight(0x88aaff, 0x000008, 0.08));
 
-// UI
+// ===== Loading/menu =====
+document.getElementById('loading').style.display='none';
+document.getElementById('menu').style.display='flex';
+
+// ===== XR fade hooks =====
+function waitUntil(cond, ms=6000){return new Promise((res,rej)=>{const t0=performance.now();(function tick(){if(cond())return res(); if(performance.now()-t0>ms)return rej(); requestAnimationFrame(tick)})()})}
+renderer.xr.addEventListener('sessionstart', async ()=>{controls.enabled=false;screen.show();try{await waitUntil(()=>true);await new Promise(r=>setTimeout(r,120));screen.fade(700);}catch{screen.fade(300)}});
+
+// ===== UI =====
 const menu = document.getElementById('menu');
-document.getElementById('btnVR').onclick = async ()=>{
-  menu.style.display='none'; screenFade.show(); await startXR();
-};
-document.getElementById('btnSpectate').onclick = async ()=>{
-  menu.style.display='none'; controls.enabled=true; screenFade.show(); setTimeout(()=>screenFade.fadeOut(700),150);
-};
+document.getElementById('btnVR').onclick = async ()=>{menu.style.display='none'; screen.show(); await startXR();};
+document.getElementById('btnSpectate').onclick = ()=>{menu.style.display='none'; controls.enabled=true; screen.show(); setTimeout(()=>screen.fade(700),150);};
 
-// загрузка UI
-function finishLoading(){ assetsReady=true; document.getElementById('loading').style.display='none'; menu.style.display='flex'; }
+// ===== Loop =====
+addEventListener('resize', ()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+renderer.setAnimationLoop(()=>{
+  skyMat.uniforms.uTime.value = performance.now()*0.001;
+  if (controls.enabled) controls.update();
+  renderer.render(scene,camera);
+});
 
-// XR запуск
+// ===== XR start =====
 async function startXR(){
   if (!navigator.xr) { alert('WebXR не поддерживается. Открой в Quest Browser.'); return; }
   try{
@@ -137,13 +200,6 @@ async function startXR(){
     await renderer.xr.setSession(session);
   }catch(e){ console.error(e); alert('Не удалось запустить VR-сессию.'); }
 }
-
-// resize
-window.addEventListener('resize', ()=>{
-  camera.aspect = window.innerWidth/window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
 </script>
 </body>
 </html>
