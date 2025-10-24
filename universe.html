@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Тессеракт — быстрый</title>
+<title>Тессеракт — cinema</title>
 <script src="./assets/js/three.min.js"></script>
 <script src="./assets/js/OrbitControls.js"></script>
 <style>
@@ -36,165 +36,168 @@
   </div>
 
 <script>
-/*** ДЕТЕКТ УСТРОЙСТВА ***/
+/*** базовые детекты ***/
 const ua = navigator.userAgent;
-const isQuest = /Quest|Oculus/i.test(ua);
+const isQuest  = /Quest|Oculus/i.test(ua);
 const isMobile = /Android|iPhone|iPad|iPod|Quest|Oculus/i.test(ua);
 
-/*** СЦЕНА ***/
+/*** сцена ***/
 const renderer = new THREE.WebGLRenderer({antialias:true, powerPreference:'high-performance'});
 renderer.setPixelRatio(isMobile ? 1 : Math.min(window.devicePixelRatio,2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.xr.enabled = true;
 if ('outputColorSpace' in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace; else renderer.outputEncoding = THREE.sRGBEncoding;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.5;
+renderer.toneMappingExposure = 1.55;
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x000000);
-// лёгкая дымка — выключаем на шлемах ради FPS
-if (!isQuest) scene.fog = new THREE.FogExp2(0x000000, 0.028);
+if (!isQuest) scene.fog = new THREE.FogExp2(0x000000, 0.022);
 
-const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.01, 1500);
+const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.01, 2000);
 camera.position.set(0,1.6,0.01);
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
 controls.enabled = false; controls.target.set(0,1.6,0);
 
-/*** VR-фейд, чтобы убрать чёрный экран при входе ***/
+/*** VR-фейд ***/
 function makeFade(){const g=new THREE.PlaneGeometry(2,2),m=new THREE.MeshBasicMaterial({color:0x000,transparent:true,opacity:1,depthTest:false});
 const q=new THREE.Mesh(g,m);q.renderOrder=9999;q.position.z=-0.3;camera.add(q);scene.add(camera);
 return{show:()=>m.opacity=1,fade:(ms=700)=>{const t0=performance.now();(function f(t){const k=Math.min(1,(t-t0)/ms);m.opacity=1-k;if(k<1)requestAnimationFrame(f)})(t0)}}}
 const screen = makeFade(); let xrFadePending=false, xrFrames=0;
 
-/*** СВЕТ (минимум) ***/
-scene.add(new THREE.AmbientLight(0x1a1510, 0.9));
-const key = new THREE.DirectionalLight(0xffe0b5, 0.5); key.position.set(-2.5,5,-4.5); scene.add(key);
+/*** свет ***/
+scene.add(new THREE.AmbientLight(0x120e0b, 0.95));
+const key = new THREE.DirectionalLight(0xffe0b5, 0.58); key.position.set(-2.5,5,-4.5); scene.add(key);
+const rim = new THREE.DirectionalLight(0xbfd4ff, 0.18);  rim.position.set( 3.0,2.0, 3.5); scene.add(rim);
 
-/*** МАТЕРИАЛЫ (простые, дешёвые) ***/
-const woodCol = new THREE.Color(0x3c2f24);
-const glassCol= new THREE.Color(0xcfd9ff);
-const matWood  = new THREE.MeshLambertMaterial({color: woodCol});
-const matGlass = new THREE.MeshLambertMaterial({color: glassCol, transparent:true, opacity:0.32});
+/*** материалы максимально простые ***/
+const matWood  = new THREE.MeshLambertMaterial({color: 0x3c2f24});
+const matGlass = new THREE.MeshLambertMaterial({color: 0xcfd9ff, transparent:true, opacity:0.30});
 const matGlow  = new THREE.MeshBasicMaterial({color:0xffffff, transparent:true, opacity:0.65, blending:THREE.AdditiveBlending, depthWrite:false});
 
-/*** КАЧЕСТВО ***/
+/*** параметры качества ***/
 function pickQuality(){
   const v = document.getElementById('qsel').value;
   if (v!=='auto') return v;
   if (isQuest) return 'low';
   return isMobile ? 'med' : 'high';
 }
+function qualityParams(q){
+  // «distance» — сколько воздуха в центре (мы увеличили, чтобы отодвинуть решётку)
+  if(q==='low')  return {cell:3, count:2, beam:0.085, slat:0.024, distance:2.4, glassRatio:0.3,  fillDensity:5, glowCount:120, layers:2};
+  if(q==='med')  return {cell:3, count:3, beam:0.09,  slat:0.024, distance:2.6, glassRatio:0.32, fillDensity:7, glowCount:180, layers:2};
+  /* high */     return {cell:3, count:3, beam:0.10, slat:0.022, distance:2.8, glassRatio:0.35, fillDensity:10,glowCount:240, layers:3};
+}
 
-/*** ГЕО: инстансинг для минимизации draw calls ***/
-function buildTesseract(params){
-  const {cell,count,beam,slat,emptyRadius,glassRatio,fillDensity,glowCount} = params;
+/*** генерация круглого градиента для «боке» ***/
+function makeBokehTexture(){
+  const s=256, c=document.createElement('canvas'); c.width=c.height=s; const ctx=c.getContext('2d');
+  const g=ctx.createRadialGradient(s/2,s/2,0, s/2,s/2,s/2);
+  g.addColorStop(0,'rgba(255,255,255,0.9)');
+  g.addColorStop(0.6,'rgba(255,255,255,0.25)');
+  g.addColorStop(1,'rgba(255,255,255,0.0)');
+  ctx.fillStyle=g; ctx.fillRect(0,0,s,s);
+  const t=new THREE.CanvasTexture(c); t.generateMipmaps=false; t.minFilter=THREE.LinearFilter; t.magFilter=THREE.LinearFilter;
+  if ('colorSpace' in t) t.colorSpace = THREE.SRGBColorSpace; else t.encoding = THREE.sRGBEncoding;
+  return t;
+}
+const bokehTex = makeBokehTexture();
 
+/*** инстанс-тессеракт (как раньше, но вынес в функцию) ***/
+function buildTesseractLayer(p, phase=0, tint=1.0){
+  const {cell,count,beam,slat,distance,glassRatio,fillDensity,glowCount} = p;
   const group = new THREE.Group();
 
-  // базовые формы
+  // базовые геометрии
+  const half = cell/2, steps=fillDensity, step=cell/(steps+1);
   const geoX = new THREE.BoxGeometry(cell, beam, beam);
   const geoY = new THREE.BoxGeometry(beam, cell, beam);
   const geoZ = new THREE.BoxGeometry(beam, beam, cell);
-  const geoLineX = new THREE.BoxGeometry(cell, slat, slat);
-  const geoLineY = new THREE.BoxGeometry(slat, cell, slat);
-  const geoLineZ = new THREE.BoxGeometry(slat, slat, cell);
-  const geoGlow   = new THREE.PlaneGeometry(0.3, 1.2);
+  const geoLX= new THREE.BoxGeometry(cell, slat, slat);
+  const geoLY= new THREE.BoxGeometry(slat, cell, slat);
+  const geoLZ= new THREE.BoxGeometry(slat, slat, cell);
+  const geoGlow = new THREE.PlaneGeometry(0.3, 1.2);
 
-  // буферы трансформов
-  const M = new THREE.Matrix4();
-  const pos = new THREE.Vector3();
-
-  // сначала посчитаем количество инстансов (чтобы создать InstancedMesh нужного размера)
-  let nFrameX=0,nFrameY=0,nFrameZ=0,nLineX=0,nLineY=0,nLineZ=0,nInnerFrames=0,nGlows=glowCount;
-  const half = cell/2;
-  const steps = fillDensity;
-  const step  = cell/(steps+1);
-  const innerFrameOffsets = [-cell/3, cell/3];
+  // посчитаем инстансы
+  let nFX=0,nFY=0,nFZ=0,nLX=0,nLY=0,nLZ=0,nIF=0;
+  const innerFrameOffsets=[-cell/3,cell/3];
 
   for(let ix=-count; ix<=count; ix++)
   for(let iy=-count; iy<=count; iy++)
   for(let iz=-count; iz<=count; iz++){
     const cx=ix*cell, cy=1.6+iy*cell, cz=iz*cell;
-    if (Math.hypot(cx,cy-1.6,cz) < emptyRadius + cell*0.5) continue;
-
-    nFrameX+=4; nFrameY+=4; nFrameZ+=4;
-    nLineX+=Math.max(0,(steps-1))*2; // симметрия
-    nLineY+=Math.max(0,(steps-1))*2;
-    nLineZ+=Math.max(0,(steps-1))*2;
-    nInnerFrames+=innerFrameOffsets.length*12;
+    if (Math.hypot(cx,cy-1.6,cz) < distance + cell*0.5) continue;
+    nFX+=4; nFY+=4; nFZ+=4;
+    nLX+=Math.max(0,(steps-1))*2;
+    nLY+=Math.max(0,(steps-1))*2;
+    nLZ+=Math.max(0,(steps-1))*2;
+    nIF+=innerFrameOffsets.length*12;
   }
 
-  // создаём InstancedMesh’и
-  const frameX = new THREE.InstancedMesh(geoX, matWood,  nFrameX);
-  const frameY = new THREE.InstancedMesh(geoY, matWood,  nFrameY);
-  const frameZ = new THREE.InstancedMesh(geoZ, matWood,  nFrameZ);
+  const frameX=new THREE.InstancedMesh(geoX, matWood.clone(), nFX);
+  const frameY=new THREE.InstancedMesh(geoY, matWood.clone(), nFY);
+  const frameZ=new THREE.InstancedMesh(geoZ, matWood.clone(), nFZ);
+  const lineX =new THREE.InstancedMesh(geoLX, matWood.clone(), nLX);
+  const lineY =new THREE.InstancedMesh(geoLY, matWood.clone(), nLY);
+  const lineZ =new THREE.InstancedMesh(geoLZ, matWood.clone(), nLZ);
+  const iFrame=new THREE.InstancedMesh(new THREE.BoxGeometry(cell, beam*0.7, beam*0.7), matGlass.clone(), nIF);
 
-  const lineX  = new THREE.InstancedMesh(geoLineX, matWood, nLineX);
-  const lineY  = new THREE.InstancedMesh(geoLineY, matWood, nLineY);
-  const lineZ  = new THREE.InstancedMesh(geoLineZ, matWood, nLineZ);
+  // слегка тонируем слой для «наслоения»
+  const layerMult = tint;
+  [frameX,frameY,frameZ,lineX,lineY,lineZ].forEach(im=>im.material.color.multiplyScalar(layerMult));
+  iFrame.material.opacity*=0.9*layerMult;
 
-  const iFrame = new THREE.InstancedMesh(new THREE.BoxGeometry(cell, beam*0.7, beam*0.7), matGlass, nInnerFrames); // переиспользуем геометрию + повороты
+  const M = new THREE.Matrix4();
 
-  // заполняем трансформы
   let ixF=0,iyF=0,izF=0, ixL=0,iyL=0,izL=0, iIF=0;
 
   for(let ix=-count; ix<=count; ix++)
   for(let iy=-count; iy<=count; iy++)
   for(let iz=-count; iz<=count; iz++){
     const cx=ix*cell, cy=1.6+iy*cell, cz=iz*cell;
-    if (Math.hypot(cx,cy-1.6,cz) < emptyRadius + cell*0.5) continue;
+    if (Math.hypot(cx,cy-1.6,cz) < distance + cell*0.5) continue;
 
-    // === каркас (12 рёбер)
-    // X
+    // каркас
     M.identity().setPosition(cx, cy - half, cz - half); frameX.setMatrixAt(ixF++, M);
     M.identity().setPosition(cx, cy - half, cz + half); frameX.setMatrixAt(ixF++, M);
     M.identity().setPosition(cx, cy + half, cz - half); frameX.setMatrixAt(ixF++, M);
     M.identity().setPosition(cx, cy + half, cz + half); frameX.setMatrixAt(ixF++, M);
-    // Y
+
     M.identity().setPosition(cx - half, cy, cz - half); frameY.setMatrixAt(iyF++, M);
     M.identity().setPosition(cx + half, cy, cz - half); frameY.setMatrixAt(iyF++, M);
     M.identity().setPosition(cx - half, cy, cz + half); frameY.setMatrixAt(iyF++, M);
     M.identity().setPosition(cx + half, cy, cz + half); frameY.setMatrixAt(iyF++, M);
-    // Z
+
     M.identity().setPosition(cx - half, cy - half, cz); frameZ.setMatrixAt(izF++, M);
     M.identity().setPosition(cx + half, cy - half, cz); frameZ.setMatrixAt(izF++, M);
     M.identity().setPosition(cx - half, cy + half, cz); frameZ.setMatrixAt(izF++, M);
     M.identity().setPosition(cx + half, cy + half, cz); frameZ.setMatrixAt(izF++, M);
 
-    // === внутренние рейки
+    // внутренние рейки
     for(let i=1;i<=steps;i++){
-      const d = -half + i*step;
-      if (Math.abs(d) <= 0.001) continue;
-
-      // вдоль X (расклад по Z)
+      const d=-half + i*step;
+      if (Math.abs(d)<=0.001) continue;
       M.identity().setPosition(cx, cy, cz + d); lineX.setMatrixAt(ixL++, M);
       M.identity().setPosition(cx, cy, cz - d); lineX.setMatrixAt(ixL++, M);
-
-      // вдоль Z (расклад по Y)
       M.identity().setPosition(cx, cy + d, cz); lineZ.setMatrixAt(izL++, M);
       M.identity().setPosition(cx, cy - d, cz); lineZ.setMatrixAt(izL++, M);
-
-      // вдоль Y (расклад по X)
       M.identity().setPosition(cx + d, cy, cz); lineY.setMatrixAt(iyL++, M);
       M.identity().setPosition(cx - d, cy, cz); lineY.setMatrixAt(iyL++, M);
     }
 
-    // === мини-рамки (12×off’ов)
-    for (const off of [-cell/3, cell/3]){
-      // параллель XY (сдвиг по Z)
+    // мини-рамки
+    for(const off of innerFrameOffsets){
       M.identity().setPosition(cx, cy - half, cz + off); iFrame.setMatrixAt(iIF++, M);
       M.identity().setPosition(cx, cy + half, cz + off); iFrame.setMatrixAt(iIF++, M);
       M.identity().makeRotationZ(Math.PI/2).setPosition(cx - half, cy, cz + off); iFrame.setMatrixAt(iIF++, M);
       M.identity().makeRotationZ(Math.PI/2).setPosition(cx + half, cy, cz + off); iFrame.setMatrixAt(iIF++, M);
 
-      // параллель XZ (сдвиг по Y)
       M.identity().setPosition(cx, cy + off, cz - half); iFrame.setMatrixAt(iIF++, M);
       M.identity().setPosition(cx, cy + off, cz + half); iFrame.setMatrixAt(iIF++, M);
       M.identity().makeRotationX(Math.PI/2).setPosition(cx - half, cy + off, cz); iFrame.setMatrixAt(iIF++, M);
       M.identity().makeRotationX(Math.PI/2).setPosition(cx + half, cy + off, cz); iFrame.setMatrixAt(iIF++, M);
 
-      // параллель YZ (сдвиг по X)
       M.identity().makeRotationZ(Math.PI/2).setPosition(cx + off, cy - half, cz); iFrame.setMatrixAt(iIF++, M);
       M.identity().makeRotationZ(Math.PI/2).setPosition(cx + off, cy + half, cz); iFrame.setMatrixAt(iIF++, M);
       M.identity().makeRotationX(Math.PI/2).setPosition(cx + off, cy, cz - half); iFrame.setMatrixAt(iIF++, M);
@@ -202,63 +205,95 @@ function buildTesseract(params){
     }
   }
 
-  frameX.instanceMatrix.needsUpdate=true;
-  frameY.instanceMatrix.needsUpdate=true;
-  frameZ.instanceMatrix.needsUpdate=true;
-  lineX.instanceMatrix.needsUpdate=true;
-  lineY.instanceMatrix.needsUpdate=true;
-  lineZ.instanceMatrix.needsUpdate=true;
-  iFrame.instanceMatrix.needsUpdate=true;
+  [frameX,frameY,frameZ,lineX,lineY,lineZ,iFrame].forEach(im=>{im.instanceMatrix.needsUpdate=true; group.add(im);});
 
-  group.add(frameX,frameY,frameZ,lineX,lineY,lineZ,iFrame);
-
-  // светящиеся щели (немного, тоже инстансинг)
-  const glows = new THREE.InstancedMesh(geoGlow, matGlow, glowCount);
+  // свечения (немного, без анимации матриц)
+  const glows = new THREE.InstancedMesh(geoGlow, matGlow.clone(), glowCount);
+  const M2 = new THREE.Matrix4();
   for(let i=0;i<glowCount;i++){
     const ax=(Math.random()*3)|0;
-    const ring = (Math.random()*(count*2+1)|0)-(count);
-    const base = ring*cell;
-    const h=half;
+    const ring=(Math.random()*(count*2+1)|0)-count;
+    const base=ring*cell, h=half;
     let x=0,y=1.6,z=0,rx=0,ry=0,rz=0;
     if(ax===0){ x=0; y=1.6+(Math.random()*2-1)*h; z=(Math.random()<.5?-1:1)*h + base; ry=Math.PI/2; }
     if(ax===1){ x=(Math.random()<.5?-1:1)*h + base; y=1.6; z=(Math.random()*2-1)*h; rx=Math.PI/2; }
     if(ax===2){ x=(Math.random()*2-1)*h + base; y=1.6+(Math.random()<.5?-1:1)*h; z=0; }
-    M.identity().makeRotationFromEuler(new THREE.Euler(rx,ry,rz)).setPosition(x,y,z);
-    glows.setMatrixAt(i,M);
+    M2.identity().makeRotationFromEuler(new THREE.Euler(rx,ry,rz)).setPosition(x,y,z);
+    glows.setMatrixAt(i, M2);
   }
   glows.instanceMatrix.needsUpdate=true;
+  glows.material.opacity*=0.8*layerMult;
   group.add(glows);
 
-  // лёгкое «дыхание»
-  group.userData.update=(dt,t)=>{
-    group.rotation.y = Math.sin(t*0.03)*0.05;
-    group.position.x = Math.sin(t*0.05+1.2)*0.18;
-    group.position.z = Math.sin(t*0.06)*0.22;
+  // движение слоя (вперёд-назад + лёгкий сквош)
+  group.userData.tick = (t)=>{
+    const a = 0.18;                    // амплитуда сдвига
+    const s = 1.00 + 0.03*Math.sin(t*0.6 + phase);
+    group.position.z = Math.sin(t*0.5 + phase) * a;
+    group.scale.set(1.00, s, 1.00/s); // чуть «дышит»
   };
+
   return group;
 }
 
-/*** ПРОФИЛИ КАЧЕСТВА ***/
-function qualityParams(q){
-  if(q==='low')  return {cell:3, count:2, beam:0.085, slat:0.024, emptyRadius:1.6, glassRatio:0.3, fillDensity:5, glowCount:120};
-  if(q==='med')  return {cell:3, count:3, beam:0.09,  slat:0.024, emptyRadius:1.6, glassRatio:0.35,fillDensity:7, glowCount:180};
-  /* high */
-  return             {cell:3, count:3, beam:0.10, slat:0.022, emptyRadius:1.6, glassRatio:0.35,fillDensity:10,glowCount:240};
+/*** бОКЕ для «киношного» софта (дёшево) ***/
+function buildBokehField(p){
+  const n = isQuest ? 120 : 220;
+  const geo = new THREE.PlaneGeometry(1,1);
+  const mat = new THREE.MeshBasicMaterial({map:bokehTex, transparent:true, blending:THREE.AdditiveBlending, depthWrite:false, opacity:0.35});
+  const inst = new THREE.InstancedMesh(geo, mat, n);
+  const M = new THREE.Matrix4();
+
+  for(let i=0;i<n;i++){
+    const r = p.count*p.cell + 3.0;
+    const x=(Math.random()*2-1)*r, y=1.6+(Math.random()*2-1)*r*0.6, z=(Math.random()*2-1)*r;
+    const s = 0.6 + Math.random()*3.0; // размер «шарика»
+    M.identity().makeRotationFromEuler(new THREE.Euler(0,0,0)).setPosition(x,y,z);
+    M.multiply(new THREE.Matrix4().makeScale(s, s, s));
+    inst.setMatrixAt(i, M);
+  }
+  inst.instanceMatrix.needsUpdate=true;
+  inst.userData.tick=(t)=>{
+    // лёгкое мерцание
+    inst.material.opacity = 0.25 + 0.20*(0.5+0.5*Math.sin(t*0.7));
+  };
+  return inst;
 }
 
-/*** СБОРКА ***/
-let grid=null;
+/*** сборка сцены ***/
+let root=null;
 function rebuild(){
-  if(grid){ scene.remove(grid); grid.traverse(o=>{ if(o.dispose) o.dispose(); }); grid=null; }
+  if(root){ scene.remove(root); root.traverse(o=>{ if(o.dispose) o.dispose(); }); root=null; }
   const q = pickQuality();
-  const p = qualityParams(q);
-  grid = buildTesseract(p);
-  scene.add(grid);
-}
-document.getElementById('qsel').value='auto';
-document.getElementById('qsel').addEventListener('change', ()=>{ rebuild(); });
+  const P = qualityParams(q);
 
-/*** МУЗЫКА ***/
+  root = new THREE.Group();
+
+  // несколько слоёв решётки с разной фазой и оттенком — «размытие» и глубина
+  const layers = Math.max(2, P.layers||2);
+  for(let i=0;i<layers;i++){
+    const tint = 0.9 + i*0.08;       // чуть теплее дальше
+    const phase = i*1.2;             // разные фазы движения
+    const layer = buildTesseractLayer(P, phase, tint);
+    root.add(layer);
+  }
+
+  // добавим поле «боке»
+  const bokeh = buildBokehField(P);
+  root.add(bokeh);
+
+  root.userData.tick=(t)=>{
+    root.children.forEach(ch=>{
+      if(ch.userData.tick) ch.userData.tick(t);
+    });
+  };
+
+  scene.add(root);
+}
+
+document.getElementById('qsel').addEventListener('change', rebuild);
+
+/*** музыка ***/
 const MUSIC_PATH = './assets/music/universe.mp3';
 let audioCtx=null, musicNode=null, musicGain=null, musicStarted=false, musicMuted=false;
 async function ensureMusic(){
@@ -278,7 +313,7 @@ function setMuted(m){ musicMuted=m; if(musicGain){ const t=audioCtx.currentTime;
 function toggleMute(){ setMuted(!musicMuted); }
 function updateMuteUI(){ document.getElementById('mute').textContent = musicMuted ? '🔇 Без звука' : '🔊 Музыка'; }
 
-/*** МЕНЮ / VR ***/
+/*** меню / VR ***/
 const loading=document.getElementById('loading');
 const menu=document.getElementById('menu');
 requestAnimationFrame(()=>{ rebuild(); loading.style.display='none'; menu.style.display='flex'; });
@@ -290,12 +325,12 @@ document.getElementById('btnVR').onclick = async ()=>{ menu.style.display='none'
 document.getElementById('btnSpectate').onclick = ()=>{ menu.style.display='none'; controls.enabled=true; screen.show(); ensureMusic(); setTimeout(()=>screen.fade(700),150); };
 document.getElementById('mute').onclick = ()=>{ ensureMusic().then(()=>toggleMute()); };
 
-/*** ЦИКЛ ***/
+/*** цикл ***/
 let last=performance.now()*0.001;
 renderer.setAnimationLoop(()=>{
   const now=performance.now()*0.001, dt=Math.min(0.033, now-last); last=now;
   if (renderer.xr.isPresenting && xrFadePending){ xrFrames++; if(xrFrames>=4){ screen.fade(700); xrFadePending=false; } }
-  if(grid && grid.userData.update) grid.userData.update(dt, now);
+  if(root && root.userData.tick) root.userData.tick(now);
   if(controls.enabled) controls.update();
   renderer.render(scene,camera);
 });
@@ -307,7 +342,7 @@ async function startXR(){
   catch(e){ console.error(e); alert('Не удалось запустить VR-сессию.'); }
 }
 
-/*** INPUT / RESIZE ***/
+/*** input / resize ***/
 addEventListener('click', ()=>{ ensureMusic(); });
 addEventListener('touchstart', ()=>{ ensureMusic(); }, {passive:true});
 addEventListener('keydown', e=>{ if(e.code==='KeyM'){ ensureMusic().then(()=>toggleMute()); } });
