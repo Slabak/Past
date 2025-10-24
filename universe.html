@@ -89,7 +89,7 @@ function makeBokehTexture(){
   if ('colorSpace' in t) t.colorSpace = THREE.SRGBColorSpace; else t.encoding = THREE.sRGBEncoding;
   return t;
 }
-const bokehTex = makeBokehTexture();
+const bokehTex = makeBokehTexture(); /* <-- единственное объявление */
 
 /* -------- слой тессеракта -------- */
 function buildTesseractLayer(p, phase=0, tint=1.0){
@@ -212,7 +212,6 @@ function buildTesseractLayer(p, phase=0, tint=1.0){
 }
 
 /* -------- поле «боке» -------- */
-const bokehTex = makeBokehTexture();
 function buildBokehField(p){
   const n = isQuest ? 140 : 220;
   const geo = new THREE.PlaneGeometry(1,1);
@@ -383,27 +382,19 @@ requestAnimationFrame(()=>{ rebuild(); loading.style.display='none'; menu.style.
 let xrSession = null;
 let hideTimeout = null;
 
-function showBlack(){ const b=document.getElementById('black'); b.style.opacity='1'; b.style.display='block'; }
+function showBlack(){ const b=document.getElementById('black'); b.style.display='block'; b.style.opacity='1'; }
 function hideBlack(){ const b=document.getElementById('black'); b.style.opacity='0'; setTimeout(()=>{ b.style.display='none'; }, 750); }
 
-// ждём N XR-кадров именно из session
 function waitXRFrames(session, n, done){
   let i=0;
-  function onFrame(){
-    i++;
-    if(i>=n){ done(); }
-    else { session.requestAnimationFrame(onFrame); }
-  }
+  function onFrame(){ i++; if(i>=n){ done(); } else { session.requestAnimationFrame(onFrame); } }
   session.requestAnimationFrame(onFrame);
 }
 
 async function startXR(){
   if(!navigator.xr){ alert('WebXR не поддерживается. Открой в Quest Browser.'); return; }
 
-  // прогрев до VR
-  renderer.render(scene, camera);
-
-  // показываем чёрный слой СРАЗУ
+  renderer.render(scene, camera); // прогрев
   showBlack();
 
   const session = await navigator.xr.requestSession('immersive-vr', {
@@ -416,26 +407,21 @@ async function startXR(){
 
   if (renderer.xr.setFoveation) { try{ renderer.xr.setFoveation(0.5); }catch(_){} }
 
-  // как только session видим — ждём пару кадров и прячем чёрный
   const onVis = ()=>{
     if (session.visibilityState === 'visible'){
-      // перестраховка — на кик с предыдущего статуса
       if (hideTimeout){ clearTimeout(hideTimeout); hideTimeout=null; }
       waitXRFrames(session, 2, hideBlack);
     } else {
-      // если ушли в системное меню — держим чёрный
       showBlack();
     }
   };
   session.addEventListener('visibilitychange', onVis);
-  onVis(); // вызвать для текущего состояния
-
-  // запасной план: через 2 секунды точно скрываем (если почему-то не пришли кадры)
+  onVis();
   hideTimeout = setTimeout(hideBlack, 2000);
 
   session.addEventListener('end', ()=>{
     xrSession = null;
-    showBlack(); // чтоб при выходе не мигнул канвас
+    showBlack();
     const menu = document.getElementById('menu');
     if (menu) menu.style.display='flex';
   });
@@ -461,7 +447,6 @@ document.getElementById('btnSpectate').addEventListener('click', ()=>{
   menu.style.display='none';
   controls.enabled=true;
   ensureMusic();
-  // лёгкий фейд через DOM-оверлей
   showBlack(); setTimeout(hideBlack,150);
 });
 document.getElementById('mute').addEventListener('click', ()=>{ ensureMusic(); toggleMute(); });
