@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Тессеракт — Menger sponge версия</title>
+<title>Тессеракт — Menger sponge (совместимый)</title>
 <script src="./assets/js/three.min.js"></script>
 <script src="./assets/js/OrbitControls.js"></script>
 <style>
@@ -29,7 +29,7 @@
     <button id="btnSpectate" class="btn secondary">Режим наблюдателя</button>
   </div>
 
-  <div class="hud">Клик/тап/пробел — «стук» (легкая волна). Камера в центре пустоты, вокруг крестовые пролёты.</div>
+  <div class="hud">Клик/тап/пробел — «стук». Камера в центре пустоты, вокруг крестовые пролёты.</div>
   <button id="mute" class="mute">🔊 Музыка</button>
 
 <script>
@@ -45,6 +45,7 @@ const isMobile = /Android|iPhone|iPad|iPod|Quest|Oculus/i.test(navigator.userAge
 renderer.setPixelRatio(isMobile ? 1 : Math.min(window.devicePixelRatio,2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.xr.enabled = true;
+// совместимость с разными версиями three:
 if ('outputColorSpace' in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace; else renderer.outputEncoding = THREE.sRGBEncoding;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.35;
@@ -62,68 +63,80 @@ function makeFade(){const g=new THREE.PlaneGeometry(2,2),m=new THREE.MeshBasicMa
 const screen = makeFade();
 let xrFadePending=false, xrFrameCount=0;
 
-/* ===== свет — тёплый + боковой холодный ===== */
+/* ===== свет ===== */
 const key = new THREE.DirectionalLight(0xffe0b5, 0.42); key.position.set(-2.5,5,-4.5); scene.add(key);
 const rim = new THREE.DirectionalLight(0x9bbfff, 0.16); rim.position.set(3,2,3.5); scene.add(rim);
 scene.add(new THREE.AmbientLight(0x0c0906, 0.55));
 
-/* ===== материалы: дерево и «стекло» ===== */
+/* ===== материалы: дерево и «стекло» (совместимые) ===== */
 function woodTex(){
   const c=document.createElement('canvas'); c.width=1024; c.height=64; const ctx=c.getContext('2d');
   for(let x=0;x<c.width;x++){
     const hue=35+Math.random()*10, sat=25+Math.random()*20, l=14+Math.random()*10;
     ctx.fillStyle=`hsl(${hue} ${sat}% ${l}%)`; ctx.fillRect(x,0,1,c.height);
   }
-  const t=new THREE.CanvasTexture(c); t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(8,1); t.colorSpace=THREE.SRGBColorSpace; return t;
+  const t=new THREE.CanvasTexture(c);
+  t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(8,1);
+  // для старых версий не трогаем colorSpace
+  if ('colorSpace' in t) t.colorSpace = THREE.SRGBColorSpace;
+  else t.encoding = THREE.sRGBEncoding;
+  return t;
 }
 const wood = woodTex();
 const matWood = new THREE.MeshStandardMaterial({map:wood, roughness:0.95, metalness:0.05, color:0xffffff});
-const matGlass= new THREE.MeshPhysicalMaterial({color:0xffffff, metalness:0, roughness:0.08, transmission:0.85, thickness:0.04, transparent:true});
 
-/* ===== генератор Menger (order=1..2) — возвращает ладдер-брусья ===== */
-function buildMenger(order=2, size=8, beam=0.12){
+// «стекло» без transmission/thickness (совместимо со старыми three)
+const matGlass = new THREE.MeshStandardMaterial({
+  color: 0xffffff,
+  metalness: 0.05,
+  roughness: 0.08,
+  transparent: true,
+  opacity: 0.35,      // степень «стеклянности»
+  envMapIntensity: 0.6
+});
+
+/* ===== генератор Menger ===== */
+function buildMenger(order=2, size=6.5, beam=0.10){
   const group = new THREE.Group();
-  const boxGeo = new THREE.BoxGeometry(1,1,beam); // базовая рейка (ось Z), остальные повернём
-  const inst = [];
+  const boxGeo = new THREE.BoxGeometry(1,1,beam);
+  const pieces = [];
   function addBeam(x,y,z, sx,sy,sz, axis){
-    const m = new THREE.Mesh(boxGeo, (Math.random()<0.3? matGlass : matWood).clone());
+    const useGlass = Math.random()<0.3;
+    const m = new THREE.Mesh(boxGeo, (useGlass? matGlass : matWood).clone());
     m.scale.set(sx, sy, 1);
-    if(axis==='x'){ m.rotation.y = Math.PI/2; }
-    if(axis==='y'){ m.rotation.x = Math.PI/2; }
+    if(axis==='x') m.rotation.y = Math.PI/2;
+    if(axis==='y') m.rotation.x = Math.PI/2;
     m.position.set(x,y,z);
-    inst.push(m);
+    pieces.push(m);
   }
-  // на каждом уровне оставляем крест из трёх осей, убираем центр и центры граней
   function recurse(cx,cy,cz, s, lvl){
     if(lvl===order) return;
     const step = s/3;
-    // рёбра по осям через центр блока
     const len = s; const thick = beam * (1 + 0.15*lvl);
     addBeam(cx,cy,cz, len, thick, thick,'x');
     addBeam(cx,cy,cz, thick, len, thick,'y');
     addBeam(cx,cy,cz, thick, thick, len,'z');
-    // рекурсивно распределяем по 3×3×3, пропуская центр и центры граней
     for(let ix=-1; ix<=1; ix++) for(let iy=-1; iy<=1; iy++) for(let iz=-1; iz<=1; iz++){
       const sum = Math.abs(ix)+Math.abs(iy)+Math.abs(iz);
-      if(sum===0 || sum===1) continue; // центр и центры граней — пропуск
+      if(sum===0 || sum===1) continue;
       recurse(cx+ix*step, cy+iy*step, cz+iz*step, step, lvl+1);
     }
   }
   recurse(0,1.6,0, size, 0);
-  inst.forEach(m=>group.add(m));
+  pieces.forEach(m=>group.add(m));
   return group;
 }
-const sponge = buildMenger(2, /*size*/6.5, /*beam*/0.10);
+const sponge = buildMenger(2, 6.5, 0.10);
 scene.add(sponge);
 
-// «дыхание» сцены
+// лёгкое «дыхание»
 sponge.userData.update = (dt,t)=>{
   sponge.rotation.y = Math.sin(t*0.04)*0.06;
   sponge.position.x = Math.sin(t*0.06+1.2)*0.18;
   sponge.position.z = Math.sin(t*0.08)*0.22;
 };
 
-/* ===== звук (музыка + мягкий «стук») ===== */
+/* ===== звук ===== */
 let audioCtx=null, musicNode=null, musicGain=null, musicStarted=false, musicMuted=false;
 async function ensureMusic(){
   try{
