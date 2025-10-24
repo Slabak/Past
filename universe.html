@@ -3,14 +3,11 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Тессеракт — хранитель времени</title>
-
-<!-- локальные three -->
+<title>Тессеракт — яркая версия + музыка</title>
 <script src="./assets/js/three.min.js"></script>
 <script src="./assets/js/OrbitControls.js"></script>
-
 <style>
-  html,body{margin:0;height:100%;background:#000;color:#fff;font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif}
+  html,body{margin:0;height:100%;background:#000;color:#fff;font-family:system-ui,Segoe UI,Roboto,Arial}
   .loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#000;z-index:30;flex-direction:column;gap:10px}
   .bar{width:240px;height:6px;background:#222;border-radius:6px;overflow:hidden}
   .bar>i{display:block;height:100%;width:0;background:#14b8a6}
@@ -18,6 +15,7 @@
   .btn{appearance:none;border:0;padding:12px 16px;border-radius:12px;font-weight:600;cursor:pointer;font-size:15px;background:#14b8a6;color:#00100e;box-shadow:0 4px 20px rgba(0,0,0,.35)}
   .btn.secondary{background:#1f2937;color:#cbd5e1}
   .hud{position:fixed;left:12px;bottom:12px;background:rgba(0,0,0,.45);padding:8px 10px;border-radius:10px;font-size:13px;z-index:5}
+  .mute{position:fixed;right:12px;bottom:12px;background:rgba(0,0,0,.5);border:1px solid rgba(255,255,255,.2);padding:8px 10px;border-radius:10px;font-size:13px;z-index:6;cursor:pointer}
 </style>
 </head>
 <body>
@@ -31,18 +29,18 @@
     <button id="btnSpectate" class="btn secondary">Режим наблюдателя</button>
   </div>
 
-  <div class="hud">Смотри вокруг. В «швах» мигают ваши кадры: прошлое → настоящее. Лёгкое движение — это «поток времени».</div>
+  <div class="hud">Клик/тап/пробел — «стук»: волна + вспышка фото. Взгляд в центр ~1.2с — тоже срабатывает.</div>
+  <button id="mute" class="mute">🔊 Музыка</button>
 
 <script>
-/* ================== загрузчик ================== */
+/* ===== загрузка ===== */
 const manager = new THREE.LoadingManager();
 manager.onProgress = (_url, loaded, total)=>{ document.getElementById('bar').style.width = ((loaded/total)*100|0)+'%'; };
-manager.onLoad = ()=>{ document.getElementById('loading').style.display='none'; document.getElementById('menu').style.display='flex'; };
-manager.onError = ()=>{ document.getElementById('loading').style.display='none'; document.getElementById('menu').style.display='flex'; };
-
+manager.onLoad = ()=>{ loading.style.display='none'; menu.style.display='flex'; };
+manager.onError = ()=>{ loading.style.display='none'; menu.style.display='flex'; };
 const texLoader = new THREE.TextureLoader(manager);
 
-/* ================== renderer/camera/scene ================== */
+/* ===== renderer/camera/scene ===== */
 const renderer = new THREE.WebGLRenderer({antialias:true, powerPreference:'high-performance'});
 const isMobile = /Android|iPhone|iPad|iPod|Quest|Oculus/i.test(navigator.userAgent);
 renderer.setPixelRatio(isMobile ? 1 : Math.min(window.devicePixelRatio,2));
@@ -50,206 +48,190 @@ renderer.setSize(innerWidth, innerHeight);
 renderer.xr.enabled = true;
 if ('outputColorSpace' in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace; else renderer.outputEncoding = THREE.sRGBEncoding;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.05;
+renderer.toneMappingExposure = 1.15;
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x000000);
-const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.01, 200);
+const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.01, 400);
 camera.position.set(0,1.6,0.01);
-
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
 controls.enabled = false; controls.target.set(0,1.6,0);
 
-/* ================== fade overlay (устойчиво для XR) ================== */
-function makeFade(){
-  const g=new THREE.PlaneGeometry(2,2);
-  const m=new THREE.MeshBasicMaterial({color:0x000,transparent:true,opacity:1,depthTest:false});
-  const q=new THREE.Mesh(g,m); q.renderOrder=9999; q.position.z=-0.3;
-  camera.add(q); scene.add(camera);
-  return { show:()=>m.opacity=1, fade:(ms=700)=>{const t0=performance.now();(function f(t){const k=Math.min(1,(t-t0)/ms);m.opacity=1-k;if(k<1)requestAnimationFrame(f)})(t0)} };
-}
+/* ===== fade-overlay + XR fix ===== */
+function makeFade(){const g=new THREE.PlaneGeometry(2,2),m=new THREE.MeshBasicMaterial({color:0x000,transparent:true,opacity:1,depthTest:false});const q=new THREE.Mesh(g,m);q.renderOrder=9999;q.position.z=-0.3;camera.add(q);scene.add(camera);return{show:()=>m.opacity=1,fade:(ms=700)=>{const t0=performance.now();(function f(t){const k=Math.min(1,(t-t0)/ms);m.opacity=1-k;if(k<1)requestAnimationFrame(f)})(t0)}}}
 const screen = makeFade();
+let xrFadePending=false, xrFrameCount=0;
 
-function waitXRFrames(n=3){return new Promise(res=>{let left=n; function tick(){left--; if(left<=0) res(); else requestAnimationFrame(tick);} requestAnimationFrame(tick);});}
+/* ===== свет ===== */
+scene.add(new THREE.HemisphereLight(0x88aaff, 0x000010, 0.12));
+const dir = new THREE.DirectionalLight(0xffffff, 0.22); dir.position.set(3,6,-2); scene.add(dir);
 
-/* ================== атмосфера: лёгкий туман/неон ================== */
-const hemi = new THREE.HemisphereLight(0x88aaff, 0x000010, 0.15); scene.add(hemi);
-const dir = new THREE.DirectionalLight(0xffffff, 0.18); dir.position.set(3,6,-2); scene.add(dir);
-
-/* ================== решётка (инстансы) ================== */
+/* ===== решётка + неон ===== */
 const lattice = new THREE.Group(); scene.add(lattice);
-
-// материалы «дерево/медь»
-const matX = new THREE.MeshStandardMaterial({color:0x3a2c1f, roughness:0.9, metalness:0.15});
-const matY = new THREE.MeshStandardMaterial({color:0x231a12, roughness:0.95, metalness:0.12});
-const matZ = new THREE.MeshStandardMaterial({color:0x2e2218, roughness:0.92, metalness:0.18});
-
-// базовые «рейки»
-const barGeo = new THREE.BoxGeometry(1, 0.04, 0.04); // X-рейка; будем масштабировать при инстансинге
-
-function makeRods(size=6, cell=1.2){
-  // Кубическая сетка NxNxN вокруг (0,1.6,0)
-  const half = (size-1)/2;
-  const countPerAxis = size*size; // по каждой ориентации
-  const rodsX = new THREE.InstancedMesh(barGeo, matX, countPerAxis);
-  const rodsY = new THREE.InstancedMesh(barGeo, matY, countPerAxis);
-  const rodsZ = new THREE.InstancedMesh(barGeo, matZ, countPerAxis);
-  rodsX.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-  rodsY.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-  rodsZ.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-
-  const m = new THREE.Matrix4();
-  let i=0;
-  for(let y=0;y<size;y++){
-    for(let z=0;z<size;z++){
-      const wy = (y-half)*cell + 1.6; // центр по глазам
-      const wz = (z-half)*cell;
-      // X ориентация — длинная
-      m.identity().makeScale(cell,1,1).setPosition(0,wy,wz);
-      rodsX.setMatrixAt(i++, m);
-    }
-  }
-  i=0;
-  for(let x=0;x<size;x++){
-    for(let z=0;z<size;z++){
-      const wx = (x-half)*cell;
-      const wz = (z-half)*cell;
-      // Y ориентация
-      m.identity().makeScale(1,cell,1).setPosition(wx,1.6,wz);
-      rodsY.setMatrixAt(i++, m);
-    }
-  }
-  i=0;
-  for(let x=0;x<size;x++){
-    for(let y=0;y<size;y++){
-      const wx = (x-half)*cell;
-      const wy = (y-half)*cell + 1.6;
-      // Z ориентация
-      m.identity().makeScale(1,1,cell).setPosition(wx,wy,0);
-      rodsZ.setMatrixAt(i++, m);
-    }
-  }
-
-  lattice.add(rodsX, rodsY, rodsZ);
+const matWood = new THREE.MeshStandardMaterial({color:0x17120d, roughness:0.95, metalness:0.08});
+const barGeo = new THREE.BoxGeometry(1, 0.06, 0.06);
+function makeGrid(size=11, cell=0.80){
+  const half=(size-1)/2, full=size*cell*1.2;
+  const rodsX=new THREE.InstancedMesh(barGeo,matWood,size*size);
+  const rodsY=new THREE.InstancedMesh(barGeo,matWood,size*size);
+  const rodsZ=new THREE.InstancedMesh(barGeo,matWood,size*size);
+  const m=new THREE.Matrix4(); let i=0;
+  for(let y=0;y<size;y++)for(let z=0;z<size;z++){const wy=(y-half)*cell+1.6,wz=(z-half)*cell; m.identity().makeScale(full,1,1).setPosition(0,wy,wz); rodsX.setMatrixAt(i++,m);}
+  i=0; for(let x=0;x<size;x++)for(let z=0;z<size;z++){const wx=(x-half)*cell,wz=(z-half)*cell; m.identity().makeScale(1,full,1).setPosition(wx,1.6,wz); rodsY.setMatrixAt(i++,m);}
+  i=0; for(let x=0;x<size;x++)for(let y=0;y<size;y++){const wx=(x-half)*cell,wy=(y-half)*cell+1.6; m.identity().makeScale(1,1,full).setPosition(wx,wy,0); rodsZ.setMatrixAt(i++,m);}
+  lattice.add(rodsX,rodsY,rodsZ);
 }
-makeRods(7, 1.05); // плотность/размер клетки: можно крутить
+makeGrid();
 
-/* ================== «поток времени» — полосы света ================== */
-const streakGeo = new THREE.PlaneGeometry(0.015, 0.9);
-const streakMat = new THREE.MeshBasicMaterial({color:0x9be8ff, transparent:true, opacity:0.22, depthWrite:false, blending:THREE.AdditiveBlending});
-const streaks = new THREE.Group(); lattice.add(streaks);
-for(let i=0;i<220;i++){
-  const s = new THREE.Mesh(streakGeo, streakMat.clone());
-  s.material.opacity = 0.12 + Math.random()*0.2;
-  s.position.set( (Math.random()-0.5)*6, 0.6+Math.random()*2.2, (Math.random()-0.5)*6 );
-  s.rotation.y = Math.random()*Math.PI;
-  streaks.add(s);
+const glowGroup=new THREE.Group(); lattice.add(glowGroup);
+const glowMat=new THREE.MeshBasicMaterial({color:0x9be8ff, transparent:true, opacity:0.55, blending:THREE.AdditiveBlending, depthWrite:false});
+const glowGeo=new THREE.BoxGeometry(8,0.02,0.02);
+for(let i=0;i<900;i++){
+  const g=new THREE.Mesh(glowGeo,glowMat.clone());
+  const axis=(Math.random()*3)|0;
+  if(axis===0){ g.scale.x=1+Math.random()*2; }
+  if(axis===1){ g.scale.y=1+Math.random()*2; }
+  if(axis===2){ g.scale.z=1+Math.random()*2; }
+  g.material.opacity=0.35+Math.random()*0.35;
+  g.position.set((Math.random()-0.5)*8, 0.6+Math.random()*2.2, (Math.random()-0.5)*8);
+  glowGroup.add(g);
 }
 
-/* ================== ФОТО — «швы времени» ================== */
-const photosGroup = new THREE.Group(); lattice.add(photosGroup);
-
-// соберём список файлов фоток (0.jpg..9.jpg). Просто пытаемся загрузить подряд.
-const photoTextures = [];
-for(let i=0;i<16;i++){
-  const url = `./assets/textures/photos/${i}.jpg`;
-  photoTextures.push(texLoader.load(url, t=>{ t.colorSpace = THREE.SRGBColorSpace; }));
-}
-
-// создаём «оконца» между рейками
+/* ===== фото ===== */
+const photosGroup=new THREE.Group(); lattice.add(photosGroup);
+const photoTextures=[];
+for(let i=0;i<48;i++){ photoTextures.push(texLoader.load(`./assets/textures/photos/${i}.jpg`, t=>{ t.colorSpace=THREE.SRGBColorSpace; })); }
 function makePhotoSlots(){
-  const MAX = 18; // сколько увидеть одновременно
-  const slotGeo = new THREE.PlaneGeometry(0.52, 0.32);
+  const MAX=20, slotGeo=new THREE.PlaneGeometry(0.30,0.18);
   for(let i=0;i<MAX;i++){
-    const tex = photoTextures[i % photoTextures.length];
-    const mat = new THREE.MeshBasicMaterial({map:tex, transparent:true, opacity:0});
-    const m = new THREE.Mesh(slotGeo, mat);
-    // позиция: случайная грань клетки
-    const side = Math.floor(Math.random()*3); // 0-x,1-y,2-z
-    const s = 3.0; // радиус
-    if(side===0){ // смотрит +/-X
-      m.position.set( Math.random()<.5? -s:s, 1.0+Math.random()*1.6, (Math.random()-0.5)*2.6 );
-      m.rotation.y = (Math.random()<.5? Math.PI/2 : -Math.PI/2);
-    }else if(side===1){ // +/-Y (потолок/пол)
-      m.position.set( (Math.random()-0.5)*2.6, Math.random()<.5? (1.6-1.4):(1.6+1.4), (Math.random()-0.5)*2.6 );
-      m.rotation.x = (Math.random()<.5? Math.PI/2 : -Math.PI/2);
-    }else{ // +/-Z
-      m.position.set( (Math.random()-0.5)*2.6, 1.0+Math.random()*1.6, Math.random()<.5? -s:s );
-      m.rotation.y = (Math.random()<.5? 0 : Math.PI);
-    }
-    m.userData.t0 = Math.random()*6; // фазы мигания
+    const tex=photoTextures[i%photoTextures.length];
+    const mat=new THREE.MeshBasicMaterial({map:tex, transparent:true, opacity:0});
+    const m=new THREE.Mesh(slotGeo,mat);
+    const s=3.4, side=(Math.random()*3)|0;
+    if(side===0){ m.position.set(Math.random()<.5?-s:s,1.0+Math.random()*1.6,(Math.random()-0.5)*3.0); m.rotation.y=(Math.random()<.5?Math.PI/2:-Math.PI/2); }
+    else if(side===1){ m.position.set((Math.random()-0.5)*3.0, Math.random()<.5?(1.6-1.6):(1.6+1.6), (Math.random()-0.5)*3.0); m.rotation.x=(Math.random()<.5?Math.PI/2:-Math.PI/2); }
+    else { m.position.set((Math.random()-0.5)*3.0,1.0+Math.random()*1.6, Math.random()<.5?-s:s); m.rotation.y=(Math.random()<.5?0:Math.PI); }
+    m.userData.t0=Math.random()*6; m.userData.flashT=-1000;
     photosGroup.add(m);
   }
 }
 makePhotoSlots();
 
-/* ================== движение и анимации ================== */
-const flow = { z: 0.25 }; // скорость «потока»
-let lastT = performance.now()*0.001;
+/* ===== звук: фоновая музыка + «стук» ===== */
+let audioCtx=null, musicNode=null, musicGain=null, musicStarted=false, musicMuted=false;
 
-function animate(){
-  const t = performance.now()*0.001;
-  const dt = Math.min(0.033, t-lastT); lastT = t;
-
-  // мир едет очень медленно вперёд (в XR кажется, что «тянет пространство»)
-  lattice.position.z += dt * flow.z;
-  if (lattice.position.z > 1.05) lattice.position.z = 0;
-
-  // лёгкая пульсация неона у полос
-  streaks.children.forEach((s,idx)=>{
-    s.material.opacity = 0.08 + 0.12*Math.sin(t*1.5 + idx*0.37)**2;
-  });
-
-  // фото: циклическое появление/затухание
-  photosGroup.children.forEach((m,idx)=>{
-    const tt = (t + m.userData.t0) % 8.0; // цикл 8с
-    const fadeIn = THREE.MathUtils.clamp((tt-0.5)/1.0, 0,1);
-    const hold   = THREE.MathUtils.clamp((tt-1.5)/3.5, 0,1);
-    const fadeOut= THREE.MathUtils.clamp((tt-5.2)/1.2, 0,1);
-    m.material.opacity = fadeIn*(1-fadeOut)*0.95;
-  });
-
-  renderer.render(scene,camera);
-}
-
-/* ================== XR измеренный фейд ================== */
-renderer.xr.addEventListener('sessionstart', async ()=>{
-  controls.enabled = false; screen.show();
-  await waitXRFrames(3);
-  screen.fade(700);
-});
-
-/* ================== UI ================== */
-const loading = document.getElementById('loading');
-const menu = document.getElementById('menu');
-document.getElementById('btnVR').onclick = async ()=>{
-  menu.style.display='none'; screen.show(); await startXR();
-};
-document.getElementById('btnSpectate').onclick = ()=>{
-  menu.style.display='none'; controls.enabled=true; screen.show(); setTimeout(()=>screen.fade(700),150);
-};
-
-/* ================== main loop ================== */
-renderer.setAnimationLoop(()=>{ animate(); if (controls.enabled) controls.update(); });
-
-/* ================== XR start ================== */
-async function startXR(){
-  if (!navigator.xr){ alert('WebXR не поддерживается. Открой в Quest Browser.'); return; }
+async function ensureMusic(){
   try{
-    const s = await navigator.xr.requestSession('immersive-vr', { optionalFeatures:['local-floor','bounded-floor'] });
-    await renderer.xr.setSession(s);
-  }catch(e){ console.error(e); alert('Не удалось запустить VR-сессию.'); }
+    if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    if(musicStarted) return;
+    const resp = await fetch('./assets/music/universe.mp3'); // локальный путь
+    const buf = await resp.arrayBuffer();
+    const audioBuf = await audioCtx.decodeAudioData(buf);
+    musicGain = audioCtx.createGain();
+    musicGain.gain.value = 0.0001; // начнём с тишины
+    musicNode = audioCtx.createBufferSource();
+    musicNode.buffer = audioBuf;
+    musicNode.loop = true;
+    musicNode.connect(musicGain).connect(audioCtx.destination);
+    musicNode.start();
+    // плавный фейд-ин до комфортной громкости
+    const t = audioCtx.currentTime;
+    musicGain.gain.cancelScheduledValues(t);
+    musicGain.gain.setValueAtTime(0.0001, t);
+    musicGain.gain.exponentialRampToValueAtTime(0.12, t+2.0);
+    musicStarted = true;
+    updateMuteUI();
+  }catch(e){ console.warn('Музыку не удалось запустить:', e); }
 }
 
-/* ================== resize ================== */
-addEventListener('resize', ()=>{
-  camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
+function setMuted(m){
+  musicMuted = m;
+  if (musicGain){
+    const t = audioCtx.currentTime;
+    musicGain.gain.cancelScheduledValues(t);
+    if (m) musicGain.gain.exponentialRampToValueAtTime(0.0001, t+0.25);
+    else   musicGain.gain.exponentialRampToValueAtTime(0.12, t+0.25);
+  }
+  updateMuteUI();
+}
+function toggleMute(){ setMuted(!musicMuted); }
+function updateMuteUI(){
+  const el = document.getElementById('mute');
+  el.textContent = musicMuted ? '🔇 Без звука' : '🔊 Музыка';
+}
+
+function thump(){ // «стук»
+  if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+  const t=audioCtx.currentTime,o=audioCtx.createOscillator(),g=audioCtx.createGain();
+  o.type='sine'; o.frequency.setValueAtTime(120,t);
+  g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.35,t+0.015); g.gain.exponentialRampToValueAtTime(0.0001,t+0.45);
+  o.connect(g).connect(audioCtx.destination); o.start(t); o.stop(t+0.5);
+}
+
+/* ===== вспышка фото, шейк, триггеры ===== */
+function cameraShake(){let t0=performance.now();(function tick(){const dt=(performance.now()-t0)/1000,k=Math.max(0,0.5-dt);camera.position.x=0.012*Math.sin(dt*40)*k;camera.position.y=1.6+0.008*Math.sin(dt*55)*k;if(k>0)requestAnimationFrame(tick);else{camera.position.x=0;camera.position.y=1.6;}})();}
+function flashRandomPhoto(){ if(!photosGroup.children.length) return; const m=photosGroup.children[(Math.random()*photosGroup.children.length)|0]; m.userData.flashT=performance.now()*0.001; }
+function triggerWave(){ ensureMusic(); thump(); cameraShake(); flashRandomPhoto(); }
+
+/* ===== взгляд-триггер ===== */
+let gazeStart=0,gazing=false;
+function checkGazeTrigger(){
+  const forward=new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
+  const toCenter=new THREE.Vector3(0,1.6,0).sub(camera.position).normalize();
+  const angle=THREE.MathUtils.radToDeg(Math.acos(THREE.MathUtils.clamp(forward.dot(toCenter),-1,1)));
+  const ok=angle<8; if(ok){ if(!gazing){gazing=true;gazeStart=performance.now();} else if(performance.now()-gazeStart>1200){gazing=false; triggerWave();} } else {gazing=false;}
+}
+
+/* ===== XR/меню ===== */
+const loading=document.getElementById('loading');
+const menu=document.getElementById('menu');
+renderer.xr.addEventListener('sessionstart', ()=>{
+  controls.enabled=false;
+  screen.show();
+  xrFadePending = true;   // ждём первые XR-кадры
+  xrFrameCount = 0;
+  ensureMusic();          // запуск музыки по пользовательскому действию
+});
+document.getElementById('btnVR').onclick = async ()=>{ menu.style.display='none'; screen.show(); await startXR(); };
+document.getElementById('btnSpectate').onclick = ()=>{ menu.style.display='none'; controls.enabled=true; screen.show(); ensureMusic(); setTimeout(()=>screen.fade(700),150); };
+document.getElementById('mute').onclick = ()=>{ ensureMusic().then(()=>toggleMute()); };
+
+/* ===== main loop (с XR-fade фиксом) ===== */
+renderer.setAnimationLoop(()=>{
+  // XR: снимем шторку после 2 XR-кадров
+  if (renderer.xr.isPresenting && xrFadePending) {
+    xrFrameCount++;
+    if (xrFrameCount >= 2) { screen.fade(700); xrFadePending = false; }
+  }
+  const t=performance.now()*0.001;
+  lattice.position.z += 0.35*(1/60); if(lattice.position.z>1.0) lattice.position.z=0;
+  glowGroup.children.forEach((g,idx)=>{ g.material.opacity = 0.25 + 0.45*Math.abs(Math.sin(t*1.4 + idx*0.19)); });
+  photosGroup.children.forEach(m=>{
+    const tt=(t+m.userData.t0)%8.0;
+    const fadeIn=THREE.MathUtils.clamp((tt-0.5)/1.0,0,1);
+    const fadeOut=THREE.MathUtils.clamp((tt-5.0)/1.2,0,1);
+    let op=fadeIn*(1-fadeOut)*0.85;
+    if(t-m.userData.flashT<0.8){const k=1-(t-m.userData.flashT)/0.8; op=Math.max(op,0.35+0.65*k); m.scale.setScalar(1.0+0.07*k);} else m.scale.setScalar(1.0);
+    m.material.opacity=op;
+  });
+  checkGazeTrigger();
+  if(controls.enabled) controls.update();
+  renderer.render(scene,camera);
 });
 
-/* ================== старт загрузки фоток ================== */
-// если фоток нет — менеджер всё равно отпустит меню после onError/onLoad
+/* ===== XR ===== */
+async function startXR(){
+  if(!navigator.xr){ alert('WebXR не поддерживается. Открой в Quest Browser.'); return; }
+  try{ const s=await navigator.xr.requestSession('immersive-vr',{optionalFeatures:['local-floor','bounded-floor']}); await renderer.xr.setSession(s); }
+  catch(e){ console.error(e); alert('Не удалось запустить VR-сессию.'); }
+}
+
+/* ===== input / resize ===== */
+addEventListener('click', ()=>{ ensureMusic(); triggerWave(); });
+addEventListener('touchstart', ()=>{ ensureMusic(); triggerWave(); }, {passive:true});
+addEventListener('keydown', e=>{ if(e.code==='Space'||e.code==='Enter'){ ensureMusic(); triggerWave(); } });
+addEventListener('resize', ()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); });
 </script>
 </body>
 </html>
