@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Тессеракт — cinema (+больше кубов и дальние фото)</title>
+<title>Тессеракт — cinema (больше кубов + живые фото)</title>
 <script src="./assets/js/three.min.js"></script>
 <script src="./assets/js/OrbitControls.js"></script>
 <style>
@@ -36,17 +36,18 @@
   </div>
 
 <script>
-/* ---- конфиг фоток (поправь пути под себя, если нужно) ---- */
+/* ---- ФОТО: поправь пути при необходимости ---- */
 const PHOTO_FILES = Array.from({length:15}, (_,i)=>`./assets/textures/${i+1}.jpg`);
-const PHOTO_SIZE = 0.6;      // базовый размер «окна»
-const PHOTO_FAR   = 1.2;     // множитель дальности (чем больше — тем дальше от сетки)
+const PHOTO_SIZE = 0.75;    // базовая ширина «окна»
+const PHOTO_NEAR = 2.2;     // не подлетать ближе к глазам (м)
+const PHOTO_RANGE = [0.75, 1.0]; // ближе к сетке: 0.75..1.0 от радиуса сцены
 
-/*** базовые детекты ***/
+/* детекты */
 const ua = navigator.userAgent;
 const isQuest  = /Quest|Oculus/i.test(ua);
 const isMobile = /Android|iPhone|iPad|iPod|Quest|Oculus/i.test(ua);
 
-/*** сцена ***/
+/* рендер/сцена */
 const renderer = new THREE.WebGLRenderer({antialias:true, powerPreference:'high-performance'});
 renderer.setPixelRatio(isMobile ? 1 : Math.min(window.devicePixelRatio,2));
 renderer.setSize(innerWidth, innerHeight);
@@ -65,23 +66,23 @@ camera.position.set(0,1.6,0.01);
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
 controls.enabled = false; controls.target.set(0,1.6,0);
 
-/*** VR-фейд ***/
+/* VR fade */
 function makeFade(){const g=new THREE.PlaneGeometry(2,2),m=new THREE.MeshBasicMaterial({color:0x000,transparent:true,opacity:1,depthTest:false});
 const q=new THREE.Mesh(g,m);q.renderOrder=9999;q.position.z=-0.3;camera.add(q);scene.add(camera);
 return{show:()=>m.opacity=1,fade:(ms=700)=>{const t0=performance.now();(function f(t){const k=Math.min(1,(t-t0)/ms);m.opacity=1-k;if(k<1)requestAnimationFrame(f)})(t0)}}}
 const screen = makeFade(); let xrFadePending=false, xrFrames=0;
 
-/*** свет ***/
+/* свет */
 scene.add(new THREE.AmbientLight(0x120e0b, 0.95));
 const key = new THREE.DirectionalLight(0xffe0b5, 0.58); key.position.set(-2.5,5,-4.5); scene.add(key);
 const rim = new THREE.DirectionalLight(0xbfd4ff, 0.18);  rim.position.set( 3.0,2.0, 3.5); scene.add(rim);
 
-/*** материалы максимально простые ***/
+/* материалы */
 const matWood  = new THREE.MeshLambertMaterial({color: 0x3c2f24});
 const matGlass = new THREE.MeshLambertMaterial({color: 0xcfd9ff, transparent:true, opacity:0.30});
 const matGlow  = new THREE.MeshBasicMaterial({color:0xffffff, transparent:true, opacity:0.65, blending:THREE.AdditiveBlending, depthWrite:false});
 
-/*** параметры качества — везде count: 3 ***/
+/* качество — по 3 куба во все стороны */
 function pickQuality(){
   const v = document.getElementById('qsel').value;
   if (v!=='auto') return v;
@@ -89,13 +90,12 @@ function pickQuality(){
   return isMobile ? 'med' : 'high';
 }
 function qualityParams(q){
-  // distance немного поднял, чтобы расширенная решётка не давила
   if(q==='low')  return {cell:3, count:3, beam:0.085, slat:0.024, distance:2.8, glassRatio:0.3,  fillDensity:5, glowCount:120, layers:2};
-  if(q==='med')  return {cell:3, count:3, beam:0.09,  slat:0.024, distance:3.0, glassRatio:0.32, fillDensity:7, glowCount:180, layers:2};
-  /* high */     return {cell:3, count:3, beam:0.10, slat:0.022, distance:3.2, glassRatio:0.35, fillDensity:10,glowCount:240, layers:3};
+  if(q==='med')  return {cell:3, count:3, beam:0.090, slat:0.024, distance:3.0, glassRatio:0.32, fillDensity:7, glowCount:180, layers:2};
+  /* high */     return {cell:3, count:3, beam:0.100, slat:0.022, distance:3.2, glassRatio:0.35, fillDensity:10,glowCount:240, layers:3};
 }
 
-/*** bokeh texture ***/
+/* bokeh texture */
 function makeBokehTexture(){
   const s=256, c=document.createElement('canvas'); c.width=c.height=s; const ctx=c.getContext('2d');
   const g=ctx.createRadialGradient(s/2,s/2,0, s/2,s/2,s/2);
@@ -109,9 +109,9 @@ function makeBokehTexture(){
 }
 const bokehTex = makeBokehTexture();
 
-/*** тессеракт-слой (как в стабильной версии) ***/
+/* слой тессеракта (стабильный) */
 function buildTesseractLayer(p, phase=0, tint=1.0){
-  const {cell,count,beam,slat,distance,glassRatio,fillDensity,glowCount} = p;
+  const {cell,count,beam,slat,distance,fillDensity,glowCount} = p;
   const group = new THREE.Group();
 
   const half = cell/2, steps=fillDensity, step=cell/(steps+1);
@@ -151,7 +151,6 @@ function buildTesseractLayer(p, phase=0, tint=1.0){
   iFrame.material.opacity*=0.9*layerMult;
 
   const M = new THREE.Matrix4();
-
   let ixF=0,iyF=0,izF=0, ixL=0,iyL=0,izL=0, iIF=0;
 
   for(let ix=-count; ix<=count; ix++)
@@ -185,7 +184,7 @@ function buildTesseractLayer(p, phase=0, tint=1.0){
       M.identity().setPosition(cx - d, cy, cz); lineY.setMatrixAt(iyL++, M);
     }
 
-    for(const off of innerFrameOffsets){
+    for(const off of [-cell/3,cell/3]){
       M.identity().setPosition(cx, cy - half, cz + off); iFrame.setMatrixAt(iIF++, M);
       M.identity().setPosition(cx, cy + half, cz + off); iFrame.setMatrixAt(iIF++, M);
       M.identity().makeRotationZ(Math.PI/2).setPosition(cx - half, cy, cz + off); iFrame.setMatrixAt(iIF++, M);
@@ -219,7 +218,6 @@ function buildTesseractLayer(p, phase=0, tint=1.0){
     glows.setMatrixAt(i, M2);
   }
   glows.instanceMatrix.needsUpdate=true;
-  glows.material.opacity*=0.8*layerMult;
   group.add(glows);
 
   group.userData.tick = (t)=>{
@@ -228,11 +226,10 @@ function buildTesseractLayer(p, phase=0, tint=1.0){
     group.position.z = Math.sin(t*0.5 + phase) * a;
     group.scale.set(1.00, s, 1.00/s);
   };
-
   return group;
 }
 
-/*** поле «боке» ***/
+/* поле «боке» */
 function buildBokehField(p){
   const n = isQuest ? 120 : 220;
   const geo = new THREE.PlaneGeometry(1,1);
@@ -253,12 +250,14 @@ function buildBokehField(p){
   return inst;
 }
 
-/*** дальние «воспоминания» (фотокадры) ***/
+/* ДАЛЬНИЕ «ВОСПОМИНАНИЯ» — ближе и двигаться как линии */
 function buildMemories(p){
   const group = new THREE.Group();
   const loader = new THREE.TextureLoader();
-  const radiusBase = (p.count * p.cell + 3.0) * PHOTO_FAR; // дальше сетки
-  const minR = radiusBase * 0.9, maxR = radiusBase * 1.15;
+
+  const sceneRadius = p.count * p.cell + 3.0;
+  const rMin = sceneRadius * PHOTO_RANGE[0];
+  const rMax = sceneRadius * PHOTO_RANGE[1];
 
   PHOTO_FILES.forEach((path,idx)=>{
     loader.load(path, (tex)=>{
@@ -267,74 +266,92 @@ function buildMemories(p){
       const w = PHOTO_SIZE * (0.85 + Math.random()*0.5);
       const h = w / ar;
 
-      const mat = new THREE.MeshBasicMaterial({map:tex, transparent:true, opacity:0.0, depthWrite:false, side:THREE.DoubleSide});
+      const mat = new THREE.MeshBasicMaterial({
+        map:tex, transparent:true, opacity:0.0, depthWrite:false, side:THREE.DoubleSide
+      });
       const geo = new THREE.PlaneGeometry(w, h);
       const m = new THREE.Mesh(geo, mat);
 
-      // случайная сферическая позиция вдали
-      const r = minR + Math.random()*(maxR-minR);
-      const th = Math.acos(1 - 2*Math.random());      // 0..pi
-      const ph = 2*Math.PI*Math.random();             // 0..2pi
-      m.position.set(
-        r*Math.sin(th)*Math.cos(ph),
-        1.6 + r*0.35*Math.cos(th), // слегка сдвигаем вверх-вниз
-        r*Math.sin(th)*Math.sin(ph)
-      );
+      // Выбираем ось (как у «балок») и ставим кадр в один из пролетов
+      const axis = (Math.random()*3)|0;    // 0:x,1:y,2:z
+      const ring = ((Math.random()*(p.count*2+1))|0) - p.count;
+      const base = ring * p.cell;
+      const half = p.cell/2;
+
+      // начальная точка на «поясе» и направление движения
+      if(axis===0){
+        m.position.set(0, 1.6+(Math.random()*2-1)*half, (Math.random()<.5?-1:1)*half + base);
+        m.userData.dir = new THREE.Vector3( 1, 0, 0);
+      }else if(axis===1){
+        m.position.set((Math.random()<.5?-1:1)*half + base, 1.6, (Math.random()*2-1)*half);
+        m.userData.dir = new THREE.Vector3( 0, 1, 0);
+      }else{
+        m.position.set((Math.random()*2-1)*half, 1.6+(Math.random()<.5?-1:1)*half, 0);
+        m.userData.dir = new THREE.Vector3( 0, 0, 1);
+      }
+
+      // уводим чуть дальше/ближе к центру сферы
+      const scaleR = rMin + Math.random()*(rMax - rMin);
+      m.position.multiplyScalar(scaleR / (half+1e-3));
+
+      // Параметры движения/мерцания
       m.userData.phase = Math.random()*Math.PI*2;
-      m.userData.speed = 0.25 + Math.random()*0.25;   // скорость мерцания
-      m.userData.drift = new THREE.Vector3(
-        (Math.random()*2-1)*0.02,
-        (Math.random()*2-1)*0.02,
-        (Math.random()*2-1)*0.02
-      );
+      m.userData.speed = 0.2 + Math.random()*0.25; // медленнее линий
+      m.userData.amp   = 0.9 + Math.random()*0.9;  // амплитуда вдоль оси, м
+      m.userData.roll  = (Math.random()*2-1)*0.35; // лёгкое вращение плоскости
+
+      // Чтобы не лезло в лицо: если ближе PHOTO_NEAR — отталкиваем
+      const camDist = m.position.distanceTo(new THREE.Vector3(0,1.6,0));
+      if (camDist < PHOTO_NEAR){
+        const push = m.position.clone().sub(new THREE.Vector3(0,1.6,0)).setLength(PHOTO_NEAR);
+        m.position.copy(push);
+      }
+
       group.add(m);
     });
   });
 
   group.userData.tick = (t)=>{
-    group.children.forEach((m,i)=>{
-      // всегда «смотреть» примерно на центр (не строго на камеру, чтобы не липло)
-      m.lookAt(0,1.6,0);
-      // лёгкий дрейф
-      m.position.addScaledVector(m.userData.drift, 0.005);
-      // плавное появление/исчезание
-      const k = 0.5 + 0.5*Math.sin(t* m.userData.speed + m.userData.phase);
-      m.material.opacity = 0.05 + 0.35*k; // максимум 0.4 — далеко и ненавязчиво
+    group.children.forEach((m)=>{
+      // Движение вдоль выбранной оси (туда-сюда)
+      const shift = Math.sin(t*m.userData.speed + m.userData.phase) * m.userData.amp;
+      const pos = m.position.clone();
+      pos.addScaledVector(m.userData.dir, shift);
+      m.position.lerp(pos, 0.08); // сглаживаем, чтобы не дёргалось
+
+      // Биллборд + лёгкий «ролл»
+      m.lookAt(camera.position);
+      m.rotateZ(m.userData.roll*0.02);
+
+      // Мягкая видимость (всплыл-погас)
+      const k = 0.5 + 0.5*Math.sin(t*m.userData.speed*0.9 + m.userData.phase);
+      m.material.opacity = 0.15 + 0.35*k;  // максимум ~0.5
     });
   };
   return group;
 }
 
-/*** сборка сцены ***/
+/* сборка сцены */
 let root=null;
 function rebuild(){
   if(root){ scene.remove(root); root.traverse(o=>{ if(o.dispose) o.dispose(); }); root=null; }
-  const q = pickQuality();
-  const P = qualityParams(q);
+  const P = qualityParams(pickQuality());
 
   root = new THREE.Group();
-
   const layers = Math.max(2, P.layers||2);
   for(let i=0;i<layers;i++){
     const tint = 0.9 + i*0.08;
     const phase = i*1.2;
-    const layer = buildTesseractLayer(P, phase, tint);
-    root.add(layer);
+    root.add( buildTesseractLayer(P, phase, tint) );
   }
-
-  const bokeh = buildBokehField(P);
-  root.add(bokeh);
-
-  const memories = buildMemories(P);   // добавили дальние фото
-  root.add(memories);
-
+  root.add( buildBokehField(P) );
+  root.add( buildMemories(P) );  // обновлённые, «живые» фото
   root.userData.tick=(t)=>{ root.children.forEach(ch=>{ if(ch.userData.tick) ch.userData.tick(t); }); };
   scene.add(root);
 }
-
 document.getElementById('qsel').addEventListener('change', rebuild);
 
-/*** музыка ***/
+/* музыка */
 const MUSIC_PATH = './assets/music/universe.mp3';
 let audioCtx=null, musicNode=null, musicGain=null, musicStarted=false, musicMuted=false;
 async function ensureMusic(){
@@ -354,7 +371,7 @@ function setMuted(m){ musicMuted=m; if(musicGain){ const t=audioCtx.currentTime;
 function toggleMute(){ setMuted(!musicMuted); }
 function updateMuteUI(){ document.getElementById('mute').textContent = musicMuted ? '🔇 Без звука' : '🔊 Музыка'; }
 
-/*** меню / VR ***/
+/* меню/VR/рендер */
 const loading=document.getElementById('loading');
 const menu=document.getElementById('menu');
 requestAnimationFrame(()=>{ rebuild(); loading.style.display='none'; menu.style.display='flex'; });
@@ -366,8 +383,6 @@ document.getElementById('btnVR').onclick = async ()=>{ menu.style.display='none'
 document.getElementById('btnSpectate').onclick = ()=>{ menu.style.display='none'; controls.enabled=true; screen.show(); ensureMusic(); setTimeout(()=>screen.fade(700),150); };
 document.getElementById('mute').onclick = ()=>{ ensureMusic().then(()=>toggleMute()); };
 
-/*** цикл ***/
-let last=performance.now()*0.001;
 renderer.setAnimationLoop(()=>{
   const now=performance.now()*0.001;
   if (renderer.xr.isPresenting && xrFadePending){ xrFrames++; if(xrFrames>=4){ screen.fade(700); xrFadePending=false; } }
@@ -376,19 +391,17 @@ renderer.setAnimationLoop(()=>{
   renderer.render(scene,camera);
 });
 
-/*** XR ***/
 async function startXR(){
   if(!navigator.xr){ alert('WebXR не поддерживается. Открой в Quest Browser.'); return; }
   try{ const s=await navigator.xr.requestSession('immersive-vr',{optionalFeatures:['local-floor','bounded-floor']}); await renderer.xr.setSession(s); }
   catch(e){ console.error(e); alert('Не удалось запустить VR-сессию.'); }
 }
 
-/*** input / resize ***/
+/* input/resize */
 addEventListener('click', ()=>{ ensureMusic(); });
 addEventListener('touchstart', ()=>{ ensureMusic(); }, {passive:true});
 addEventListener('keydown', e=>{ if(e.code==='KeyM'){ ensureMusic().then(()=>toggleMute()); } });
 addEventListener('resize', ()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); });
-
 </script>
 </body>
 </html>
