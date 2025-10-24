@@ -1,252 +1,434 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Хранитель времени — Квест</title>
-  <meta name="description" content="Одностраничный квест с фоновым изображением, музыкой и эффектом помех." />
-  <style>
-    /* --- CSS reset (минимально) --- */
-    *,*::before,*::after{box-sizing:border-box}
-    html,body{height:100%;margin:0}
-    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif;background:#000;color:#e6e6e6;overflow:hidden}
-
-    /* --- Контейнер сцены --- */
-    .stage{position:fixed;inset:0;}
-
-    /* --- Фоновая картинка --- */
-    .bg{position:absolute;inset:0;background:#000 center/cover no-repeat fixed;filter:brightness(0.88) contrast(1.05) saturate(1.05);transform:scale(1.02);}
-    /* лёгкое плавание фона для живости */
-    @keyframes drift{0%{transform:scale(1.02) translate3d(0,0,0)}50%{transform:scale(1.03) translate3d(0,-10px,0)}100%{transform:scale(1.02) translate3d(0,0,0)}}
-    .bg{animation:drift 18s ease-in-out infinite}
-
-    /* --- Затенение краёв (виньетка) --- */
-    .vignette{position:absolute;inset:0;pointer-events:none;background:radial-gradient(90% 70% at 50% 40%, rgba(0,0,0,0) 45%, rgba(0,0,0,0.35) 80%, rgba(0,0,0,0.75) 100%)}
-
-    /* --- Сканлайны/статическое зерно поверх --- */
-    .scanlines{position:absolute;inset:0;pointer-events:none;mix-blend-mode:soft-light;opacity:0.5;background:repeating-linear-gradient(to bottom, rgba(255,255,255,0.03), rgba(255,255,255,0.03) 2px, rgba(0,0,0,0.03) 3px, rgba(0,0,0,0.03) 4px)}
-
-    /* --- Глитч/помехи вспышками --- */
-    .glitch{position:absolute;inset:0;pointer-events:none}
-    .glitch::before,.glitch::after{content:"";position:absolute;inset:0;background:inherit;opacity:0;mix-blend-mode:screen;}
-    @keyframes glitchShift {
-      0% { transform:translate(0,0); opacity:0 }
-      1% { transform:translate(8px,-2px); opacity:0.35 }
-      2% { transform:translate(-6px,2px); opacity:0.45 }
-      3% { transform:translate(3px,-1px); opacity:0.2 }
-      4% { transform:translate(0,0); opacity:0 }
-    }
-    @keyframes glitchRGB {
-      0%, 96%, 100% { filter:none; opacity:0 }
-      97% { filter:drop-shadow(0 0 0 #f00) drop-shadow(0 0 0 #0ff); opacity:0.3 }
-      98% { filter:drop-shadow(2px 0 0 #f00) drop-shadow(-2px 0 0 #0ff); opacity:0.45 }
-      99% { filter:drop-shadow(-1px 0 0 #f00) drop-shadow(1px 0 0 #0ff); opacity:0.25 }
-    }
-    .glitch::before{animation:glitchShift 7s steps(1,end) infinite}
-    .glitch::after{animation:glitchRGB 5.6s steps(1,end) infinite}
-
-    /* --- Контентный слой (текст/подсказки) --- */
-    .content{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:24px}
-    .content .box{max-width:900px;background:rgba(0,0,0,0.32);backdrop-filter:blur(3px);border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:20px 22px}
-    h1{font-weight:600;letter-spacing:.02em;margin:0 0 .25rem;font-size:clamp(28px,4vw,40px)}
-    p{margin:.25rem 0 .5rem;opacity:.9;font-size:clamp(14px,2.2vw,18px);line-height:1.55}
-
-    /* --- Экран запуска для обхода запрета автоплея --- */
-    .intro{position:fixed;inset:0;background:#000;display:grid;place-items:center;z-index:3;transition:opacity .7s ease}
-    .intro.hidden{opacity:0;pointer-events:none}
-    .intro .btn{cursor:pointer;background:#111;border:1px solid #2a2a2a;color:#eaeaea;border-radius:12px;padding:14px 18px;font-size:18px;letter-spacing:.02em}
-    .intro .btn:hover{background:#171717}
-
-    /* --- Кнопки управления --- */
-    .controls{position:fixed;left:14px;bottom:14px;display:flex;gap:8px;z-index:2}
-    .controls button{background:rgba(0,0,0,0.55);border:1px solid rgba(255,255,255,0.1);color:#eaeaea;border-radius:12px;padding:10px 12px;font-size:14px;backdrop-filter:blur(2px);cursor:pointer}
-    .controls button:hover{background:rgba(0,0,0,0.7)}
-
-    /* --- Подсказка «включите звук» для мобильных --- */
-    .toast{position:fixed;right:12px;bottom:12px;background:rgba(0,0,0,0.7);border:1px solid rgba(255,255,255,0.1);padding:10px 12px;border-radius:10px;font-size:13px;opacity:0;transform:translateY(6px);transition:.4s;z-index:2}
-    .toast.show{opacity:1;transform:translateY(0)}
-
-    /* Респонсив для очень узких экранов */
-    @media (max-width:520px){
-      .content .box{padding:14px}
-    }
-  </style>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Тессеракт — low + живые воспоминания</title>
+<script src="./assets/js/three.min.js"></script>
+<script src="./assets/js/OrbitControls.js"></script>
+<style>
+  html,body{margin:0;height:100%;background:#000;color:#fff;font-family:system-ui,Segoe UI,Roboto,Arial}
+  .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#000;z-index:30}
+  .menu{position:fixed;inset:0;background:rgba(0,0,0,.88);display:none;align-items:center;justify-content:center;flex-direction:column;gap:12px;z-index:20}
+  .btn{appearance:none;border:0;padding:12px 16px;border-radius:12px;font-weight:600;cursor:pointer;font-size:15px;background:#14b8a6;color:#00100e;box-shadow:0 4px 20px rgba(0,0,0,.35)}
+  .btn.secondary{background:#1f2937;color:#cbd5e1}
+  .hud{position:fixed;left:12px;bottom:12px;background:rgba(0,0,0,.45);padding:8px 10px;border-radius:10px;font-size:13px;z-index:5}
+  .mute{position:fixed;right:12px;bottom:12px;background:rgba(0,0,0,.5);border:1px solid rgba(255,255,255,.2);padding:8px 10px;border-radius:10px;font-size:13px;z-index:6;cursor:pointer}
+</style>
 </head>
 <body>
-  <!-- Экран запуска (нужен для старта аудио кликом) -->
-  <div class="intro" id="intro">
-    <button class="btn" id="startBtn">Войти в связь</button>
+  <div id="loading" class="overlay"><div>Собираю тессеракт…</div></div>
+  <div id="menu" class="menu">
+    <button id="btnVR" class="btn">Войти в VR</button>
+    <button id="btnSpectate" class="btn secondary">Режим наблюдателя</button>
   </div>
+  <div class="hud">ПК: мышь — обзор. Клик включает музыку. Камера не трясётся.</div>
+  <button id="mute" class="mute">🔊 Музыка</button>
 
-  <!-- Сцена -->
-  <main class="stage" aria-label="Квест">
-    <!-- Фоновое изображение (замените путь на ваш файл) -->
-    <div class="bg" id="bg" style="background-image:url('assets/keeper-1920x1080.jpg');"></div>
+<script>
+/* ---------- настройки ---------- */
+const PHOTO_FILES = Array.from({length:15}, (_,i)=>`./assets/textures/${i+1}.jpg`);
+const FIXED_QUALITY = 'low';     // всегда low
+const GRID_COUNT = 4;            // по просьбе — 4 куба во все стороны
+const PHOTO_SIZE = 1.05;         // базовая ширина кадра (м)
+const PHOTO_NEAR = 2.0;          // не ближе к глазам (м)
+const PHOTO_POOL = 18;           // одновременно активных «билбордов»
+const PHOTO_OPACITY_MAX = 0.65;  // пик яркости
+const PHOTO_LIFETIME = [1.8, 3.2]; // сколько держится (сек)
+const PHOTO_COOLDOWN = [1.2, 2.2]; // пауза до следующего появления
+const PHOTO_RANGE = [0.65, 0.9]; // ближе к сетке (доли радиуса сцены)
 
-    <!-- Виньетка и сканлайны -->
-    <div class="vignette"></div>
-    <div class="scanlines"></div>
+const ua = navigator.userAgent;
+const isQuest  = /Quest|Oculus/i.test(ua);
+const isMobile = /Android|iPhone|iPad|iPod|Quest|Oculus/i.test(ua);
 
-    <!-- Глитч-слой (использует фон сверху через inherit) -->
-    <div class="glitch"></div>
+const renderer = new THREE.WebGLRenderer({antialias:true, powerPreference:'high-performance'});
+renderer.setPixelRatio(isMobile ? 1 : Math.min(window.devicePixelRatio,2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.xr.enabled = true;
+if ('outputColorSpace' in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace; else renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.52;
+document.body.appendChild(renderer.domElement);
 
-    <!-- Контент сверху (можно выключить после релиза) -->
-    <section class="content" id="content">
-      <div class="box">
-        <h1>Сигнал нестабилен…</h1>
-        <p id="subtitle">Ожидайте обращения Хранителя. Связь может прерываться.</p>
-      </div>
-    </section>
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x000000);
+if (!isQuest) scene.fog = new THREE.FogExp2(0x000000, 0.022);
 
-    <!-- Кнопки управления -->
-    <nav class="controls">
-      <button id="btnReplay">Повтор речи</button>
-      <button id="btnMute">Звук: выкл</button>
-    </nav>
+const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.01, 2000);
+camera.position.set(0,1.6,0.01);
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enabled = false; controls.target.set(0,1.6,0);
 
-    <div class="toast" id="toast">Если нет звука — нажмите «Войти в связь» или включите громкость.</div>
-  </main>
+/* VR fade (лечим «чёрный экран») */
+function makeFade(){const g=new THREE.PlaneGeometry(2,2),m=new THREE.MeshBasicMaterial({color:0x000,transparent:true,opacity:1,depthTest:false});
+const q=new THREE.Mesh(g,m);q.renderOrder=9999;q.position.z=-0.3;camera.add(q);scene.add(camera);
+return{show:()=>m.opacity=1,fade:(ms=700)=>{const t0=performance.now();(function f(t){const k=Math.min(1,(t-t0)/ms);m.opacity=1-k;if(k<1)requestAnimationFrame(f)})(t0)}}}
+const screen = makeFade(); let xrFadePending=false, xrFrames=0;
 
-  <!-- Аудио -->
-      <!-- Аудио (playsinline для iOS, чтобы не лезло в полноэкранный плеер) -->
-  <audio id="music" src="assets/ambient.mp3" preload="auto" loop playsinline></audio>
-  <audio id="voice" src="assets/start.mp3" preload="auto" playsinline></audio>
+/* свет */
+scene.add(new THREE.AmbientLight(0x120e0b, 0.95));
+const key = new THREE.DirectionalLight(0xffe0b5, 0.58); key.position.set(-2.5,5,-4.5); scene.add(key);
+const rim = new THREE.DirectionalLight(0xbfd4ff, 0.18);  rim.position.set( 3.0,2.0, 3.5); scene.add(rim);
 
-  <script>
-    // === Глобальные элементы ===
-    const intro    = document.getElementById('intro');
-    const startBtn = document.getElementById('startBtn');
-    const music    = document.getElementById('music');
-    const voice    = document.getElementById('voice');
-    const btnReplay= document.getElementById('btnReplay');
-    const btnMute  = document.getElementById('btnMute');  = document.getElementById('btnMute');
-    const toast    = document.getElementById('toast');
-    const glitch   = document.querySelector('.glitch');
+/* материалы */
+const matWood  = new THREE.MeshLambertMaterial({color: 0x3c2f24});
+const matGlass = new THREE.MeshLambertMaterial({color: 0xcfd9ff, transparent:true, opacity:0.30});
+const matGlow  = new THREE.MeshBasicMaterial({color:0xffffff, transparent:true, opacity:0.65, blending:THREE.AdditiveBlending, depthWrite:false});
 
-    // Стартовые значения
-    let muted = true; // до клика — тишина
-    music.volume = 0; voice.volume = 1;
+/* параметры «low» (с поправкой под GRID_COUNT) */
+function qualityParams(){
+  return {cell:3, count:GRID_COUNT, beam:0.085, slat:0.024, distance:3.6, glassRatio:0.3, fillDensity:5, glowCount:160, layers:2};
+}
 
-    // Тост
-    function showToast(msg){
-      if(!toast) return;
-      toast.textContent = msg;
-      toast.classList.add('show');
-      setTimeout(()=>toast.classList.remove('show'), 3200);
+/* боке-текстура */
+function makeBokehTexture(){
+  const s=256, c=document.createElement('canvas'); c.width=c.height=s; const ctx=c.getContext('2d');
+  const g=ctx.createRadialGradient(s/2,s/2,0, s/2,s/2,s/2);
+  g.addColorStop(0,'rgba(255,255,255,0.9)');
+  g.addColorStop(0.6,'rgba(255,255,255,0.25)');
+  g.addColorStop(1,'rgba(255,255,255,0.0)');
+  ctx.fillStyle=g; ctx.fillRect(0,0,s,s);
+  const t=new THREE.CanvasTexture(c); t.generateMipmaps=false; t.minFilter=THREE.LinearFilter; t.magFilter=THREE.LinearFilter;
+  if ('colorSpace' in t) t.colorSpace = THREE.SRGBColorSpace; else t.encoding = THREE.sRGBEncoding;
+  return t;
+}
+const bokehTex = makeBokehTexture();
+
+/* слой тессеракта (стабильный, как в «рабочей» версии) */
+function buildTesseractLayer(p, phase=0, tint=1.0){
+  const {cell,count,beam,slat,distance,fillDensity,glowCount} = p;
+  const group = new THREE.Group();
+
+  const half = cell/2, steps=fillDensity, step=cell/(steps+1);
+  const geoX = new THREE.BoxGeometry(cell, beam, beam);
+  const geoY = new THREE.BoxGeometry(beam, cell, beam);
+  const geoZ = new THREE.BoxGeometry(beam, beam, cell);
+  const geoLX= new THREE.BoxGeometry(cell, slat, slat);
+  const geoLY= new THREE.BoxGeometry(slat, cell, slat);
+  const geoLZ= new THREE.BoxGeometry(slat, slat, cell);
+  const geoGlow = new THREE.PlaneGeometry(0.3, 1.2);
+
+  let nFX=0,nFY=0,nFZ=0,nLX=0,nLY=0,nLZ=0,nIF=0;
+  const innerFrameOffsets=[-cell/3,cell/3];
+
+  for(let ix=-count; ix<=count; ix++)
+  for(let iy=-count; iy<=count; iy++)
+  for(let iz=-count; iz<=count; iz++){
+    const cx=ix*cell, cy=1.6+iy*cell, cz=iz*cell;
+    if (Math.hypot(cx,cy-1.6,cz) < distance + cell*0.5) continue;
+    nFX+=4; nFY+=4; nFZ+=4;
+    nLX+=Math.max(0,(steps-1))*2;
+    nLY+=Math.max(0,(steps-1))*2;
+    nLZ+=Math.max(0,(steps-1))*2;
+    nIF+=innerFrameOffsets.length*12;
+  }
+
+  const frameX=new THREE.InstancedMesh(geoX, matWood.clone(), nFX);
+  const frameY=new THREE.InstancedMesh(geoY, matWood.clone(), nFY);
+  const frameZ=new THREE.InstancedMesh(geoZ, matWood.clone(), nFZ);
+  const lineX =new THREE.InstancedMesh(geoLX, matWood.clone(), nLX);
+  const lineY =new THREE.InstancedMesh(geoLY, matWood.clone(), nLY);
+  const lineZ =new THREE.InstancedMesh(geoLZ, matWood.clone(), nLZ);
+  const iFrame=new THREE.InstancedMesh(new THREE.BoxGeometry(cell, beam*0.7, beam*0.7), matGlass.clone(), nIF);
+
+  const layerMult = tint;
+  [frameX,frameY,frameZ,lineX,lineY,lineZ].forEach(im=>im.material.color.multiplyScalar(layerMult));
+  iFrame.material.opacity*=0.9*layerMult;
+
+  const M = new THREE.Matrix4();
+  let ixF=0,iyF=0,izF=0, ixL=0,iyL=0,izL=0, iIF=0;
+
+  for(let ix=-GRID_COUNT; ix<=GRID_COUNT; ix++)
+  for(let iy=-GRID_COUNT; iy<=GRID_COUNT; iy++)
+  for(let iz=-GRID_COUNT; iz<=GRID_COUNT; iz++){
+    const cx=ix*cell, cy=1.6+iy*cell, cz=iz*cell;
+    if (Math.hypot(cx,cy-1.6,cz) < distance + cell*0.5) continue;
+
+    M.identity().setPosition(cx, cy - half, cz - half); frameX.setMatrixAt(ixF++, M);
+    M.identity().setPosition(cx, cy - half, cz + half); frameX.setMatrixAt(ixF++, M);
+    M.identity().setPosition(cx, cy + half, cz - half); frameX.setMatrixAt(ixF++, M);
+    M.identity().setPosition(cx, cy + half, cz + half); frameX.setMatrixAt(ixF++, M);
+
+    M.identity().setPosition(cx - half, cy, cz - half); frameY.setMatrixAt(iyF++, M);
+    M.identity().setPosition(cx + half, cy, cz - half); frameY.setMatrixAt(iyF++, M);
+    M.identity().setPosition(cx - half, cy, cz + half); frameY.setMatrixAt(iyF++, M);
+    M.identity().setPosition(cx + half, cy, cz + half); frameY.setMatrixAt(iyF++, M);
+
+    M.identity().setPosition(cx - half, cy - half, cz); frameZ.setMatrixAt(izF++, M);
+    M.identity().setPosition(cx + half, cy - half, cz); frameZ.setMatrixAt(izF++, M);
+    M.identity().setPosition(cx - half, cy + half, cz); frameZ.setMatrixAt(izF++, M);
+    M.identity().setPosition(cx + half, cy + half, cz); frameZ.setMatrixAt(izF++, M);
+
+    for(let i=1;i<=steps;i++){
+      const d=-half + i*step; if (Math.abs(d)<=0.001) continue;
+      M.identity().setPosition(cx, cy, cz + d); lineX.setMatrixAt(ixL++, M);
+      M.identity().setPosition(cx, cy, cz - d); lineX.setMatrixAt(ixL++, M);
+      M.identity().setPosition(cx, cy + d, cz); lineZ.setMatrixAt(izL++, M);
+      M.identity().setPosition(cx, cy - d, cz); lineZ.setMatrixAt(izL++, M);
+      M.identity().setPosition(cx + d, cy, cz); lineY.setMatrixAt(iyL++, M);
+      M.identity().setPosition(cx - d, cy, cz); lineY.setMatrixAt(iyL++, M);
     }
 
-    // Плавная смена громкости
-    function fadeAudio(audio, to = 1, ms = 1200){
-      const step = 0.02 * Math.sign(to - audio.volume);
-      const tick = 16;
-      const interval = setInterval(() => {
-        audio.volume = +(audio.volume + step).toFixed(3);
-        if ((step > 0 && audio.volume >= to) || (step < 0 && audio.volume <= to)){
-          audio.volume = to; clearInterval(interval);
+    for(const off of [-cell/3,cell/3]){
+      M.identity().setPosition(cx, cy - half, cz + off); iFrame.setMatrixAt(iIF++, M);
+      M.identity().setPosition(cx, cy + half, cz + off); iFrame.setMatrixAt(iIF++, M);
+      M.identity().makeRotationZ(Math.PI/2).setPosition(cx - half, cy, cz + off); iFrame.setMatrixAt(iIF++, M);
+      M.identity().makeRotationZ(Math.PI/2).setPosition(cx + half, cy, cz + off); iFrame.setMatrixAt(iIF++, M);
+
+      M.identity().setPosition(cx, cy + off, cz - half); iFrame.setMatrixAt(iIF++, M);
+      M.identity().setPosition(cx, cy + off, cz + half); iFrame.setMatrixAt(iIF++, M);
+      M.identity().makeRotationX(Math.PI/2).setPosition(cx - half, cy + off, cz); iFrame.setMatrixAt(iIF++, M);
+      M.identity().makeRotationX(Math.PI/2).setPosition(cx + half, cy + off, cz); iFrame.setMatrixAt(iIF++, M);
+
+      M.identity().makeRotationZ(Math.PI/2).setPosition(cx + off, cy - half, cz); iFrame.setMatrixAt(iIF++, M);
+      M.identity().makeRotationZ(Math.PI/2).setPosition(cx + off, cy + half, cz); iFrame.setMatrixAt(iIF++, M);
+      M.identity().makeRotationX(Math.PI/2).setPosition(cx + off, cy, cz - half); iFrame.setMatrixAt(iIF++, M);
+      M.identity().makeRotationX(Math.PI/2).setPosition(cx + off, cy, cz + half); iFrame.setMatrixAt(iIF++, M);
+    }
+  }
+
+  [frameX,frameY,frameZ,lineX,lineY,lineZ,iFrame].forEach(im=>{im.instanceMatrix.needsUpdate=true; group.add(im);});
+
+  const glows = new THREE.InstancedMesh(geoGlow, matGlow.clone(), glowCount);
+  const M2 = new THREE.Matrix4();
+  for(let i=0;i<glowCount;i++){
+    const ax=(Math.random()*3)|0;
+    const ring=(Math.random()*(GRID_COUNT*2+1)|0)-GRID_COUNT;
+    const base=ring*cell, h=half;
+    let x=0,y=1.6,z=0,rx=0,ry=0,rz=0;
+    if(ax===0){ x=0; y=1.6+(Math.random()*2-1)*h; z=(Math.random()<.5?-1:1)*h + base; ry=Math.PI/2; }
+    if(ax===1){ x=(Math.random()<.5?-1:1)*h + base; y=1.6; z=(Math.random()*2-1)*h; rx=Math.PI/2; }
+    if(ax===2){ x=(Math.random()*2-1)*h + base; y=1.6+(Math.random()<.5?-1:1)*h; z=0; }
+    M2.identity().makeRotationFromEuler(new THREE.Euler(rx,ry,rz)).setPosition(x,y,z);
+    glows.setMatrixAt(i, M2);
+  }
+  glows.instanceMatrix.needsUpdate=true;
+  group.add(glows);
+
+  group.userData.tick = (t)=>{
+    const a = 0.18;
+    const s = 1.00 + 0.03*Math.sin(t*0.6 + phase);
+    group.position.z = Math.sin(t*0.5 + phase) * a;
+    group.scale.set(1.00, s, 1.00/s);
+  };
+  return group;
+}
+
+/* поле «боке» */
+function buildBokehField(p){
+  const n = isQuest ? 140 : 220;
+  const geo = new THREE.PlaneGeometry(1,1);
+  const mat = new THREE.MeshBasicMaterial({map:bokehTex, transparent:true, blending:THREE.AdditiveBlending, depthWrite:false, opacity:0.32});
+  const inst = new THREE.InstancedMesh(geo, mat, n);
+  const M = new THREE.Matrix4();
+
+  for(let i=0;i<n;i++){
+    const r = GRID_COUNT*p.cell + 3.0;
+    const x=(Math.random()*2-1)*r, y=1.6+(Math.random()*2-1)*r*0.6, z=(Math.random()*2-1)*r;
+    const s = 0.6 + Math.random()*3.0;
+    M.identity().setPosition(x,y,z);
+    M.multiply(new THREE.Matrix4().makeScale(s, s, s));
+    inst.setMatrixAt(i, M);
+  }
+  inst.instanceMatrix.needsUpdate=true;
+  inst.userData.tick=(t)=>{ inst.material.opacity = 0.22 + 0.18*(0.5+0.5*Math.sin(t*0.7)); };
+  return inst;
+}
+
+/* ВОСПОМИНАНИЯ — пул, всплывают/гаснут, без движения по рельсам */
+function buildMemories(p){
+  const group = new THREE.Group();
+  const loader = new THREE.TextureLoader();
+  const textures = [];
+
+  // предзагрузка
+  PHOTO_FILES.forEach(path=>{
+    const tex = loader.load(path);
+    if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace; else tex.encoding = THREE.sRGBEncoding;
+    textures.push(tex);
+  });
+
+  const sceneRadius = GRID_COUNT * p.cell + 3.0;
+  const rMin = sceneRadius * PHOTO_RANGE[0];
+  const rMax = sceneRadius * PHOTO_RANGE[1];
+
+  // утилиты
+  const rnd = (a,b)=>a + Math.random()*(b-a);
+  const pick = arr => arr[(Math.random()*arr.length)|0];
+
+  // создаём пул
+  for(let i=0;i<PHOTO_POOL;i++){
+    const tex = pick(textures);
+    const ar =  (tex.image?.width||1) / (tex.image?.height||1);
+    const w  = PHOTO_SIZE * rnd(0.9, 1.25);
+    const h  = w / ar;
+
+    const mat = new THREE.MeshBasicMaterial({map:tex, transparent:true, opacity:0.0, depthWrite:false, side:THREE.DoubleSide});
+    const geo = new THREE.PlaneGeometry(w, h);
+    const m = new THREE.Mesh(geo, mat);
+
+    // начальное состояние
+    m.userData.state = 'cooldown';
+    m.userData.t = rnd(...PHOTO_COOLDOWN);
+    group.add(m);
+  }
+
+  function placeRandom(m){
+    // выбираем «ось слоя» и один из «поясов» сетки
+    const axis = (Math.random()*3)|0; // 0:x,1:y,2:z
+    const ring = ((Math.random()*(GRID_COUNT*2+1))|0) - GRID_COUNT; // смещение слоя
+    const base = ring * p.cell;
+    const half = p.cell/2;
+
+    // произвольная «ячейка» внутри куба слоя
+    let x=0,y=1.6,z=0;
+    if(axis===0){
+      x = 0;
+      y = 1.6 + rnd(-half, half);
+      z = (Math.random()<.5?-1:1)*half + base + rnd(-0.35,0.35);
+    }else if(axis===1){
+      x = (Math.random()<.5?-1:1)*half + base + rnd(-0.35,0.35);
+      y = 1.6;
+      z = rnd(-half, half);
+    }else{
+      x = rnd(-half, half);
+      y = 1.6 + (Math.random()<.5?-1:1)*half + rnd(-0.35,0.35);
+      z = 0;
+    }
+    // отодвигаем к дальним рядам
+    const scaleR = rMin + Math.random()*(rMax - rMin);
+    const len = Math.hypot(x, y-1.6, z) || 1;
+    x *= scaleR/len; y = 1.6 + (y-1.6)*scaleR/len; z *= scaleR/len;
+
+    // не слишком близко
+    const d = Math.hypot(x, y-1.6, z);
+    if (d < PHOTO_NEAR){
+      const k = PHOTO_NEAR/d;
+      x*=k; z*=k; y = 1.6 + (y-1.6)*k;
+    }
+
+    m.position.set(x,y,z);
+    m.lookAt(camera.position);
+    m.userData.phase = Math.random()*Math.PI*2;
+    m.material.opacity = 0.0;
+  }
+
+  group.userData.tick = (dt, t)=>{
+    group.children.forEach((m)=>{
+      if(m.userData.state==='cooldown'){
+        m.userData.t -= dt;
+        if(m.userData.t<=0){
+          // активируем
+          placeRandom(m);
+          // сменим текстуру иногда
+          if(Math.random()<0.6){
+            const tex = pick(textures);
+            if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace; else tex.encoding = THREE.sRGBEncoding;
+            m.material.map = tex;
+            m.material.needsUpdate = true;
+          }
+          m.userData.state='fadein';
+          m.userData.t = rnd(0.4,0.7); // время набора
+          m.userData.hold = rnd(...PHOTO_LIFETIME);
         }
-      }, tick);
-      setTimeout(()=>clearInterval(interval), ms + 2000);
-    }
-
-    // Запуск опыта
-    async function startExperience(){
-      try{
-        // Разблокировка аудио для iOS/Safari
-        try{ const Ctx = window.AudioContext||window.webkitAudioContext; if(Ctx){ const ctx = new Ctx(); await ctx.resume(); } }catch(_){/* необязательно */}
-
-        // Перезагружаем и пробуем запустить
-        music.load(); voice.load();
-        await music.play();
-
-        muted = false;
-        btnMute.textContent = 'Звук: вкл';
-        fadeAudio(music, 0.4, 1200);
-
-        // Чуть позже — голос (однократно)
-        setTimeout(async ()=>{
-          try{ voice.currentTime = 0; await voice.play(); }
-          catch(e){ showToast('Речь не стартовала. Нажмите «Повтор речи».'); }
-        }, 1400);
-
-        // Скрываем заставку
-        intro.classList.add('hidden');
-
-        // Периодические короткие глитчи (визуал)
-        setInterval(()=>{
-          glitch.classList.toggle('pulse');
-          setTimeout(()=>glitch.classList.toggle('pulse'), 240);
-        }, 3800 + Math.random()*2400);
-
-      }catch(e){
-        showToast('Не удалось запустить звук. Проверьте пути к assets/ambient.mp3 и assets/start.mp3, а также громкость.');
+      }else if(m.userData.state==='fadein'){
+        const k = Math.min(1, 1 - m.userData.t/(0.0001 + m.userData.t + 0)); // плавное
+        m.material.opacity = Math.min(PHOTO_OPACITY_MAX, m.material.opacity + 0.06);
+        m.userData.t -= dt;
+        if(m.userData.t<=0){ m.userData.state='hold'; }
+      }else if(m.userData.state==='hold'){
+        m.userData.hold -= dt;
+        // легкая пульсация прозрачности, чтобы «дышало»
+        const pulse = 0.04*Math.sin(t*0.8 + m.userData.phase);
+        m.material.opacity = Math.max(0, Math.min(PHOTO_OPACITY_MAX, PHOTO_OPACITY_MAX - 0.05 + pulse));
+        m.lookAt(camera.position);
+        if(m.userData.hold<=0){ m.userData.state='fadeout'; m.userData.t=rnd(0.4,0.7); }
+      }else if(m.userData.state==='fadeout'){
+        m.material.opacity = Math.max(0, m.material.opacity - 0.06);
+        m.userData.t -= dt;
+        if(m.userData.t<=0){ m.userData.state='cooldown'; m.userData.t=rnd(...PHOTO_COOLDOWN); m.material.opacity=0; }
       }
-    } }catch(_){/* необязательно */}
-
-        // На всякий случай перезагрузим тег и попробуем проиграть
-        music.load();
-        await music.play();
-
-        muted = false;
-        btnMute.textContent = 'Звук: вкл';
-        fadeAudio(music, 0.4, 1200);
-
-        // Скрываем заставку
-        intro.classList.add('hidden');
-
-        // Периодические короткие глитчи (визуал)
-        setInterval(()=>{
-          glitch.classList.toggle('pulse');
-          setTimeout(()=>glitch.classList.toggle('pulse'), 240);
-        }, 3800 + Math.random()*2400);
-
-      }catch(e){
-        showToast('Не удалось запустить звук. Проверьте путь к assets/ambient.mp3 и громкость.');
-      }
-    }
-
-    // Слушатели
-    startBtn.addEventListener('click', startExperience);
-
-    btnMute.addEventListener('click', () => {
-      if(muted){ fadeAudio(music, 0.4, 600); btnMute.textContent = 'Звук: вкл'; }
-      else { fadeAudio(music, 0, 600); btnMute.textContent = 'Звук: выкл'; }
-      muted = !muted;
     });
+  };
 
-    // Повтор речи
-    btnReplay.addEventListener('click', async ()=>{
-      try{ voice.currentTime = 0; await voice.play(); }
-      catch(e){ showToast('Не удалось воспроизвести start.mp3'); }
-    });
+  return group;
+}
 
-    // Автоприглушение фоновой музыки во время речи
-    voice.addEventListener('play', ()=>{ if(!muted) fadeAudio(music, 0.18, 400); });
-    voice.addEventListener('ended', ()=>{ if(!muted) fadeAudio(music, 0.4, 600); }); btnMute.textContent = 'Звук: вкл'; }
-      else { fadeAudio(music, 0, 600); btnMute.textContent = 'Звук: выкл'; }
-      muted = !muted;
-    });
+/* сборка сцены */
+let root=null, memories=null;
+function rebuild(){
+  if(root){ scene.remove(root); root.traverse(o=>{ if(o.dispose) o.dispose(); }); root=null; }
+  const P = qualityParams();
 
-    // Подмена фона под HiDPI/широкие экраны (опционально)
-    const mqUltra = window.matchMedia('(min-width:1800px)');
-    if(mqUltra.matches){
-      const bg = document.getElementById('bg');
-      const hires = 'assets/keeper-4k.jpg';
-      const img = new Image();
-      img.onload = ()=>{ bg.style.backgroundImage = `url('${hires}')`; };
-      img.src = hires;
-    }
+  root = new THREE.Group();
+  const layers = Math.max(2, P.layers||2);
+  for(let i=0;i<layers;i++){
+    const tint = 0.9 + i*0.08;
+    const phase = i*1.2;
+    root.add( buildTesseractLayer(P, phase, tint) );
+  }
+  root.add( buildBokehField(P) );
+  memories = buildMemories(P);
+  root.add(memories);
 
-    // Быстрая проверка наличия файла (HEAD)
-    ;(async()=>{
-      try{
-        const [m,v] = await Promise.all([
-          fetch('assets/ambient.mp3', {method:'HEAD'}),
-          fetch('assets/start.mp3', {method:'HEAD'})
-        ]);
-        if(!m.ok) showToast('Не найден файл: assets/ambient.mp3');
-        if(!v.ok) showToast('Не найден файл: assets/start.mp3');
-      }catch(_){ /* при file:// HEAD может не работать — это нормально */ }
-    })();
-  </script>
+  root.userData.tick=(t,dt)=>{ root.children.forEach(ch=>{ if(ch.userData.tick) ch.userData.tick(t,dt); }); };
+  scene.add(root);
+}
+
+/* музыка */
+const MUSIC_PATH = './assets/music/universe.mp3';
+let audioCtx=null, musicNode=null, musicGain=null, musicStarted=false, musicMuted=false;
+async function ensureMusic(){
+  try{
+    if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+    if(musicStarted) return;
+    const resp=await fetch(MUSIC_PATH); const buf=await resp.arrayBuffer();
+    const audioBuf=await audioCtx.decodeAudioData(buf);
+    musicGain=audioCtx.createGain(); musicGain.gain.value=0.0001;
+    musicNode=audioCtx.createBufferSource(); musicNode.buffer=audioBuf; musicNode.loop=true;
+    musicNode.connect(musicGain).connect(audioCtx.destination); musicNode.start();
+    const t=audioCtx.currentTime; musicGain.gain.exponentialRampToValueAtTime(0.10, t+2.0);
+    musicStarted=true; updateMuteUI();
+  }catch(e){ console.warn('Музыка не стартанула:',e); }
+}
+function setMuted(m){ musicMuted=m; if(musicGain){ const t=audioCtx.currentTime; musicGain.gain.cancelScheduledValues(t); musicGain.gain.exponentialRampToValueAtTime(m?0.0001:0.10, t+0.25);} updateMuteUI();}
+function toggleMute(){ setMuted(!musicMuted); }
+function updateMuteUI(){ document.getElementById('mute').textContent = musicMuted ? '🔇 Без звука' : '🔊 Музыка'; }
+
+/* меню/VR/рендер */
+const loading=document.getElementById('loading');
+const menu=document.getElementById('menu');
+requestAnimationFrame(()=>{ rebuild(); loading.style.display='none'; menu.style.display='flex'; });
+
+renderer.xr.addEventListener('sessionstart', ()=>{
+  controls.enabled=false; screen.show(); xrFadePending=true; xrFrames=0; ensureMusic();
+});
+document.getElementById('btnVR').onclick = async ()=>{ menu.style.display='none'; screen.show(); await startXR(); };
+document.getElementById('btnSpectate').onclick = ()=>{ menu.style.display='none'; controls.enabled=true; screen.show(); ensureMusic(); setTimeout(()=>screen.fade(700),150); };
+document.getElementById('mute').onclick = ()=>{ ensureMusic().then(()=>toggleMute()); };
+
+let last=performance.now()*0.001;
+renderer.setAnimationLoop(()=>{
+  const now=performance.now()*0.001, dt=Math.min(0.05, now-last); last=now;
+  if (renderer.xr.isPresenting && xrFadePending){ xrFrames++; if(xrFrames>=4){ screen.fade(700); xrFadePending=false; } }
+  if(root && root.userData.tick) root.userData.tick(now,dt);
+  if(memories && memories.userData.tick) memories.userData.tick(dt, now);
+  if(controls.enabled) controls.update();
+  renderer.render(scene,camera);
+});
+
+async function startXR(){
+  if(!navigator.xr){ alert('WebXR не поддерживается. Открой в Quest Browser.'); return; }
+  try{ const s=await navigator.xr.requestSession('immersive-vr',{optionalFeatures:['local-floor','bounded-floor']}); await renderer.xr.setSession(s); }
+  catch(e){ console.error(e); alert('Не удалось запустить VR-сессию.'); }
+}
+
+/* input/resize */
+addEventListener('click', ()=>{ ensureMusic(); });
+addEventListener('touchstart', ()=>{ ensureMusic(); }, {passive:true});
+addEventListener('keydown', e=>{ if(e.code==='KeyM'){ ensureMusic().then(()=>toggleMute()); } });
+addEventListener('resize', ()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); });
+</script>
 </body>
 </html>
