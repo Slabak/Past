@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Тессеракт — киношный, стабильный</title>
+<title>Тессеракт — Menger sponge версия</title>
 <script src="./assets/js/three.min.js"></script>
 <script src="./assets/js/OrbitControls.js"></script>
 <style>
@@ -29,7 +29,7 @@
     <button id="btnSpectate" class="btn secondary">Режим наблюдателя</button>
   </div>
 
-  <div class="hud">Клик/тап/пробел — «стук» (мягкая волна + вспышка фото). Взгляд в центр тоже сработает.</div>
+  <div class="hud">Клик/тап/пробел — «стук» (легкая волна). Камера в центре пустоты, вокруг крестовые пролёты.</div>
   <button id="mute" class="mute">🔊 Музыка</button>
 
 <script>
@@ -38,7 +38,6 @@ const manager = new THREE.LoadingManager();
 manager.onProgress = (_url, loaded, total)=>{ document.getElementById('bar').style.width = ((loaded/total)*100|0)+'%'; };
 manager.onLoad = ()=>{ loading.style.display='none'; menu.style.display='flex'; };
 manager.onError = ()=>{ loading.style.display='none'; menu.style.display='flex'; };
-const texLoader = new THREE.TextureLoader(manager);
 
 /* ===== renderer/camera/scene ===== */
 const renderer = new THREE.WebGLRenderer({antialias:true, powerPreference:'high-performance'});
@@ -48,12 +47,12 @@ renderer.setSize(innerWidth, innerHeight);
 renderer.xr.enabled = true;
 if ('outputColorSpace' in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace; else renderer.outputEncoding = THREE.sRGBEncoding;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.25; // чуть ярче
+renderer.toneMappingExposure = 1.35;
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x000000);
-const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.01, 400);
+const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.01, 500);
 camera.position.set(0,1.6,0.01);
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
 controls.enabled = false; controls.target.set(0,1.6,0);
@@ -63,83 +62,68 @@ function makeFade(){const g=new THREE.PlaneGeometry(2,2),m=new THREE.MeshBasicMa
 const screen = makeFade();
 let xrFadePending=false, xrFrameCount=0;
 
-/* ===== свет — тёплый, мягкий ===== */
-const key = new THREE.DirectionalLight(0xffe0b5, 0.35); key.position.set(-2,5,-4); scene.add(key);
-const rim = new THREE.DirectionalLight(0x9bbfff, 0.12); rim.position.set(3,2,3); scene.add(rim);
-scene.add(new THREE.AmbientLight(0x120d08, 0.55));
+/* ===== свет — тёплый + боковой холодный ===== */
+const key = new THREE.DirectionalLight(0xffe0b5, 0.42); key.position.set(-2.5,5,-4.5); scene.add(key);
+const rim = new THREE.DirectionalLight(0x9bbfff, 0.16); rim.position.set(3,2,3.5); scene.add(rim);
+scene.add(new THREE.AmbientLight(0x0c0906, 0.55));
 
-/* ===== «стеллажи»: объёмные панели (Box), а не плоскости ===== */
-const racks = new THREE.Group(); scene.add(racks);
-
-function woodTexture(){
+/* ===== материалы: дерево и «стекло» ===== */
+function woodTex(){
   const c=document.createElement('canvas'); c.width=1024; c.height=64; const ctx=c.getContext('2d');
-  for(let x=0; x<c.width; x++){
+  for(let x=0;x<c.width;x++){
     const hue=35+Math.random()*10, sat=25+Math.random()*20, l=14+Math.random()*10;
-    ctx.fillStyle=`hsl(${hue} ${sat}% ${l}%)`;
-    ctx.fillRect(x,0,1,c.height);
+    ctx.fillStyle=`hsl(${hue} ${sat}% ${l}%)`; ctx.fillRect(x,0,1,c.height);
   }
-  const t=new THREE.CanvasTexture(c); t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(8,1); t.colorSpace=THREE.SRGBColorSpace;
-  return t;
+  const t=new THREE.CanvasTexture(c); t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(8,1); t.colorSpace=THREE.SRGBColorSpace; return t;
 }
-const wood = woodTexture();
+const wood = woodTex();
+const matWood = new THREE.MeshStandardMaterial({map:wood, roughness:0.95, metalness:0.05, color:0xffffff});
+const matGlass= new THREE.MeshPhysicalMaterial({color:0xffffff, metalness:0, roughness:0.08, transmission:0.85, thickness:0.04, transparent:true});
 
-function addRackLayers(axis='x', layers=8, spacing=1.0, size={w:12,h:3.2, d:0.08}, innerGap=1.2){
-  // слои идут дальше центрального пустого объёма
-  // внутренний «пустой куб» ~2.4м: +-innerGap от центра
-  const halfOffset = innerGap + spacing * 0.5;
-  for(let i=0;i<layers;i++){
-    const sign = (i%2===0) ? 1 : -1;
-    const step = halfOffset + Math.floor(i/2)*spacing;
-    const geo = new THREE.BoxGeometry(size.w, size.h, size.d);
-    const mat = new THREE.MeshStandardMaterial({map:wood, roughness:0.95, metalness:0.05, color:0xffffff});
-    const m = new THREE.Mesh(geo, mat);
-    if(axis==='x'){ m.rotation.y = Math.PI/2; m.position.set(sign*step, 1.6, 0); }
-    if(axis==='y'){ m.rotation.x = Math.PI/2; m.position.set(0, 1.6+sign*step, 0); }
-    if(axis==='z'){ m.position.set(0, 1.6, sign*step); }
-    m.castShadow = false; m.receiveShadow = false;
-    racks.add(m);
+/* ===== генератор Menger (order=1..2) — возвращает ладдер-брусья ===== */
+function buildMenger(order=2, size=8, beam=0.12){
+  const group = new THREE.Group();
+  const boxGeo = new THREE.BoxGeometry(1,1,beam); // базовая рейка (ось Z), остальные повернём
+  const inst = [];
+  function addBeam(x,y,z, sx,sy,sz, axis){
+    const m = new THREE.Mesh(boxGeo, (Math.random()<0.3? matGlass : matWood).clone());
+    m.scale.set(sx, sy, 1);
+    if(axis==='x'){ m.rotation.y = Math.PI/2; }
+    if(axis==='y'){ m.rotation.x = Math.PI/2; }
+    m.position.set(x,y,z);
+    inst.push(m);
   }
+  // на каждом уровне оставляем крест из трёх осей, убираем центр и центры граней
+  function recurse(cx,cy,cz, s, lvl){
+    if(lvl===order) return;
+    const step = s/3;
+    // рёбра по осям через центр блока
+    const len = s; const thick = beam * (1 + 0.15*lvl);
+    addBeam(cx,cy,cz, len, thick, thick,'x');
+    addBeam(cx,cy,cz, thick, len, thick,'y');
+    addBeam(cx,cy,cz, thick, thick, len,'z');
+    // рекурсивно распределяем по 3×3×3, пропуская центр и центры граней
+    for(let ix=-1; ix<=1; ix++) for(let iy=-1; iy<=1; iy++) for(let iz=-1; iz<=1; iz++){
+      const sum = Math.abs(ix)+Math.abs(iy)+Math.abs(iz);
+      if(sum===0 || sum===1) continue; // центр и центры граней — пропуск
+      recurse(cx+ix*step, cy+iy*step, cz+iz*step, step, lvl+1);
+    }
+  }
+  recurse(0,1.6,0, size, 0);
+  inst.forEach(m=>group.add(m));
+  return group;
 }
-addRackLayers('x', 10, 0.9, {w:14,h:3.6,d:0.08}, 1.2);
-addRackLayers('y', 10, 0.9, {w:14,h:3.6,d:0.08}, 1.2);
-addRackLayers('z', 10, 0.9, {w:14,h:3.6,d:0.08}, 1.2);
+const sponge = buildMenger(2, /*size*/6.5, /*beam*/0.10);
+scene.add(sponge);
 
-// лёгкое дыхание сцены (без стробов)
-racks.userData.update=(dt,t)=>{
-  const a=0.18;
-  racks.position.z = Math.sin(t*0.08)*0.35;
-  racks.position.x = Math.sin(t*0.06+1.3)*0.25;
-  racks.rotation.y = Math.sin(t*0.03)*0.02;
+// «дыхание» сцены
+sponge.userData.update = (dt,t)=>{
+  sponge.rotation.y = Math.sin(t*0.04)*0.06;
+  sponge.position.x = Math.sin(t*0.06+1.2)*0.18;
+  sponge.position.z = Math.sin(t*0.08)*0.22;
 };
 
-/* ===== фото: 1..15, поверх, маленькие ===== */
-const photos = new THREE.Group(); racks.add(photos);
-const photoTex = [];
-for(let i=1;i<=15;i++){
-  const url=`./assets/textures/photos/${i}.jpg`;
-  texLoader.load(url, t=>{ t.colorSpace=THREE.SRGBColorSpace; photoTex.push(t); });
-}
-
-function placePhotos(){
-  const N = Math.min(15, Math.max(3, photoTex.length));
-  const geo = new THREE.PlaneGeometry(0.26, 0.16);
-  for(let i=0;i<N;i++){
-    const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-      map: photoTex[i%photoTex.length],
-      transparent:true, opacity:0, depthTest:false, depthWrite:false
-    }));
-    m.renderOrder = 10; // поверх
-    const side = (Math.random()*3)|0; const s = 2.1; // внутри пустого ядра
-    if(side===0){ m.position.set(Math.random()<.5?-s:s, 1.0+Math.random()*1.6, (Math.random()-0.5)*1.8); m.rotation.y=(Math.random()<.5? Math.PI/2 : -Math.PI/2); }
-    else if(side===1){ m.position.set((Math.random()-0.5)*1.8, Math.random()<.5?(1.6-0.9):(1.6+0.9), (Math.random()-0.5)*1.8); m.rotation.x=(Math.random()<.5? Math.PI/2 : -Math.PI/2); }
-    else { m.position.set((Math.random()-0.5)*1.8, 1.0+Math.random()*1.6, Math.random()<.5?-s:s); m.rotation.y=(Math.random()<.5? 0 : Math.PI); }
-    m.userData.t0=Math.random()*6; m.userData.flashT=-1000;
-    photos.add(m);
-  }
-}
-manager.onLoad = ()=>{ loading.style.display='none'; menu.style.display='flex'; placePhotos(); };
-
-/* ===== музыка и «стук» ===== */
+/* ===== звук (музыка + мягкий «стук») ===== */
 let audioCtx=null, musicNode=null, musicGain=null, musicStarted=false, musicMuted=false;
 async function ensureMusic(){
   try{
@@ -157,26 +141,14 @@ async function ensureMusic(){
 function setMuted(m){ musicMuted=m; if(musicGain){ const t=audioCtx.currentTime; musicGain.gain.cancelScheduledValues(t); musicGain.gain.exponentialRampToValueAtTime(m?0.0001:0.10, t+0.25);} updateMuteUI(); }
 function toggleMute(){ setMuted(!musicMuted); }
 function updateMuteUI(){ document.getElementById('mute').textContent = musicMuted ? '🔇 Без звука' : '🔊 Музыка'; }
-
-function thump(){ // мягкий «стук»
-  if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+function thump(){ if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
   const t=audioCtx.currentTime,o=audioCtx.createOscillator(),g=audioCtx.createGain();
   o.type='sine'; o.frequency.setValueAtTime(95,t);
   g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.22,t+0.02); g.gain.exponentialRampToValueAtTime(0.0001,t+0.5);
   o.connect(g).connect(audioCtx.destination); o.start(t); o.stop(t+0.52);
 }
 function cameraShake(){let t0=performance.now();(function tick(){const dt=(performance.now()-t0)/1000,k=Math.max(0,0.35-dt);camera.position.x=0.006*Math.sin(dt*40)*k;camera.position.y=1.6+0.004*Math.sin(dt*55)*k;if(k>0)requestAnimationFrame(tick);else{camera.position.x=0;camera.position.y=1.6;}})();}
-function flashRandomPhoto(){ if(!photos.children.length) return; const m=photos.children[(Math.random()*photos.children.length)|0]; m.userData.flashT=performance.now()*0.001; }
-function triggerWave(){ ensureMusic(); thump(); cameraShake(); flashRandomPhoto(); }
-
-/* ===== взгляд-триггер ===== */
-let gazeStart=0,gazing=false;
-function checkGazeTrigger(){
-  const f=new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
-  const toCenter=new THREE.Vector3(0,1.6,0).sub(camera.position).normalize();
-  const angle=THREE.MathUtils.radToDeg(Math.acos(THREE.MathUtils.clamp(f.dot(toCenter),-1,1)));
-  const ok=angle<8; if(ok){ if(!gazing){gazing=true;gazeStart=performance.now();} else if(performance.now()-gazeStart>1200){gazing=false; triggerWave();} } else {gazing=false;}
-}
+function triggerWave(){ ensureMusic(); thump(); cameraShake(); }
 
 /* ===== XR/меню ===== */
 const loading=document.getElementById('loading');
@@ -185,7 +157,7 @@ renderer.xr.addEventListener('sessionstart', ()=>{
   controls.enabled=false;
   screen.show();
   xrFadePending = true;
-  xrFrameCount = 0;   // ждём побольше — 4 кадра
+  xrFrameCount = 0;
   ensureMusic();
 });
 document.getElementById('btnVR').onclick   = async ()=>{ menu.style.display='none'; screen.show(); await startXR(); };
@@ -199,19 +171,7 @@ renderer.setAnimationLoop(()=>{
     if (xrFrameCount >= 4) { screen.fade(700); xrFadePending = false; }
   }
   const t=performance.now()*0.001;
-  if (racks.userData.update) racks.userData.update(1/60,t);
-
-  // фото: мягкие циклы + короткая вспышка
-  photos.children.forEach(m=>{
-    const tt=(t + (m.userData.t0||0)) % 10.0;
-    const fadeIn = THREE.MathUtils.clamp((tt-1.0)/1.2,0,1);
-    const fadeOut= THREE.MathUtils.clamp((tt-6.8)/1.2,0,1);
-    let op=fadeIn*(1-fadeOut)*0.75;
-    if(t-(m.userData.flashT||-1000)<0.8){ const k=1-(t-m.userData.flashT)/0.8; op=Math.max(op,0.35+0.55*k); m.scale.setScalar(1.0+0.05*k);} else m.scale.setScalar(1.0);
-    m.material.opacity=op;
-  });
-
-  checkGazeTrigger();
+  if (sponge.userData.update) sponge.userData.update(1/60,t);
   if(controls.enabled) controls.update();
   renderer.render(scene,camera);
 });
