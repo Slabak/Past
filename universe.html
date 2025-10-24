@@ -3,14 +3,12 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Тессеракт — Menger sponge (v2)</title>
+<title>Тессеракт — крестовые пролёты + белые линии</title>
 <script src="./assets/js/three.min.js"></script>
 <script src="./assets/js/OrbitControls.js"></script>
 <style>
   html,body{margin:0;height:100%;background:#000;color:#fff;font-family:system-ui,Segoe UI,Roboto,Arial}
-  .loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#000;z-index:30;flex-direction:column;gap:10px}
-  .bar{width:240px;height:6px;background:#222;border-radius:6px;overflow:hidden}
-  .bar>i{display:block;height:100%;width:100%;background:#14b8a6} /* просто фейк-бар */
+  .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#000;z-index:30;flex-direction:column;gap:10px}
   .menu{position:fixed;inset:0;background:rgba(0,0,0,.88);display:none;align-items:center;justify-content:center;flex-direction:column;gap:12px;z-index:20}
   .btn{appearance:none;border:0;padding:12px 16px;border-radius:12px;font-weight:600;cursor:pointer;font-size:15px;background:#14b8a6;color:#00100e;box-shadow:0 4px 20px rgba(0,0,0,.35)}
   .btn.secondary{background:#1f2937;color:#cbd5e1}
@@ -19,21 +17,22 @@
 </style>
 </head>
 <body>
-  <div id="loading" class="loading">
+  <div id="loading" class="overlay">
     <div>Собираю тессеракт…</div>
-    <div class="bar"><i></i></div>
   </div>
-
   <div id="menu" class="menu">
     <button id="btnVR" class="btn">Войти в VR</button>
     <button id="btnSpectate" class="btn secondary">Режим наблюдателя</button>
   </div>
-
-  <div class="hud">Клик/тап/пробел — «стук». Камера в центре пустоты, вокруг крестовые пролёты.</div>
+  <div class="hud">Клик/тап/пробел — лёгкий «стук». Камера в чистом центре; вокруг — крестовые пролёты.</div>
   <button id="mute" class="mute">🔊 Музыка</button>
 
 <script>
-/* ===== renderer/camera/scene ===== */
+/*** быстрые настройки ***/
+const ENABLE_STREAKS = true;   // белые линии как в ранней версии
+const MUSIC_PATH     = './assets/music/universe.mp3';
+
+/*** базовая сцена ***/
 const renderer = new THREE.WebGLRenderer({antialias:true, powerPreference:'high-performance'});
 const isMobile = /Android|iPhone|iPad|iPod|Quest|Oculus/i.test(navigator.userAgent);
 renderer.setPixelRatio(isMobile ? 1 : Math.min(window.devicePixelRatio,2));
@@ -41,31 +40,30 @@ renderer.setSize(innerWidth, innerHeight);
 renderer.xr.enabled = true;
 if ('outputColorSpace' in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace; else renderer.outputEncoding = THREE.sRGBEncoding;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.35;
+renderer.toneMappingExposure = 1.42;
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x000000);
-const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.01, 500);
+const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.01, 600);
 camera.position.set(0,1.6,0.01);
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
 controls.enabled = false; controls.target.set(0,1.6,0);
 
-/* ===== fade + XR fix ===== */
+/*** шторка/фикс чёрного экрана в VR ***/
 function makeFade(){const g=new THREE.PlaneGeometry(2,2),m=new THREE.MeshBasicMaterial({color:0x000,transparent:true,opacity:1,depthTest:false});const q=new THREE.Mesh(g,m);q.renderOrder=9999;q.position.z=-0.3;camera.add(q);scene.add(camera);return{show:()=>m.opacity=1,fade:(ms=700)=>{const t0=performance.now();(function f(t){const k=Math.min(1,(t-t0)/ms);m.opacity=1-k;if(k<1)requestAnimationFrame(f)})(t0)}}}
 const screen = makeFade();
-let xrFadePending=false, xrFrameCount=0;
+let xrFadePending=false, xrFrames=0;
 
-/* ===== свет ===== */
-const key = new THREE.DirectionalLight(0xffe0b5, 0.42); key.position.set(-2.5,5,-4.5); scene.add(key);
-const rim = new THREE.DirectionalLight(0x9bbfff, 0.16); rim.position.set(3,2,3.5); scene.add(rim);
-scene.add(new THREE.AmbientLight(0x0c0906, 0.55));
+/*** свет — тёплый + чуть холодного обвода ***/
+const key = new THREE.DirectionalLight(0xffe0b5, 0.5); key.position.set(-2.5,5,-4.5); scene.add(key);
+const rim = new THREE.DirectionalLight(0x9bbfff, 0.15); rim.position.set(3,2,3.5); scene.add(rim);
+scene.add(new THREE.AmbientLight(0x0c0906, 0.6));
 
-/* ===== материалы ===== */
+/*** материалы ***/
 function woodTex(){
   const c=document.createElement('canvas'); c.width=1024; c.height=64; const ctx=c.getContext('2d');
-  for(let x=0;x<c.width;x++){
-    const hue=35+Math.random()*10, sat=25+Math.random()*20, l=14+Math.random()*10;
+  for(let x=0;x<c.width;x++){ const hue=35+Math.random()*10, sat=25+Math.random()*20, l=14+Math.random()*10;
     ctx.fillStyle=`hsl(${hue} ${sat}% ${l}%)`; ctx.fillRect(x,0,1,c.height);
   }
   const t=new THREE.CanvasTexture(c);
@@ -74,62 +72,84 @@ function woodTex(){
   return t;
 }
 const wood = woodTex();
-const matWood = new THREE.MeshStandardMaterial({map:wood, roughness:0.95, metalness:0.05, color:0xffffff});
-const matGlass= new THREE.MeshStandardMaterial({color:0xffffff, metalness:0.05, roughness:0.08, transparent:true, opacity:0.35, envMapIntensity:0.6});
+const matWood  = new THREE.MeshStandardMaterial({map:wood, roughness:0.95, metalness:0.05, color:0xffffff});
+const matGlass = new THREE.MeshStandardMaterial({color:0xffffff, metalness:0.05, roughness:0.08, transparent:true, opacity:0.35, envMapIntensity:0.6});
 
-/* ===== генератор Menger ===== */
-function buildMenger(order=2, size=6.5, beam=0.10){
-  const group = new THREE.Group();
-  const boxGeo = new THREE.BoxGeometry(1,1,beam);
-  function addBeam(x,y,z, sx,sy,sz, axis){
-    const useGlass = Math.random()<0.3;
-    const m = new THREE.Mesh(boxGeo, (useGlass? matGlass : matWood).clone());
-    m.scale.set(sx, sy, 1);
-    if(axis==='x') m.rotation.y = Math.PI/2;
-    if(axis==='y') m.rotation.x = Math.PI/2;
-    m.position.set(x,y,z);
-    group.add(m);
+/*** крестовая решётка с пустым ядром (как в кадре) ***/
+function buildCrossLattice({
+  innerGap = 1.7, layers = 12, spacing = 0.85,
+  len = 16, height = 4.0, beam = 0.10, glassRatio = 0.40
+}={}){
+  const g = new THREE.Group();
+  const geoX = new THREE.BoxGeometry(len, beam, beam);
+  const geoY = new THREE.BoxGeometry(beam, height, beam);
+  const geoZ = new THREE.BoxGeometry(beam, beam, len);
+  const add=(mesh,x,y,z)=>{mesh.position.set(x,y,z); g.add(mesh);};
+
+  for(let i=0;i<layers;i++){
+    const d = innerGap + i*spacing;
+    // X вдоль X — размещаем по Y/Z
+    for(const sZ of [-1,1]) add(new THREE.Mesh(geoX,(Math.random()<glassRatio?matGlass:matWood).clone()), 0, 1.6, sZ*d);
+    for(const sY of [-1,1]) add(new THREE.Mesh(geoX,(Math.random()<glassRatio?matGlass:matWood).clone()), 0, 1.6+sY*d, 0);
+    // Y вдоль Y — по X/Z
+    for(const sZ of [-1,1]) add(new THREE.Mesh(geoY,(Math.random()<glassRatio?matGlass:matWood).clone()), 0, 1.6, sZ*d);
+    for(const sX of [-1,1]) add(new THREE.Mesh(geoY,(Math.random()<glassRatio?matGlass:matWood).clone()), sX*d, 1.6, 0);
+    // Z вдоль Z — по X/Y
+    for(const sX of [-1,1]) add(new THREE.Mesh(geoZ,(Math.random()<glassRatio?matGlass:matWood).clone()), sX*d, 1.6, 0);
+    for(const sY of [-1,1]) add(new THREE.Mesh(geoZ,(Math.random()<glassRatio?matGlass:matWood).clone()), 0, 1.6+sY*d, 0);
   }
-  function recurse(cx,cy,cz, s, lvl){
-    if(lvl===order) return;
-    const step = s/3;
-    const len = s; const thick = beam * (1 + 0.15*lvl);
-    addBeam(cx,cy,cz, len, thick, thick,'x');
-    addBeam(cx,cy,cz, thick, len, thick,'y');
-    addBeam(cx,cy,cz, thick, thick, len,'z');
-    for(let ix=-1; ix<=1; ix++) for(let iy=-1; iy<=1; iy++) for(let iz=-1; iz<=1; iz++){
-      const sum = Math.abs(ix)+Math.abs(iy)+Math.abs(iz);
-      if(sum===0 || sum===1) continue;
-      recurse(cx+ix*step, cy+iy*step, cz+iz*step, step, lvl+1);
-    }
-  }
-  recurse(0,1.6,0, size, 0);
-  return group;
+
+  g.userData.update=(dt,t)=>{
+    g.rotation.y = Math.sin(t*0.035)*0.05;
+    g.position.x = Math.sin(t*0.05+1.2)*0.18;
+    g.position.z = Math.sin(t*0.065)*0.22;
+  };
+  return g;
 }
-const sponge = buildMenger(2, 6.5, 0.10);
-scene.add(sponge);
-sponge.userData.update = (dt,t)=>{
-  sponge.rotation.y = Math.sin(t*0.04)*0.06;
-  sponge.position.x = Math.sin(t*0.06+1.2)*0.18;
-  sponge.position.z = Math.sin(t*0.08)*0.22;
-};
+const lattice = buildCrossLattice();
+scene.add(lattice);
 
-/* ===== звук ===== */
+/*** белые «линии-всполохи» (аддитив, мягкое движение) ***/
+let streaks=null;
+if (ENABLE_STREAKS){
+  streaks = new THREE.Group(); scene.add(streaks);
+  const lineGeo = new THREE.BoxGeometry(8,0.02,0.02);
+  const mat = new THREE.MeshBasicMaterial({color:0xffffff, transparent:true, opacity:0.55, blending:THREE.AdditiveBlending, depthWrite:false});
+  for(let i=0;i<600;i++){
+    const m = new THREE.Mesh(lineGeo, mat.clone());
+    const axis = (Math.random()*3)|0;
+    if(axis===1) m.scale.y = 1+Math.random()*2;
+    if(axis===2) m.scale.z = 1+Math.random()*2;
+    m.material.opacity = 0.25 + Math.random()*0.35;
+    m.position.set((Math.random()-0.5)*10, 0.8+Math.random()*2.2, (Math.random()-0.5)*10);
+    streaks.add(m);
+  }
+  streaks.userData.update=(dt,t)=>{
+    const s = streaks.children;
+    for(let i=0;i<s.length;i++){
+      const k = 0.22 + 0.08*Math.sin(t*0.6 + i*0.13);
+      s[i].material.opacity = 0.18 + 0.42*Math.abs(Math.sin(t*0.9 + i*0.17));
+      s[i].position.z += k*dt; if(s[i].position.z>5.5) s[i].position.z=-5.5;
+    }
+  };
+}
+
+/*** музыка + «стук» ***/
 let audioCtx=null, musicNode=null, musicGain=null, musicStarted=false, musicMuted=false;
 async function ensureMusic(){
   try{
     if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
     if(musicStarted) return;
-    const resp=await fetch('./assets/music/universe.mp3'); const buf=await resp.arrayBuffer();
+    const resp=await fetch(MUSIC_PATH); const buf=await resp.arrayBuffer();
     const audioBuf=await audioCtx.decodeAudioData(buf);
     musicGain=audioCtx.createGain(); musicGain.gain.value=0.0001;
     musicNode=audioCtx.createBufferSource(); musicNode.buffer=audioBuf; musicNode.loop=true;
     musicNode.connect(musicGain).connect(audioCtx.destination); musicNode.start();
     const t=audioCtx.currentTime; musicGain.gain.exponentialRampToValueAtTime(0.10, t+2.0);
     musicStarted=true; updateMuteUI();
-  }catch(e){ console.warn('Музыку не удалось запустить:', e); }
+  }catch(e){ console.warn('Музыка не стартанула:',e); }
 }
-function setMuted(m){ musicMuted=m; if(musicGain){ const t=audioCtx.currentTime; musicGain.gain.cancelScheduledValues(t); musicGain.gain.exponentialRampToValueAtTime(m?0.0001:0.10, t+0.25);} updateMuteUI(); }
+function setMuted(m){ musicMuted=m; if(musicGain){ const t=audioCtx.currentTime; musicGain.gain.cancelScheduledValues(t); musicGain.gain.exponentialRampToValueAtTime(m?0.0001:0.10, t+0.25);} updateMuteUI();}
 function toggleMute(){ setMuted(!musicMuted); }
 function updateMuteUI(){ document.getElementById('mute').textContent = musicMuted ? '🔇 Без звука' : '🔊 Музыка'; }
 function thump(){ if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
@@ -141,44 +161,40 @@ function thump(){ if(!audioCtx) audioCtx=new (window.AudioContext||window.webkit
 function cameraShake(){let t0=performance.now();(function tick(){const dt=(performance.now()-t0)/1000,k=Math.max(0,0.35-dt);camera.position.x=0.006*Math.sin(dt*40)*k;camera.position.y=1.6+0.004*Math.sin(dt*55)*k;if(k>0)requestAnimationFrame(tick);else{camera.position.x=0;camera.position.y=1.6;}})();}
 function triggerWave(){ ensureMusic(); thump(); cameraShake(); }
 
-/* ===== XR/меню ===== */
+/*** меню/VR ***/
 const loading=document.getElementById('loading');
 const menu=document.getElementById('menu');
-
-// важное: показываем меню сразу после первого кадра
 requestAnimationFrame(()=>{ loading.style.display='none'; menu.style.display='flex'; });
 
 renderer.xr.addEventListener('sessionstart', ()=>{
-  controls.enabled=false;
-  screen.show();
-  xrFadePending = true;
-  xrFrameCount = 0;
-  ensureMusic();
+  controls.enabled=false; screen.show(); xrFadePending=true; xrFrames=0; ensureMusic();
 });
-document.getElementById('btnVR').onclick   = async ()=>{ menu.style.display='none'; screen.show(); await startXR(); };
+document.getElementById('btnVR').onclick = async ()=>{ menu.style.display='none'; screen.show(); await startXR(); };
 document.getElementById('btnSpectate').onclick = ()=>{ menu.style.display='none'; controls.enabled=true; screen.show(); ensureMusic(); setTimeout(()=>screen.fade(700),150); };
 document.getElementById('mute').onclick = ()=>{ ensureMusic().then(()=>toggleMute()); };
 
-/* ===== main loop (XR-fade на 4 кадра) ===== */
+/*** цикл ***/
+let last=performance.now()*0.001;
 renderer.setAnimationLoop(()=>{
-  if (renderer.xr.isPresenting && xrFadePending) {
-    xrFrameCount++;
-    if (xrFrameCount >= 4) { screen.fade(700); xrFadePending = false; }
-  }
-  const t=performance.now()*0.001;
-  if (sponge.userData.update) sponge.userData.update(1/60,t);
+  const now=performance.now()*0.001, dt=Math.min(0.033, now-last); last=now;
+
+  if (renderer.xr.isPresenting && xrFadePending){ xrFrames++; if(xrFrames>=4){ screen.fade(700); xrFadePending=false; } }
+
+  if(lattice.userData.update) lattice.userData.update(dt, now);
+  if(streaks && streaks.userData.update) streaks.userData.update(dt, now);
+
   if(controls.enabled) controls.update();
   renderer.render(scene,camera);
 });
 
-/* ===== XR ===== */
+/*** XR ***/
 async function startXR(){
   if(!navigator.xr){ alert('WebXR не поддерживается. Открой в Quest Browser.'); return; }
   try{ const s=await navigator.xr.requestSession('immersive-vr',{optionalFeatures:['local-floor','bounded-floor']}); await renderer.xr.setSession(s); }
   catch(e){ console.error(e); alert('Не удалось запустить VR-сессию.'); }
 }
 
-/* ===== input / resize ===== */
+/*** input/resize ***/
 addEventListener('click', ()=>{ ensureMusic(); triggerWave(); });
 addEventListener('touchstart', ()=>{ ensureMusic(); triggerWave(); }, {passive:true});
 addEventListener('keydown', e=>{ if(e.code==='Space'||e.code==='Enter'){ ensureMusic(); triggerWave(); } });
