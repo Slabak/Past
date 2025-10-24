@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Тессеракт — Menger sponge (совместимый)</title>
+<title>Тессеракт — Menger sponge (v2)</title>
 <script src="./assets/js/three.min.js"></script>
 <script src="./assets/js/OrbitControls.js"></script>
 <style>
   html,body{margin:0;height:100%;background:#000;color:#fff;font-family:system-ui,Segoe UI,Roboto,Arial}
   .loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#000;z-index:30;flex-direction:column;gap:10px}
   .bar{width:240px;height:6px;background:#222;border-radius:6px;overflow:hidden}
-  .bar>i{display:block;height:100%;width:0;background:#14b8a6}
+  .bar>i{display:block;height:100%;width:100%;background:#14b8a6} /* просто фейк-бар */
   .menu{position:fixed;inset:0;background:rgba(0,0,0,.88);display:none;align-items:center;justify-content:center;flex-direction:column;gap:12px;z-index:20}
   .btn{appearance:none;border:0;padding:12px 16px;border-radius:12px;font-weight:600;cursor:pointer;font-size:15px;background:#14b8a6;color:#00100e;box-shadow:0 4px 20px rgba(0,0,0,.35)}
   .btn.secondary{background:#1f2937;color:#cbd5e1}
@@ -21,7 +21,7 @@
 <body>
   <div id="loading" class="loading">
     <div>Собираю тессеракт…</div>
-    <div class="bar"><i id="bar"></i></div>
+    <div class="bar"><i></i></div>
   </div>
 
   <div id="menu" class="menu">
@@ -33,19 +33,12 @@
   <button id="mute" class="mute">🔊 Музыка</button>
 
 <script>
-/* ===== загрузка ===== */
-const manager = new THREE.LoadingManager();
-manager.onProgress = (_url, loaded, total)=>{ document.getElementById('bar').style.width = ((loaded/total)*100|0)+'%'; };
-manager.onLoad = ()=>{ loading.style.display='none'; menu.style.display='flex'; };
-manager.onError = ()=>{ loading.style.display='none'; menu.style.display='flex'; };
-
 /* ===== renderer/camera/scene ===== */
 const renderer = new THREE.WebGLRenderer({antialias:true, powerPreference:'high-performance'});
 const isMobile = /Android|iPhone|iPad|iPod|Quest|Oculus/i.test(navigator.userAgent);
 renderer.setPixelRatio(isMobile ? 1 : Math.min(window.devicePixelRatio,2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.xr.enabled = true;
-// совместимость с разными версиями three:
 if ('outputColorSpace' in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace; else renderer.outputEncoding = THREE.sRGBEncoding;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.35;
@@ -68,7 +61,7 @@ const key = new THREE.DirectionalLight(0xffe0b5, 0.42); key.position.set(-2.5,5,
 const rim = new THREE.DirectionalLight(0x9bbfff, 0.16); rim.position.set(3,2,3.5); scene.add(rim);
 scene.add(new THREE.AmbientLight(0x0c0906, 0.55));
 
-/* ===== материалы: дерево и «стекло» (совместимые) ===== */
+/* ===== материалы ===== */
 function woodTex(){
   const c=document.createElement('canvas'); c.width=1024; c.height=64; const ctx=c.getContext('2d');
   for(let x=0;x<c.width;x++){
@@ -77,29 +70,17 @@ function woodTex(){
   }
   const t=new THREE.CanvasTexture(c);
   t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(8,1);
-  // для старых версий не трогаем colorSpace
-  if ('colorSpace' in t) t.colorSpace = THREE.SRGBColorSpace;
-  else t.encoding = THREE.sRGBEncoding;
+  if ('colorSpace' in t) t.colorSpace = THREE.SRGBColorSpace; else t.encoding = THREE.sRGBEncoding;
   return t;
 }
 const wood = woodTex();
 const matWood = new THREE.MeshStandardMaterial({map:wood, roughness:0.95, metalness:0.05, color:0xffffff});
-
-// «стекло» без transmission/thickness (совместимо со старыми three)
-const matGlass = new THREE.MeshStandardMaterial({
-  color: 0xffffff,
-  metalness: 0.05,
-  roughness: 0.08,
-  transparent: true,
-  opacity: 0.35,      // степень «стеклянности»
-  envMapIntensity: 0.6
-});
+const matGlass= new THREE.MeshStandardMaterial({color:0xffffff, metalness:0.05, roughness:0.08, transparent:true, opacity:0.35, envMapIntensity:0.6});
 
 /* ===== генератор Menger ===== */
 function buildMenger(order=2, size=6.5, beam=0.10){
   const group = new THREE.Group();
   const boxGeo = new THREE.BoxGeometry(1,1,beam);
-  const pieces = [];
   function addBeam(x,y,z, sx,sy,sz, axis){
     const useGlass = Math.random()<0.3;
     const m = new THREE.Mesh(boxGeo, (useGlass? matGlass : matWood).clone());
@@ -107,7 +88,7 @@ function buildMenger(order=2, size=6.5, beam=0.10){
     if(axis==='x') m.rotation.y = Math.PI/2;
     if(axis==='y') m.rotation.x = Math.PI/2;
     m.position.set(x,y,z);
-    pieces.push(m);
+    group.add(m);
   }
   function recurse(cx,cy,cz, s, lvl){
     if(lvl===order) return;
@@ -123,13 +104,10 @@ function buildMenger(order=2, size=6.5, beam=0.10){
     }
   }
   recurse(0,1.6,0, size, 0);
-  pieces.forEach(m=>group.add(m));
   return group;
 }
 const sponge = buildMenger(2, 6.5, 0.10);
 scene.add(sponge);
-
-// лёгкое «дыхание»
 sponge.userData.update = (dt,t)=>{
   sponge.rotation.y = Math.sin(t*0.04)*0.06;
   sponge.position.x = Math.sin(t*0.06+1.2)*0.18;
@@ -166,6 +144,10 @@ function triggerWave(){ ensureMusic(); thump(); cameraShake(); }
 /* ===== XR/меню ===== */
 const loading=document.getElementById('loading');
 const menu=document.getElementById('menu');
+
+// важное: показываем меню сразу после первого кадра
+requestAnimationFrame(()=>{ loading.style.display='none'; menu.style.display='flex'; });
+
 renderer.xr.addEventListener('sessionstart', ()=>{
   controls.enabled=false;
   screen.show();
