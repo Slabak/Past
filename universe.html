@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Комната Хранителя — ВРЕМЯ (fix)</title>
+<title>Тессеракт — хранитель времени</title>
 
 <!-- локальные three -->
 <script src="./assets/js/three.min.js"></script>
@@ -11,244 +11,229 @@
 
 <style>
   html,body{margin:0;height:100%;background:#000;color:#fff;font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif}
-  .loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#000;z-index:30}
+  .loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#000;z-index:30;flex-direction:column;gap:10px}
+  .bar{width:240px;height:6px;background:#222;border-radius:6px;overflow:hidden}
+  .bar>i{display:block;height:100%;width:0;background:#14b8a6}
   .menu{position:fixed;inset:0;background:rgba(0,0,0,.88);display:none;align-items:center;justify-content:center;flex-direction:column;gap:12px;z-index:20}
   .btn{appearance:none;border:0;padding:12px 16px;border-radius:12px;font-weight:600;cursor:pointer;font-size:15px;background:#14b8a6;color:#00100e;box-shadow:0 4px 20px rgba(0,0,0,.35)}
   .btn.secondary{background:#1f2937;color:#cbd5e1}
-  .hud{position:fixed;left:12px;bottom:12px;background:rgba(0,0,0,.5);padding:8px 10px;border-radius:10px;font-size:13px;z-index:5}
-  .note{position:fixed;right:12px;bottom:12px;background:rgba(20,184,166,.18);border:1px solid rgba(20,184,166,.45);
-        padding:8px 10px;border-radius:10px;font-size:12px;z-index:5;color:#c7fffb}
+  .hud{position:fixed;left:12px;bottom:12px;background:rgba(0,0,0,.45);padding:8px 10px;border-radius:10px;font-size:13px;z-index:5}
 </style>
 </head>
 <body>
-  <div id="loading" class="loading">Собираю пространство…</div>
+  <div id="loading" class="loading">
+    <div>Собираю «книжный тессеракт»…</div>
+    <div class="bar"><i id="bar"></i></div>
+  </div>
+
   <div id="menu" class="menu">
     <button id="btnVR" class="btn">Войти в VR</button>
     <button id="btnSpectate" class="btn secondary">Режим наблюдателя</button>
   </div>
-  <div class="hud">Синхронизируй три артефакта. Смотри на каждый, пока индикатор не станет зелёным (≈1.00×).</div>
-  <div class="note">Держи взгляд 2–3 сек. Если «уплывают» — вернись, дожми.</div>
+
+  <div class="hud">Смотри вокруг. В «швах» мигают ваши кадры: прошлое → настоящее. Лёгкое движение — это «поток времени».</div>
 
 <script>
-// ---------- базовая установка ----------
-const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
+/* ================== загрузчик ================== */
+const manager = new THREE.LoadingManager();
+manager.onProgress = (_url, loaded, total)=>{ document.getElementById('bar').style.width = ((loaded/total)*100|0)+'%'; };
+manager.onLoad = ()=>{ document.getElementById('loading').style.display='none'; document.getElementById('menu').style.display='flex'; };
+manager.onError = ()=>{ document.getElementById('loading').style.display='none'; document.getElementById('menu').style.display='flex'; };
+
+const texLoader = new THREE.TextureLoader(manager);
+
+/* ================== renderer/camera/scene ================== */
+const renderer = new THREE.WebGLRenderer({antialias:true, powerPreference:'high-performance'});
 const isMobile = /Android|iPhone|iPad|iPod|Quest|Oculus/i.test(navigator.userAgent);
-renderer.setPixelRatio(isMobile ? 1 : Math.min(window.devicePixelRatio, 2));
-renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(isMobile ? 1 : Math.min(window.devicePixelRatio,2));
+renderer.setSize(innerWidth, innerHeight);
 renderer.xr.enabled = true;
 if ('outputColorSpace' in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace; else renderer.outputEncoding = THREE.sRGBEncoding;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.0;
+renderer.toneMappingExposure = 1.05;
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 500);
+scene.background = new THREE.Color(0x000000);
+const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.01, 200);
 camera.position.set(0,1.6,0.01);
+
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
-controls.enabled=false; controls.target.set(0,1.6,0);
+controls.enabled = false; controls.target.set(0,1.6,0);
 
-// невидимый пол — комфорт
-const floor = new THREE.Mesh(new THREE.PlaneGeometry(40,40), new THREE.MeshBasicMaterial({visible:false}));
-floor.rotation.x = -Math.PI/2; floor.position.y = 0; scene.add(floor);
-
-// чёрная «шторка» (фейд)
-function makeFade(){const g=new THREE.PlaneGeometry(2,2),m=new THREE.MeshBasicMaterial({color:0x000,transparent:true,opacity:1,depthTest:false});const q=new THREE.Mesh(g,m);q.renderOrder=9999;q.position.z=-0.3;camera.add(q);scene.add(camera);return{show:()=>m.opacity=1,fade:(ms=700)=>{const t0=performance.now();(function f(t){const k=Math.min(1,(t-t0)/ms);m.opacity=1-k;if(k<1)requestAnimationFrame(f)})(t0)} }}
+/* ================== fade overlay (устойчиво для XR) ================== */
+function makeFade(){
+  const g=new THREE.PlaneGeometry(2,2);
+  const m=new THREE.MeshBasicMaterial({color:0x000,transparent:true,opacity:1,depthTest:false});
+  const q=new THREE.Mesh(g,m); q.renderOrder=9999; q.position.z=-0.3;
+  camera.add(q); scene.add(camera);
+  return { show:()=>m.opacity=1, fade:(ms=700)=>{const t0=performance.now();(function f(t){const k=Math.min(1,(t-t0)/ms);m.opacity=1-k;if(k<1)requestAnimationFrame(f)})(t0)} };
+}
 const screen = makeFade();
 
-// вспомогалка: дождаться N XR-кадров, чтобы точно прорисовалось
-function waitXRFrames(n=2){return new Promise(res=>{let left=n; const loop=()=>{left--; if(left<=0) res(); else renderer.setAnimationLoop(()=>{left--; if(left<=0){renderer.setAnimationLoop(mainLoop); res();}})}; if(renderer.xr.isPresenting) loop(); else res();});}
+function waitXRFrames(n=3){return new Promise(res=>{let left=n; function tick(){left--; if(left<=0) res(); else requestAnimationFrame(tick);} requestAnimationFrame(tick);});}
 
-// ---------- процедурный космос ----------
-const sky = (()=> {
-  const geom = new THREE.SphereGeometry(80, 64, 64);
-  const mat = new THREE.ShaderMaterial({
-    side: THREE.BackSide,
-    uniforms: { uTime:{value:0}, uWarp:{value:0.28}, uStars:{value:0.85}, uNebula:{value:1.15},
-      uTintA:{value:new THREE.Color(0x08152f)}, uTintB:{value:new THREE.Color(0x7ad5ff)}, uExposure:{value:1.0} },
-    vertexShader: `varying vec3 vDir; void main(){ vDir=normalize(position); gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
-    fragmentShader: `
-      precision highp float; varying vec3 vDir;
-      uniform float uTime,uWarp,uStars,uNebula,uExposure; uniform vec3 uTintA,uTintB;
-      float h(vec3 p){ p=fract(p*0.3183099+vec3(0.1,0.2,0.3)); p*=17.0; return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }
-      float n3(vec3 p){ vec3 i=floor(p),f=fract(p); vec3 u=f*f*(3.0-2.0*f);
-        float n000=h(i+vec3(0,0,0)),n100=h(i+vec3(1,0,0)),n010=h(i+vec3(0,1,0)),n110=h(i+vec3(1,1,0));
-        float n001=h(i+vec3(0,0,1)),n101=h(i+vec3(1,0,1)),n011=h(i+vec3(0,1,1)),n111=h(i+vec3(1,1,1));
-        return mix(mix(mix(n000,n100,u.x),mix(n010,n110,u.x),u.y),mix(mix(n001,n101,u.x),mix(n011,n111,u.x),u.y),u.z);
-      }
-      float fbm(vec3 p){ float s=0.,a=.55; for(int i=0;i<5;i++){ s+=a*n3(p); p=p*2.0+1.37; a*=.55; } return s; }
-      float stars(vec3 d){ vec3 p=d*50.0; float s=0.; s+=step(.997,n3(p*.95))*.8; s+=step(.9992,n3(p*1.75))*1.6; s+=step(.99975,n3(p*3.1))*2.6; return s; }
-      vec3 tone(vec3 c){ return pow(c, vec3(1.0/2.2)); }
-      void main(){
-        vec3 d = normalize(vDir);
-        vec3 axis = normalize(vec3(0.0,0.11,-1.0));
-        float cosA = dot(d,axis);
-        float k = pow(max(0.,1.-abs(cosA)),1.2);
-        vec3 bend = normalize(mix(d,axis,0.28*k));
-        d = mix(d,bend,0.6);
-        float t=uTime*.03;
-        float neb=pow(fbm(d*1.7+vec3(t,-t*.5,t*.7)),1.6);
-        vec3 colNeb = mix(uTintA,uTintB,neb); colNeb *= (0.25 + 1.35*neb) * uNebula;
-        float s = stars(d); float bloom = smoothstep(.8,2.6,s);
-        vec3 colStars = vec3(1.)*(0.35*s + 1.2*bloom)*uStars;
-        float v = 1.0 - pow(abs(d.y),3.0)*0.25;
-        vec3 col = (colNeb + colStars) * v * uExposure;
-        gl_FragColor = vec4(tone(col),1.0);
-      }`
-  });
-  const mesh = new THREE.Mesh(geom, mat);
-  mesh.userData.update = (dt,t)=>{ mat.uniforms.uTime.value = t; };
-  scene.add(mesh);
-  return mesh;
-})();
+/* ================== атмосфера: лёгкий туман/неон ================== */
+const hemi = new THREE.HemisphereLight(0x88aaff, 0x000010, 0.15); scene.add(hemi);
+const dir = new THREE.DirectionalLight(0xffffff, 0.18); dir.position.set(3,6,-2); scene.add(dir);
 
-scene.add(new THREE.HemisphereLight(0x88aaff, 0x000008, 0.08));
+/* ================== решётка (инстансы) ================== */
+const lattice = new THREE.Group(); scene.add(lattice);
 
-// ---------- gaze ----------
-function isGazingAt(worldPos, maxAngleDeg=12, maxDist=6){
-  const to = new THREE.Vector3().subVectors(worldPos, camera.position);
-  const dist = to.length(); if (dist > maxDist) return false;
-  to.normalize();
-  const forward = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
-  const angle = THREE.MathUtils.radToDeg(Math.acos(THREE.MathUtils.clamp(forward.dot(to), -1, 1)));
-  return angle < maxAngleDeg;
-}
+// материалы «дерево/медь»
+const matX = new THREE.MeshStandardMaterial({color:0x3a2c1f, roughness:0.9, metalness:0.15});
+const matY = new THREE.MeshStandardMaterial({color:0x231a12, roughness:0.95, metalness:0.12});
+const matZ = new THREE.MeshStandardMaterial({color:0x2e2218, roughness:0.92, metalness:0.18});
 
-// ---------- звук ----------
-let audioCtx=null;
-function ding(){
-  if (!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
-  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-  o.type='sine'; o.frequency.value=880; g.gain.value=0.0001;
-  o.connect(g); g.connect(audioCtx.destination);
-  o.start();
-  const t = audioCtx.currentTime;
-  g.gain.exponentialRampToValueAtTime(0.2, t+0.01);
-  g.gain.exponentialRampToValueAtTime(0.0001, t+0.6);
-  o.stop(t+0.65);
-}
+// базовые «рейки»
+const barGeo = new THREE.BoxGeometry(1, 0.04, 0.04); // X-рейка; будем масштабировать при инстансинге
 
-// ---------- индикатор ----------
-function makeGaugeCanvas(){
-  const w=256,h=128, c=document.createElement('canvas'); c.width=w; c.height=h;
-  const ctx=c.getContext('2d');
-  function draw(val, gazed=false){
-    ctx.clearRect(0,0,w,h);
-    ctx.fillStyle='rgba(0,0,0,0.45)'; ctx.fillRect(0,0,w,h);
-    ctx.strokeStyle='rgba(255,255,255,0.25)'; ctx.strokeRect(0.5,0.5,w-1,h-1);
-    const cx=20, cy=h/2, r=40; ctx.lineWidth=6;
-    ctx.strokeStyle='rgba(255,255,255,0.15)'; ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.stroke();
-    const e = THREE.MathUtils.clamp(Math.abs(val-1.0),0,0.2)/0.2;
-    const color = (e<0.15)?'#30f2b6': (e<0.5)?'#f2cf30':'#ff5b5b';
-    ctx.strokeStyle=color;
-    ctx.beginPath(); ctx.arc(cx,cy,r,-Math.PI/2, -Math.PI/2 + (val%2)*Math.PI); ctx.stroke();
-    ctx.fillStyle=color; ctx.font='700 22px system-ui,Segoe UI,Roboto,Arial'; ctx.textAlign='left';
-    ctx.fillText((val).toFixed(2)+'×', 80, cy+8);
-    ctx.fillStyle=gazed?'#c7fffb':'#98a2b3'; ctx.font='12px system-ui,Segoe UI,Roboto,Arial';
-    ctx.fillText(gazed?'держи взгляд…':'посмотри, чтобы синхронизировать', 80, cy+28);
-  }
-  return {canvas:c, draw};
-}
+function makeRods(size=6, cell=1.2){
+  // Кубическая сетка NxNxN вокруг (0,1.6,0)
+  const half = (size-1)/2;
+  const countPerAxis = size*size; // по каждой ориентации
+  const rodsX = new THREE.InstancedMesh(barGeo, matX, countPerAxis);
+  const rodsY = new THREE.InstancedMesh(barGeo, matY, countPerAxis);
+  const rodsZ = new THREE.InstancedMesh(barGeo, matZ, countPerAxis);
+  rodsX.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  rodsY.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  rodsZ.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 
-function createClock(pos, startRate){
-  const base = new THREE.Group(); base.position.copy(pos); scene.add(base);
-  const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.25,0.3,0.3,24),
-                             new THREE.MeshStandardMaterial({color:0x0d1a2b, roughness:0.9, metalness:0.1}));
-  ped.position.y = 0.15; base.add(ped);
-  const orb = new THREE.Mesh(new THREE.SphereGeometry(0.14, 24, 24),
-                             new THREE.MeshStandardMaterial({color:0x7ad5ff, emissive:0x2266aa, emissiveIntensity:0.6, roughness:0.3}));
-  orb.position.y = 0.7; base.add(orb);
-  const halo = new THREE.Mesh(new THREE.RingGeometry(0.18,0.22,48),
-                              new THREE.MeshBasicMaterial({color:0x7ad5ff, transparent:true, opacity:0.35, side:THREE.DoubleSide}));
-  halo.rotation.x = -Math.PI/2; halo.position.y = 0.45; base.add(halo);
-
-  const g = makeGaugeCanvas(); g.draw(startRate,false);
-  const tex = new THREE.CanvasTexture(g.canvas); tex.colorSpace = THREE.SRGBColorSpace;
-  const board = new THREE.Mesh(new THREE.PlaneGeometry(0.55,0.275),
-                               new THREE.MeshBasicMaterial({map:tex, transparent:true}));
-  board.position.set(0, 1.05, 0); base.add(board);
-
-  const state = {
-    rate: startRate,
-    drift: (Math.random()*0.06+0.02)*(Math.random()<.5?-1:1),
-    done: false
-  };
-  base.userData.state = state; // <-- ВЫТАЩИЛ НАРУЖУ!
-
-  base.userData.update = (dt, t)=>{
-    const gazed = isGazingAt(new THREE.Vector3().addVectors(base.position,new THREE.Vector3(0,0.8,0)));
-    if (!state.done){
-      if (gazed) state.rate += (1.0 - state.rate) * Math.min(1.0, dt*2.2);
-      else { state.rate += state.drift*dt*0.15; state.rate += (1.0 - state.rate) * dt * 0.05; }
-      state.rate = THREE.MathUtils.clamp(state.rate, 0.6, 1.4);
-      if (Math.abs(state.rate - 1.0) < 0.02){ state.done = true; ding(); }
+  const m = new THREE.Matrix4();
+  let i=0;
+  for(let y=0;y<size;y++){
+    for(let z=0;z<size;z++){
+      const wy = (y-half)*cell + 1.6; // центр по глазам
+      const wz = (z-half)*cell;
+      // X ориентация — длинная
+      m.identity().makeScale(cell,1,1).setPosition(0,wy,wz);
+      rodsX.setMatrixAt(i++, m);
     }
-    const e = Math.abs(state.rate-1.0);
-    const col = (e<0.02)?0x30f2b6: (e<0.1)?0xf2cf30:0xff5b5b;
-    halo.material.color.setHex(col);
-    halo.material.opacity = (e<0.02)?0.55:0.35;
-    g.draw(state.rate, gazed); tex.needsUpdate = true;
-  };
-  return base;
+  }
+  i=0;
+  for(let x=0;x<size;x++){
+    for(let z=0;z<size;z++){
+      const wx = (x-half)*cell;
+      const wz = (z-half)*cell;
+      // Y ориентация
+      m.identity().makeScale(1,cell,1).setPosition(wx,1.6,wz);
+      rodsY.setMatrixAt(i++, m);
+    }
+  }
+  i=0;
+  for(let x=0;x<size;x++){
+    for(let y=0;y<size;y++){
+      const wx = (x-half)*cell;
+      const wy = (y-half)*cell + 1.6;
+      // Z ориентация
+      m.identity().makeScale(1,1,cell).setPosition(wx,wy,0);
+      rodsZ.setMatrixAt(i++, m);
+    }
+  }
+
+  lattice.add(rodsX, rodsY, rodsZ);
+}
+makeRods(7, 1.05); // плотность/размер клетки: можно крутить
+
+/* ================== «поток времени» — полосы света ================== */
+const streakGeo = new THREE.PlaneGeometry(0.015, 0.9);
+const streakMat = new THREE.MeshBasicMaterial({color:0x9be8ff, transparent:true, opacity:0.22, depthWrite:false, blending:THREE.AdditiveBlending});
+const streaks = new THREE.Group(); lattice.add(streaks);
+for(let i=0;i<220;i++){
+  const s = new THREE.Mesh(streakGeo, streakMat.clone());
+  s.material.opacity = 0.12 + Math.random()*0.2;
+  s.position.set( (Math.random()-0.5)*6, 0.6+Math.random()*2.2, (Math.random()-0.5)*6 );
+  s.rotation.y = Math.random()*Math.PI;
+  streaks.add(s);
 }
 
-const clockA = createClock(new THREE.Vector3(-1.6,0,-3.0), 1.25);
-const clockB = createClock(new THREE.Vector3( 0.0,0,-3.2), 0.78);
-const clockC = createClock(new THREE.Vector3( 1.6,0,-3.0), 1.08);
+/* ================== ФОТО — «швы времени» ================== */
+const photosGroup = new THREE.Group(); lattice.add(photosGroup);
 
-const finale = (()=> {
-  const geo = new THREE.PlaneGeometry(2.8, 0.6);
-  const mat = new THREE.MeshBasicMaterial({transparent:true, opacity:0});
-  const m = new THREE.Mesh(geo, mat); m.position.set(0,1.8,-2.2);
-  const c=document.createElement('canvas'); c.width=1400; c.height=300; const ctx=c.getContext('2d');
-  ctx.font='800 180px system-ui,Segoe UI,Roboto,Arial'; ctx.textAlign='center'; ctx.textBaseline='middle';
-  ctx.shadowColor='#30f2b6'; ctx.shadowBlur=28; ctx.fillStyle='#aaffee'; ctx.fillText('ВРЕМЯ', c.width/2, c.height/2);
-  const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; m.material.map=t; m.material.needsUpdate=true;
-  m.userData.reveal = ()=>{ let o=0; const id=setInterval(()=>{o+=0.05; m.material.opacity=Math.min(1,o); if(o>=1)clearInterval(id);},40); };
-  scene.add(m); return m;
-})();
+// соберём список файлов фоток (0.jpg..9.jpg). Просто пытаемся загрузить подряд.
+const photoTextures = [];
+for(let i=0;i<16;i++){
+  const url = `./assets/textures/photos/${i}.jpg`;
+  photoTextures.push(texLoader.load(url, t=>{ t.colorSpace = THREE.SRGBColorSpace; }));
+}
 
-let completed=false;
-function allSynced(){ return [clockA,clockB,clockC].every(c=> c.userData.state && c.userData.state.done); }
+// создаём «оконца» между рейками
+function makePhotoSlots(){
+  const MAX = 18; // сколько увидеть одновременно
+  const slotGeo = new THREE.PlaneGeometry(0.52, 0.32);
+  for(let i=0;i<MAX;i++){
+    const tex = photoTextures[i % photoTextures.length];
+    const mat = new THREE.MeshBasicMaterial({map:tex, transparent:true, opacity:0});
+    const m = new THREE.Mesh(slotGeo, mat);
+    // позиция: случайная грань клетки
+    const side = Math.floor(Math.random()*3); // 0-x,1-y,2-z
+    const s = 3.0; // радиус
+    if(side===0){ // смотрит +/-X
+      m.position.set( Math.random()<.5? -s:s, 1.0+Math.random()*1.6, (Math.random()-0.5)*2.6 );
+      m.rotation.y = (Math.random()<.5? Math.PI/2 : -Math.PI/2);
+    }else if(side===1){ // +/-Y (потолок/пол)
+      m.position.set( (Math.random()-0.5)*2.6, Math.random()<.5? (1.6-1.4):(1.6+1.4), (Math.random()-0.5)*2.6 );
+      m.rotation.x = (Math.random()<.5? Math.PI/2 : -Math.PI/2);
+    }else{ // +/-Z
+      m.position.set( (Math.random()-0.5)*2.6, 1.0+Math.random()*1.6, Math.random()<.5? -s:s );
+      m.rotation.y = (Math.random()<.5? 0 : Math.PI);
+    }
+    m.userData.t0 = Math.random()*6; // фазы мигания
+    photosGroup.add(m);
+  }
+}
+makePhotoSlots();
 
-// ---------- загрузка/меню ----------
-const loading = document.getElementById('loading');
-const menu = document.getElementById('menu');
-loading.style.display='none'; menu.style.display='flex';
+/* ================== движение и анимации ================== */
+const flow = { z: 0.25 }; // скорость «потока»
+let lastT = performance.now()*0.001;
 
-// более надёжный фейд при старте XR
+function animate(){
+  const t = performance.now()*0.001;
+  const dt = Math.min(0.033, t-lastT); lastT = t;
+
+  // мир едет очень медленно вперёд (в XR кажется, что «тянет пространство»)
+  lattice.position.z += dt * flow.z;
+  if (lattice.position.z > 1.05) lattice.position.z = 0;
+
+  // лёгкая пульсация неона у полос
+  streaks.children.forEach((s,idx)=>{
+    s.material.opacity = 0.08 + 0.12*Math.sin(t*1.5 + idx*0.37)**2;
+  });
+
+  // фото: циклическое появление/затухание
+  photosGroup.children.forEach((m,idx)=>{
+    const tt = (t + m.userData.t0) % 8.0; // цикл 8с
+    const fadeIn = THREE.MathUtils.clamp((tt-0.5)/1.0, 0,1);
+    const hold   = THREE.MathUtils.clamp((tt-1.5)/3.5, 0,1);
+    const fadeOut= THREE.MathUtils.clamp((tt-5.2)/1.2, 0,1);
+    m.material.opacity = fadeIn*(1-fadeOut)*0.95;
+  });
+
+  renderer.render(scene,camera);
+}
+
+/* ================== XR измеренный фейд ================== */
 renderer.xr.addEventListener('sessionstart', async ()=>{
-  controls.enabled=false; screen.show();
-  await waitXRFrames(3); // дождались нескольких XR-кадров
+  controls.enabled = false; screen.show();
+  await waitXRFrames(3);
   screen.fade(700);
 });
 
-// кнопки
+/* ================== UI ================== */
+const loading = document.getElementById('loading');
+const menu = document.getElementById('menu');
 document.getElementById('btnVR').onclick = async ()=>{
-  menu.style.display='none'; screen.show();
-  await startXR(); // sessionstart сам снимет шторку
+  menu.style.display='none'; screen.show(); await startXR();
 };
 document.getElementById('btnSpectate').onclick = ()=>{
   menu.style.display='none'; controls.enabled=true; screen.show(); setTimeout(()=>screen.fade(700),150);
 };
 
-// ---------- главный цикл ----------
-function mainLoop(){
-  const t = performance.now()*0.001;
-  scene.traverse(o=>{ if (o.userData && o.userData.update) o.userData.update(Math.min(0.033, 1/60), t); });
-  if (!completed && allSynced()){
-    completed = true;
-    finale.userData.reveal();
-    // лёгкая «волна»
-    sky.material.uniforms.uTintB.value.set(0xfff1a8);
-    sky.material.uniforms.uWarp.value = 0.18;
-    setTimeout(()=>{ sky.material.uniforms.uTintB.value.set(0x7ad5ff); }, 2500);
-  }
-  if (controls.enabled) controls.update();
-  renderer.render(scene, camera);
-}
-renderer.setAnimationLoop(mainLoop);
+/* ================== main loop ================== */
+renderer.setAnimationLoop(()=>{ animate(); if (controls.enabled) controls.update(); });
 
-// ---------- XR старт ----------
+/* ================== XR start ================== */
 async function startXR(){
   if (!navigator.xr){ alert('WebXR не поддерживается. Открой в Quest Browser.'); return; }
   try{
@@ -257,12 +242,14 @@ async function startXR(){
   }catch(e){ console.error(e); alert('Не удалось запустить VR-сессию.'); }
 }
 
-// ресайз
+/* ================== resize ================== */
 addEventListener('resize', ()=>{
-  camera.aspect = window.innerWidth/window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
+  camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
 });
+
+/* ================== старт загрузки фоток ================== */
+// если фоток нет — менеджер всё равно отпустит меню после onError/onLoad
 </script>
 </body>
 </html>
