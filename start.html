@@ -100,6 +100,7 @@
 
     <!-- Кнопки управления -->
     <nav class="controls">
+      <button id="btnReplay">Повтор речи</button>
       <button id="btnMute">Звук: выкл</button>
     </nav>
 
@@ -109,19 +110,22 @@
   <!-- Аудио -->
       <!-- Аудио (playsinline для iOS, чтобы не лезло в полноэкранный плеер) -->
   <audio id="music" src="assets/ambient.mp3" preload="auto" loop playsinline></audio>
+  <audio id="voice" src="assets/start.mp3" preload="auto" playsinline></audio>
 
   <script>
     // === Глобальные элементы ===
     const intro    = document.getElementById('intro');
     const startBtn = document.getElementById('startBtn');
     const music    = document.getElementById('music');
-    const btnMute  = document.getElementById('btnMute');
+    const voice    = document.getElementById('voice');
+    const btnReplay= document.getElementById('btnReplay');
+    const btnMute  = document.getElementById('btnMute');  = document.getElementById('btnMute');
     const toast    = document.getElementById('toast');
     const glitch   = document.querySelector('.glitch');
 
     // Стартовые значения
     let muted = true; // до клика — тишина
-    music.volume = 0;
+    music.volume = 0; voice.volume = 1;
 
     // Тост
     function showToast(msg){
@@ -149,6 +153,34 @@
       try{
         // Разблокировка аудио для iOS/Safari
         try{ const Ctx = window.AudioContext||window.webkitAudioContext; if(Ctx){ const ctx = new Ctx(); await ctx.resume(); } }catch(_){/* необязательно */}
+
+        // Перезагружаем и пробуем запустить
+        music.load(); voice.load();
+        await music.play();
+
+        muted = false;
+        btnMute.textContent = 'Звук: вкл';
+        fadeAudio(music, 0.4, 1200);
+
+        // Чуть позже — голос (однократно)
+        setTimeout(async ()=>{
+          try{ voice.currentTime = 0; await voice.play(); }
+          catch(e){ showToast('Речь не стартовала. Нажмите «Повтор речи».'); }
+        }, 1400);
+
+        // Скрываем заставку
+        intro.classList.add('hidden');
+
+        // Периодические короткие глитчи (визуал)
+        setInterval(()=>{
+          glitch.classList.toggle('pulse');
+          setTimeout(()=>glitch.classList.toggle('pulse'), 240);
+        }, 3800 + Math.random()*2400);
+
+      }catch(e){
+        showToast('Не удалось запустить звук. Проверьте пути к assets/ambient.mp3 и assets/start.mp3, а также громкость.');
+      }
+    } }catch(_){/* необязательно */}
 
         // На всякий случай перезагрузим тег и попробуем проиграть
         music.load();
@@ -181,6 +213,19 @@
       muted = !muted;
     });
 
+    // Повтор речи
+    btnReplay.addEventListener('click', async ()=>{
+      try{ voice.currentTime = 0; await voice.play(); }
+      catch(e){ showToast('Не удалось воспроизвести start.mp3'); }
+    });
+
+    // Автоприглушение фоновой музыки во время речи
+    voice.addEventListener('play', ()=>{ if(!muted) fadeAudio(music, 0.18, 400); });
+    voice.addEventListener('ended', ()=>{ if(!muted) fadeAudio(music, 0.4, 600); }); btnMute.textContent = 'Звук: вкл'; }
+      else { fadeAudio(music, 0, 600); btnMute.textContent = 'Звук: выкл'; }
+      muted = !muted;
+    });
+
     // Подмена фона под HiDPI/широкие экраны (опционально)
     const mqUltra = window.matchMedia('(min-width:1800px)');
     if(mqUltra.matches){
@@ -194,8 +239,12 @@
     // Быстрая проверка наличия файла (HEAD)
     ;(async()=>{
       try{
-        const resp = await fetch('assets/ambient.mp3', {method:'HEAD'});
-        if(!resp.ok) showToast('Не найден файл музыки: assets/ambient.mp3');
+        const [m,v] = await Promise.all([
+          fetch('assets/ambient.mp3', {method:'HEAD'}),
+          fetch('assets/start.mp3', {method:'HEAD'})
+        ]);
+        if(!m.ok) showToast('Не найден файл: assets/ambient.mp3');
+        if(!v.ok) showToast('Не найден файл: assets/start.mp3');
       }catch(_){ /* при file:// HEAD может не работать — это нормально */ }
     })();
   </script>

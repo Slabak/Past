@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Тессеракт — cinema (больше кубов + живые фото)</title>
+<title>Тессеракт — cinema (x4 + заметные фото)</title>
 <script src="./assets/js/three.min.js"></script>
 <script src="./assets/js/OrbitControls.js"></script>
 <style>
@@ -36,25 +36,23 @@
   </div>
 
 <script>
-/* ---- ФОТО: поправь пути при необходимости ---- */
+/* ---- ФОТО ---- */
 const PHOTO_FILES = Array.from({length:15}, (_,i)=>`./assets/textures/${i+1}.jpg`);
-const PHOTO_SIZE = 0.75;    // базовая ширина «окна»
-const PHOTO_NEAR = 2.2;     // не подлетать ближе к глазам (м)
-const PHOTO_RANGE = [0.75, 1.0]; // ближе к сетке: 0.75..1.0 от радиуса сцены
+const PHOTO_SIZE  = 1.05;     // было 0.75 — теперь крупнее
+const PHOTO_NEAR  = 2.0;      // не подлетать ближе к глазам
+const PHOTO_RANGE = [0.65, 0.9]; // ближе к сетке
 
-/* детекты */
 const ua = navigator.userAgent;
 const isQuest  = /Quest|Oculus/i.test(ua);
 const isMobile = /Android|iPhone|iPad|iPod|Quest|Oculus/i.test(ua);
 
-/* рендер/сцена */
 const renderer = new THREE.WebGLRenderer({antialias:true, powerPreference:'high-performance'});
 renderer.setPixelRatio(isMobile ? 1 : Math.min(window.devicePixelRatio,2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.xr.enabled = true;
 if ('outputColorSpace' in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace; else renderer.outputEncoding = THREE.sRGBEncoding;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.55;
+renderer.toneMappingExposure = 1.52;
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -82,7 +80,7 @@ const matWood  = new THREE.MeshLambertMaterial({color: 0x3c2f24});
 const matGlass = new THREE.MeshLambertMaterial({color: 0xcfd9ff, transparent:true, opacity:0.30});
 const matGlow  = new THREE.MeshBasicMaterial({color:0xffffff, transparent:true, opacity:0.65, blending:THREE.AdditiveBlending, depthWrite:false});
 
-/* качество — по 3 куба во все стороны */
+/* качество — теперь count: 4, расстояние чуть увеличил, чтобы не давило */
 function pickQuality(){
   const v = document.getElementById('qsel').value;
   if (v!=='auto') return v;
@@ -90,9 +88,9 @@ function pickQuality(){
   return isMobile ? 'med' : 'high';
 }
 function qualityParams(q){
-  if(q==='low')  return {cell:3, count:3, beam:0.085, slat:0.024, distance:2.8, glassRatio:0.3,  fillDensity:5, glowCount:120, layers:2};
-  if(q==='med')  return {cell:3, count:3, beam:0.090, slat:0.024, distance:3.0, glassRatio:0.32, fillDensity:7, glowCount:180, layers:2};
-  /* high */     return {cell:3, count:3, beam:0.100, slat:0.022, distance:3.2, glassRatio:0.35, fillDensity:10,glowCount:240, layers:3};
+  if(q==='low')  return {cell:3, count:4, beam:0.085, slat:0.024, distance:3.6, glassRatio:0.3,  fillDensity:5, glowCount:160, layers:2};
+  if(q==='med')  return {cell:3, count:4, beam:0.090, slat:0.024, distance:3.8, glassRatio:0.32, fillDensity:7, glowCount:220, layers:2};
+  /* high */     return {cell:3, count:4, beam:0.100, slat:0.022, distance:4.0, glassRatio:0.35, fillDensity:10,glowCount:300, layers:3};
 }
 
 /* bokeh texture */
@@ -231,7 +229,7 @@ function buildTesseractLayer(p, phase=0, tint=1.0){
 
 /* поле «боке» */
 function buildBokehField(p){
-  const n = isQuest ? 120 : 220;
+  const n = isQuest ? 140 : 260;
   const geo = new THREE.PlaneGeometry(1,1);
   const mat = new THREE.MeshBasicMaterial({map:bokehTex, transparent:true, blending:THREE.AdditiveBlending, depthWrite:false, opacity:0.35});
   const inst = new THREE.InstancedMesh(geo, mat, n);
@@ -250,7 +248,7 @@ function buildBokehField(p){
   return inst;
 }
 
-/* ДАЛЬНИЕ «ВОСПОМИНАНИЯ» — ближе и двигаться как линии */
+/* ФОТО — ближе, крупнее, ярче и медленнее */
 function buildMemories(p){
   const group = new THREE.Group();
   const loader = new THREE.TextureLoader();
@@ -259,11 +257,11 @@ function buildMemories(p){
   const rMin = sceneRadius * PHOTO_RANGE[0];
   const rMax = sceneRadius * PHOTO_RANGE[1];
 
-  PHOTO_FILES.forEach((path,idx)=>{
+  PHOTO_FILES.forEach((path)=>{
     loader.load(path, (tex)=>{
       if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace; else tex.encoding = THREE.sRGBEncoding;
       const ar = tex.image.width / tex.image.height;
-      const w = PHOTO_SIZE * (0.85 + Math.random()*0.5);
+      const w = PHOTO_SIZE * (0.9 + Math.random()*0.4);
       const h = w / ar;
 
       const mat = new THREE.MeshBasicMaterial({
@@ -272,35 +270,24 @@ function buildMemories(p){
       const geo = new THREE.PlaneGeometry(w, h);
       const m = new THREE.Mesh(geo, mat);
 
-      // Выбираем ось (как у «балок») и ставим кадр в один из пролетов
       const axis = (Math.random()*3)|0;    // 0:x,1:y,2:z
       const ring = ((Math.random()*(p.count*2+1))|0) - p.count;
       const base = ring * p.cell;
       const half = p.cell/2;
 
-      // начальная точка на «поясе» и направление движения
-      if(axis===0){
-        m.position.set(0, 1.6+(Math.random()*2-1)*half, (Math.random()<.5?-1:1)*half + base);
-        m.userData.dir = new THREE.Vector3( 1, 0, 0);
-      }else if(axis===1){
-        m.position.set((Math.random()<.5?-1:1)*half + base, 1.6, (Math.random()*2-1)*half);
-        m.userData.dir = new THREE.Vector3( 0, 1, 0);
-      }else{
-        m.position.set((Math.random()*2-1)*half, 1.6+(Math.random()<.5?-1:1)*half, 0);
-        m.userData.dir = new THREE.Vector3( 0, 0, 1);
-      }
+      if(axis===0){ m.position.set(0, 1.6+(Math.random()*2-1)*half, (Math.random()<.5?-1:1)*half + base); m.userData.dir = new THREE.Vector3( 1, 0, 0); }
+      else if(axis===1){ m.position.set((Math.random()<.5?-1:1)*half + base, 1.6, (Math.random()*2-1)*half); m.userData.dir = new THREE.Vector3( 0, 1, 0); }
+      else { m.position.set((Math.random()*2-1)*half, 1.6+(Math.random()<.5?-1:1)*half, 0); m.userData.dir = new THREE.Vector3( 0, 0, 1); }
 
-      // уводим чуть дальше/ближе к центру сферы
       const scaleR = rMin + Math.random()*(rMax - rMin);
       m.position.multiplyScalar(scaleR / (half+1e-3));
 
-      // Параметры движения/мерцания
+      // Медленнее и заметнее
       m.userData.phase = Math.random()*Math.PI*2;
-      m.userData.speed = 0.2 + Math.random()*0.25; // медленнее линий
-      m.userData.amp   = 0.9 + Math.random()*0.9;  // амплитуда вдоль оси, м
-      m.userData.roll  = (Math.random()*2-1)*0.35; // лёгкое вращение плоскости
+      m.userData.speed = 0.10 + Math.random()*0.12; // было 0.2–0.45
+      m.userData.amp   = 1.2 + Math.random()*1.0;   // ход по оси
+      m.userData.roll  = (Math.random()*2-1)*0.25;
 
-      // Чтобы не лезло в лицо: если ближе PHOTO_NEAR — отталкиваем
       const camDist = m.position.distanceTo(new THREE.Vector3(0,1.6,0));
       if (camDist < PHOTO_NEAR){
         const push = m.position.clone().sub(new THREE.Vector3(0,1.6,0)).setLength(PHOTO_NEAR);
@@ -313,19 +300,17 @@ function buildMemories(p){
 
   group.userData.tick = (t)=>{
     group.children.forEach((m)=>{
-      // Движение вдоль выбранной оси (туда-сюда)
       const shift = Math.sin(t*m.userData.speed + m.userData.phase) * m.userData.amp;
       const pos = m.position.clone();
       pos.addScaledVector(m.userData.dir, shift);
-      m.position.lerp(pos, 0.08); // сглаживаем, чтобы не дёргалось
+      m.position.lerp(pos, 0.06);
 
-      // Биллборд + лёгкий «ролл»
       m.lookAt(camera.position);
-      m.rotateZ(m.userData.roll*0.02);
+      m.rotateZ(m.userData.roll*0.015);
 
-      // Мягкая видимость (всплыл-погас)
-      const k = 0.5 + 0.5*Math.sin(t*m.userData.speed*0.9 + m.userData.phase);
-      m.material.opacity = 0.15 + 0.35*k;  // максимум ~0.5
+      // Ярче: максимум ~0.65
+      const k = 0.5 + 0.5*Math.sin(t*m.userData.speed*0.85 + m.userData.phase);
+      m.material.opacity = 0.20 + 0.45*k;
     });
   };
   return group;
@@ -345,7 +330,8 @@ function rebuild(){
     root.add( buildTesseractLayer(P, phase, tint) );
   }
   root.add( buildBokehField(P) );
-  root.add( buildMemories(P) );  // обновлённые, «живые» фото
+  root.add( buildMemories(P) );
+
   root.userData.tick=(t)=>{ root.children.forEach(ch=>{ if(ch.userData.tick) ch.userData.tick(t); }); };
   scene.add(root);
 }
