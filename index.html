@@ -7,6 +7,9 @@
 <style>
   html,body{height:100%;margin:0;overflow:hidden;background:#000;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
 
+  /* XR чёрный DOM-оверлей — СКРЫТ при старте */
+  #black{position:fixed;inset:0;display:none;opacity:0;background:#000;z-index:20;transition:opacity .7s ease}
+
   /* Экран ЗАГРУЗКИ (показывается сразу) */
   #loading{position:fixed;inset:0;display:grid;place-items:center;z-index:12;
     background:radial-gradient(ellipse at center,rgba(0,0,0,.85),rgba(0,0,0,.98));color:#fff}
@@ -33,6 +36,9 @@
 </style>
 </head>
 <body>
+  <!-- XR DOM overlay -->
+  <div id="black"></div>
+
   <!-- Загрузка (сразу видна) -->
   <div id="loading">
     <div class="loadbox">
@@ -96,6 +102,7 @@ const overlay = document.getElementById('overlay');
 const loading = document.getElementById('loading');
 const ring    = document.getElementById('ring');
 const percent = document.getElementById('percent');
+const blackEl = document.getElementById('black');
 
 function showLoading(p){ loading.style.display='grid'; setProgress(p); }
 function hideLoading(){ loading.style.display='none'; }
@@ -106,57 +113,29 @@ function setProgress(p){ ring.style.setProperty('--p', p+'%'); percent.textConte
 let scene,camera,renderer,controls,tl,manager;
 let candle1,candle2; // «свечи»
 let audioListener,music;
-let xrSession=null;
 
-let assetsReady=false;
-let xrStarted=false;
-
-/* ===================== УТИЛИТЫ ОЖИДАНИЯ ===================== */
-function waitUntil(cond, timeoutMs=6000){
-  return new Promise((resolve,reject)=>{
-    const t0=performance.now();
-    (function tick(){
-      if (cond()) return resolve();
-      if (performance.now()-t0>timeoutMs) return reject(new Error('timeout'));
-      requestAnimationFrame(tick);
-    })();
-  });
-}
-
-/* ===================== ШТОРКА ВНУТРИ КАМЕРЫ ===================== */
-function makeScreenFade(cam){
-  const g=new THREE.PlaneGeometry(2,2);
-  const m=new THREE.MeshBasicMaterial({color:0x000000,transparent:true,opacity:1,depthTest:false});
-  const mesh=new THREE.Mesh(g,m); mesh.renderOrder=9999; mesh.position.z=-0.3;
-  cam.add(mesh); scene.add(cam);
-  return {
-    show:()=>{m.opacity=1},
-    fadeOut:(ms=700)=>{ const t0=performance.now(); (function f(t){const k=Math.min(1,(t-t0)/ms); m.opacity=1-k; if(k<1) requestAnimationFrame(f);})(t0); }
-  };
-}
-let screenFade=null;
+/* ===================== XR DOM overlay helpers ===================== */
+function showBlack(){ blackEl.style.display='block'; requestAnimationFrame(()=>{ blackEl.style.opacity='1'; }); }
+function hideBlack(){ blackEl.style.opacity='0'; setTimeout(()=>{ blackEl.style.display='none'; }, 750); }
+function waitXRFrames(session, n, cb){ let i=0; function onF(){ if(++i>=n) cb(); else session.requestAnimationFrame(onF);} session.requestAnimationFrame(onF); }
 
 /* ===================== КНОПКИ ===================== */
 document.getElementById('btnVR').addEventListener('click', async ()=>{
-  // Меню скрываем; XR стартуем, шторку держим — снимем её после sessionstart + assetsReady
   overlay.style.display='none';
-  screenFade && screenFade.show();
-  await startXR(); // fadeOut произойдёт в sessionstart
-},{once:true});
+  await startXR(); // скрывать чёрный будем по кадрам XR
+});
 
 document.getElementById('btnFlat').addEventListener('click', async ()=>{
   overlay.style.display='none';
-  // Наблюдатель: просто плавно открываемся, ассеты уже готовы
   controls.enabled=true;
-  screenFade && screenFade.show();
-  setTimeout(()=> screenFade && screenFade.fadeOut(700), 150);
-},{once:true});
+  showBlack(); setTimeout(hideBlack,150);
+});
 
 /* ===================== ПЕРВИЧНЫЙ СТАРТ: СНАЧАЛА ЗАГРУЗКА ===================== */
 initRenderer();
 bootSceneAndAssets()
-  .then(()=>{ hideLoading(); showMenu(); })
-  .catch(()=>{ hideLoading(); showMenu(); });
+  .then(()=>{ hideLoading(); showMenu(); hideBlack(); })
+  .catch(()=>{ hideLoading(); showMenu(); hideBlack(); });
 
 /* ===================== Загрузка сцены/ассетов с прогрессом ===================== */
 async function bootSceneAndAssets(){
@@ -166,13 +145,12 @@ async function bootSceneAndAssets(){
   let done=0,total=0;
   manager.onStart    = (_,l,t)=>{ done=l; total=t; setProgress(total?done/total*100:0); };
   manager.onProgress = (_,l,t)=>{ done=l; total=t; setProgress(total?done/total*100:0); };
-  manager.onLoad     = ()=>{ setProgress(100); assetsReady=true; };
+  manager.onLoad     = ()=>{ setProgress(100); };
 
-  initScene(manager);                           // сцена, свет, камера
-  screenFade = makeScreenFade(camera);          // шторка перед камерой
-  buildRoom(manager);                           // пол/стены/потолок/зеркало
-  await loadModels(manager);                    // glb модели
-  startMusic();                                 // музыка (мягко)
+  initScene(manager);
+  buildRoom(manager);
+  await loadModels(manager);
+  startMusic();
 }
 
 /* ===================== РЕНДЕРЕР ===================== */
@@ -198,21 +176,13 @@ function initRenderer(){
     renderer.setSize(innerWidth,innerHeight);
   });
 
-  // XR события — снимаем шторку только ПОСЛЕ старта XR и если ассеты готовы
-  renderer.xr.addEventListener('sessionstart', async ()=>{
-    xrStarted=true;
-    controls.enabled=false;
-    try{
-      await waitUntil(()=>assetsReady);
-      await new Promise(r=>setTimeout(r,100));
-      screenFade && screenFade.fadeOut(700);
-    }catch(e){
-      screenFade && screenFade.fadeOut(300);
-    }
-  });
-  renderer.xr.addEventListener('sessionend', ()=>{
-    xrStarted=false;
-    controls.enabled=false;
+  // цикл рендера
+  renderer.setAnimationLoop(()=>{
+    const t=performance.now()*0.0025;
+    if(candle1) candle1.intensity=0.46+Math.sin(t*3.2)*0.06+Math.sin(t*5.3)*0.04;
+    if(candle2) candle2.intensity=0.34+Math.sin(t*3.7)*0.05+Math.sin(t*4.7)*0.03;
+    controls.update();
+    renderer.render(scene,camera);
   });
 }
 
@@ -248,15 +218,6 @@ function initScene(manager){
   // музыка
   audioListener=new THREE.AudioListener(); camera.add(audioListener);
   music=new THREE.Audio(audioListener);
-
-  // цикл рендера
-  renderer.setAnimationLoop(()=>{
-    const t=performance.now()*0.0025;
-    if(candle1) candle1.intensity=0.46+Math.sin(t*3.2)*0.06+Math.sin(t*5.3)*0.04;
-    if(candle2) candle2.intensity=0.34+Math.sin(t*3.7)*0.05+Math.sin(t*4.7)*0.03;
-    controls.update();
-    renderer.render(scene,camera);
-  });
 }
 
 /* ===================== КОМНАТА ===================== */
@@ -297,8 +258,6 @@ function fitByHeight(root, targetH){
   const b3=new THREE.Box3().setFromObject(root);
   root.position.y -= b3.min.y; // поставить на пол
 }
-
-// аккуратно «утопить» объект во фронтальную стену (z=D/2), inset<0 — внутрь
 function snapToFrontWall(mesh, inset=-0.018){
   const box=new THREE.Box3().setFromObject(mesh);
   const maxZ=box.max.z;
@@ -309,7 +268,6 @@ function snapToFrontWall(mesh, inset=-0.018){
 /* ===================== ЗАГРУЗКА МОДЕЛЕЙ ===================== */
 async function loadModels(manager){
   const L=new THREE.GLTFLoader(manager);
-
   await new Promise((res)=>L.load(MODEL_CHEST,(g)=>{ const m=g.scene; fitByHeight(m,0.95); m.position.set(POS_CHEST_X,0,POS_CHEST_Z); m.rotation.y=0; scene.add(m); res(); }));
   await new Promise((res)=>L.load(MODEL_BARREL,(g)=>{ const m=g.scene; fitByHeight(m,1.15); m.position.copy(POS_BARREL); scene.add(m); res(); }));
   await new Promise((res)=>L.load(MODEL_TABLE,(g)=>{ const m=g.scene; fitByHeight(m,0.78); m.position.copy(POS_TABLE); scene.add(m); res(); }));
@@ -327,12 +285,25 @@ function startMusic(){
   }catch(e){}
 }
 
-/* ===================== XR ===================== */
+/* ===================== XR с анти-«чёрным стартом» ===================== */
 async function startXR(){
   if (!navigator.xr) { alert('WebXR не поддерживается. Открой в Quest Browser.'); return; }
   try{
-    xrSession = await navigator.xr.requestSession('immersive-vr', { requiredFeatures:['local-floor'] });
-    await renderer.xr.setSession(xrSession);
+    // прогрев до VR — уменьшает вероятность пустого первого кадра
+    renderer.render(scene, camera);
+    showBlack();
+
+    const session = await navigator.xr.requestSession('immersive-vr', { requiredFeatures:['local-floor'] });
+    await renderer.xr.setSession(session);
+
+    const onVis = ()=>{
+      if (session.visibilityState === 'visible'){ waitXRFrames(session, 2, hideBlack); }
+      else showBlack();
+    };
+    session.addEventListener('visibilitychange', onVis);
+    onVis();
+
+    session.addEventListener('end', ()=>{ showBlack(); showMenu(); });
   }catch(e){
     console.error(e); alert('Не удалось запустить VR-сессию.');
   }

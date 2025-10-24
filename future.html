@@ -12,9 +12,13 @@
 
   <style>
     html,body{margin:0;height:100%;background:#000;color:#fff;font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif}
+    /* Чёрный DOM-оверлей для XR-стартов/возвратов — СКРЫТ по умолчанию */
+    #black{position:fixed;inset:0;background:#000;z-index:50;opacity:0;display:none;transition:opacity .7s ease}
+
     .loading{position:fixed;inset:0;background:#000;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;z-index:30}
     .spinner{width:38px;height:38px;border-radius:50%;border:3px solid #333;border-top-color:#fff;animation:spin 1s linear infinite}
     @keyframes spin{to{transform:rotate(360deg)}}
+
     .menu{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;flex-direction:column;gap:12px;z-index:20}
     .menu h1{margin:0 0 8px;font-size:20px;font-weight:600}
     .btn{appearance:none;border:0;padding:12px 16px;border-radius:12px;font-weight:600;cursor:pointer;font-size:15px;background:#14b8a6;color:#00100e;box-shadow:0 4px 20px rgba(0,0,0,.35)}
@@ -23,6 +27,9 @@
   </style>
 </head>
 <body>
+  <!-- DOM-оверлей -->
+  <div id="black"></div>
+
   <!-- Чёрный экран до загрузки ассетов -->
   <div id="loading" class="loading">
     <div class="spinner"></div>
@@ -60,7 +67,7 @@
   // ===== Scene / Camera =====
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x05070d);
-  scene.fog = new THREE.Fog(0x05070d, 5.5, 12); // лёгкий туман
+  scene.fog = new THREE.Fog(0x05070d, 5.5, 12);
 
   const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 100);
   camera.position.set(0, 1.6, ROOM.size * 0.45);
@@ -69,23 +76,8 @@
   controls.enabled = false;
   controls.target.set(0, 1.6, 0);
 
-  // ===== Встроенная «шторка» (чёрный внутри VR/наблюдателя) + устойчивый фейд =====
-  function makeScreenFade(){
-    const geom = new THREE.PlaneGeometry(2, 2);
-    const mat  = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 1, depthTest: false });
-    const mesh = new THREE.Mesh(geom, mat);
-    mesh.renderOrder = 9999; mesh.position.z = -0.3;
-    camera.add(mesh); scene.add(camera);
-    return {
-      show: ()=> mat.opacity = 1,
-      fadeOut: (ms=700)=>{ const t0 = performance.now(); (function step(t){ const k=Math.min(1,(t-t0)/ms); mat.opacity=1-k; if(k<1) requestAnimationFrame(step);})(t0); }
-    };
-  }
-  const screenFade = makeScreenFade();
-
-  // ===== Свет (мягкий ключ + cyan/magenta; ослабили контровой) =====
+  // ===== Свет =====
   scene.add(new THREE.HemisphereLight(0x91a4ff, 0x0a0d16, 0.45));
-
   const key = new THREE.DirectionalLight(0xffffff, 0.38);
   key.position.set(-1.6, 3.6, 1.4);
   key.castShadow = true;
@@ -94,100 +86,56 @@
   key.shadow.bias = -0.0006; key.shadow.normalBias = 0.02;
   scene.add(key);
 
-  // холодный заполняющий
-  const fill = new THREE.PointLight(0x00e5ff, 0.8, 6.5);
-  fill.position.set(-1.8, 1.2, -1.6);
-  scene.add(fill);
-
-  // мягче и дальше от двери
-  const rim = new THREE.PointLight(0xff3ea5, 0.45, 6.0);
-  rim.position.set(1.4, 2.2, 0.8);
-  scene.add(rim);
+  const fill = new THREE.PointLight(0x00e5ff, 0.8, 6.5); fill.position.set(-1.8, 1.2, -1.6); scene.add(fill);
+  const rim  = new THREE.PointLight(0xff3ea5, 0.45, 6.0); rim.position.set( 1.4, 2.2,  0.8); scene.add(rim);
 
   // ===== Текстуры пола/стен/потолка =====
   const texLoader = new THREE.TextureLoader();
   const ANISO = 4;
-
-  function setSRGB(t){ if (!t) return t; if ('colorSpace' in t) t.colorSpace = THREE.SRGBColorSpace; else t.encoding = THREE.sRGBEncoding; return t; }
-  function loadT(url){ const t = texLoader.load(url); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = ANISO; return setSRGB(t); }
-
-  const tFloor   = loadT(PATH.textures + FILES.floor);
-  const tWall    = loadT(PATH.textures + FILES.wall);
-  const tCeiling = loadT(PATH.textures + FILES.ceiling);
-
-  tFloor.repeat.set(1.3, 1.3);
-  tWall.repeat.set(1.2, 1.0);
-  tCeiling.repeat.set(1.2, 1.2);
+  const setSRGB = t => (t && ('colorSpace' in t) ? (t.colorSpace=THREE.SRGBColorSpace,t): (t.encoding=THREE.sRGBEncoding,t));
+  const loadT = url => { const t = texLoader.load(url); t.wrapS=t.wrapT=THREE.RepeatWrapping; t.anisotropy=ANISO; return setSRGB(t); };
+  const tFloor = loadT(PATH.textures + FILES.floor); tFloor.repeat.set(1.3,1.3);
+  const tWall =  loadT(PATH.textures + FILES.wall ); tWall.repeat.set(1.2,1.0);
+  const tCeil =  loadT(PATH.textures + FILES.ceiling); tCeil.repeat.set(1.2,1.2);
 
   // ===== Геометрия комнаты =====
-  { // пол
-    const g = new THREE.PlaneGeometry(ROOM.size, ROOM.size);
-    const m = new THREE.MeshStandardMaterial({ map:tFloor, color:0x1c2126, roughness:0.95, metalness:0 });
-    const mesh = new THREE.Mesh(g, m);
-    mesh.rotation.x = -Math.PI/2; mesh.receiveShadow = true; scene.add(mesh);
-  }
-  { // потолок
-    const g = new THREE.PlaneGeometry(ROOM.size, ROOM.size);
-    const m = new THREE.MeshStandardMaterial({ map:tCeiling, color:0x0c0f14, roughness:0.98, metalness:0 });
-    const ceil = new THREE.Mesh(g, m);
-    ceil.rotation.x =  Math.PI/2; ceil.position.y = ROOM.height; scene.add(ceil);
-  }
-  { // стены
-    const g = new THREE.PlaneGeometry(ROOM.size, ROOM.height);
-    const m = new THREE.MeshStandardMaterial({ map:tWall, color:0x101217, roughness:0.98, metalness:0 });
+  { const g=new THREE.PlaneGeometry(ROOM.size, ROOM.size);
+    const m=new THREE.MeshStandardMaterial({ map:tFloor, color:0x1c2126, roughness:0.95, metalness:0 });
+    const mesh=new THREE.Mesh(g,m); mesh.rotation.x=-Math.PI/2; mesh.receiveShadow=true; scene.add(mesh); }
+  { const g=new THREE.PlaneGeometry(ROOM.size, ROOM.size);
+    const m=new THREE.MeshStandardMaterial({ map:tCeil, color:0x0c0f14, roughness:0.98, metalness:0 });
+    const ceil=new THREE.Mesh(g,m); ceil.rotation.x=Math.PI/2; ceil.position.y=ROOM.height; scene.add(ceil); }
+  { const g=new THREE.PlaneGeometry(ROOM.size, ROOM.height);
+    const m=new THREE.MeshStandardMaterial({ map:tWall, color:0x101217, roughness:0.98, metalness:0 });
     [
       {pos:[0,ROOM.height/2,-ROOM.size/2], rot:[0,0,0]},
       {pos:[0,ROOM.height/2, ROOM.size/2], rot:[0,Math.PI,0]},
       {pos:[-ROOM.size/2,ROOM.height/2,0], rot:[0, Math.PI/2, 0]},
       {pos:[ ROOM.size/2,ROOM.height/2,0], rot:[0,-Math.PI/2, 0]},
-    ].forEach(s=>{
-      const w = new THREE.Mesh(g, m);
-      w.position.set(...s.pos); w.rotation.set(...s.rot); w.receiveShadow = true; scene.add(w);
-    });
+    ].forEach(s=>{ const w=new THREE.Mesh(g,m); w.position.set(...s.pos); w.rotation.set(...s.rot); w.receiveShadow=true; scene.add(w); });
   }
 
   // ===== Простые «неон-планки» =====
   function addNeon({x=0,y=1.2,z=-ROOM.size/2+0.01,len=1.6,rotY=0,color=0x00e5ff,intensity=3}={}){
-    const geom = new THREE.BoxGeometry(len, 0.05, 0.02);
-    const mat  = new THREE.MeshStandardMaterial({ color:0x111, emissive: color, emissiveIntensity:intensity, roughness:0.4, metalness:0.0 });
-    const bar  = new THREE.Mesh(geom, mat);
-    bar.position.set(x,y,z); bar.rotation.y = rotY; scene.add(bar); return bar;
+    const geom=new THREE.BoxGeometry(len,0.05,0.02);
+    const mat=new THREE.MeshStandardMaterial({ color:0x111, emissive: color, emissiveIntensity:intensity, roughness:0.4, metalness:0.0 });
+    const bar=new THREE.Mesh(geom,mat); bar.position.set(x,y,z); bar.rotation.y=rotY; scene.add(bar); return bar;
   }
-
-  // Левая стена (холодный)
-  addNeon({
-    x: -ROOM.size/2 + 0.01,
-    y: 1.6,
-    z: 0,
-    len: 2.2,
-    rotY: Math.PI/2,
-    color: 0x00e5ff,
-    intensity: 2.2
-  });
-
-  // «Козырёк» над дверью (короче и слабее, тёплый)
-  addNeon({
-    x: 0,
-    y: 2.25,
-    z:  ROOM.size/2 - 0.02,
-    len: 1.4,
-    rotY: Math.PI,
-    color: 0xff3ea5,
-    intensity: 1.0
-  });
+  addNeon({ x:-ROOM.size/2+0.01,y:1.6,z:0,len:2.2,rotY:Math.PI/2,color:0x00e5ff,intensity:2.2 });
+  addNeon({ x:0,y:2.25,z:ROOM.size/2-0.02,len:1.4,rotY:Math.PI,color:0xff3ea5,intensity:1.0 });
 
   // ===== Загрузка future.glb и менеджер =====
   const loadingEl   = document.getElementById('loading');
   const loadingText = document.getElementById('loadingText');
   const menuEl      = document.getElementById('menu');
+  const blackEl     = document.getElementById('black');
 
   const manager = new THREE.LoadingManager();
   let assetsReady = false;
 
   manager.onStart    = ()=>{ loadingText.textContent = 'Загрузка…'; };
   manager.onProgress = (url, loaded, total)=>{ loadingText.textContent = `Загрузка… ${loaded}/${total}`; };
-  manager.onLoad     = ()=>{ assetsReady = true; loadingEl.style.display='none'; menuEl.style.display='flex';
-                              if (renderer.xr.isPresenting) { setTimeout(()=> screenFade.fadeOut(700), 150); } };
+  manager.onLoad     = ()=>{ assetsReady = true; loadingEl.style.display='none'; menuEl.style.display='flex'; };
   manager.onError    = (url)=>{ loadingText.textContent = `Ошибка: ${url}`; };
 
   const gltf = new THREE.GLTFLoader(manager);
@@ -199,49 +147,43 @@
     renderer.compile(scene, camera);
   });
 
-  // ===== Ручной запуск XR (устойчивый фейд) =====
-  function waitUntil(cond, timeoutMs=6000){
-    return new Promise((resolve,reject)=>{
-      const t0=performance.now();
-      (function tick(){
-        if (cond()) return resolve();
-        if (performance.now()-t0>timeoutMs) return reject(new Error('timeout'));
-        requestAnimationFrame(tick);
-      })();
-    });
+  // ===== XR helper: DOM-оверлей и ожидание кадров =====
+  function showBlack(){ blackEl.style.display='block'; requestAnimationFrame(()=>{ blackEl.style.opacity='1'; }); }
+  function hideBlack(){ blackEl.style.opacity='0'; setTimeout(()=>{ blackEl.style.display='none'; }, 750); }
+  function waitXRFrames(session, n, cb){
+    let i=0; function onF(){ if(++i>=n) cb(); else session.requestAnimationFrame(onF); }
+    session.requestAnimationFrame(onF);
   }
 
   async function startXR(){
     if (!navigator.xr) { alert('WebXR не поддерживается. Открой в Quest Browser.'); return; }
     try {
-      const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor','bounded-floor'] });
+      renderer.render(scene, camera); // прогрев GPU перед VR
+      showBlack();
+
+      const session = await navigator.xr.requestSession('immersive-vr', { requiredFeatures:['local-floor'], optionalFeatures:['bounded-floor'] });
       await renderer.xr.setSession(session);
+
+      const onVis = ()=>{
+        if (session.visibilityState === 'visible'){ waitXRFrames(session, 2, hideBlack); }
+        else showBlack();
+      };
+      session.addEventListener('visibilitychange', onVis);
+      onVis();
+
+      session.addEventListener('end', ()=>{ showBlack(); menuEl.style.display='flex'; });
     } catch (e) { console.error(e); alert('Не удалось запустить VR-сессию.'); }
   }
-
-  renderer.xr.addEventListener('sessionstart', async ()=>{
-    controls.enabled = false;
-    screenFade.show();
-    try {
-      await waitUntil(()=> assetsReady);
-      await new Promise(r=> setTimeout(r, 100));
-      screenFade.fadeOut(700);
-    } catch { screenFade.fadeOut(300); }
-  });
-  renderer.xr.addEventListener('sessionend', ()=>{ controls.enabled = false; });
 
   // ===== UI =====
   document.getElementById('btnVR').onclick = async ()=>{
     menuEl.style.display = 'none';
-    screenFade.show();
-    await startXR(); // fadeOut сделается в sessionstart
+    await startXR();
   };
   document.getElementById('btnSpectate').onclick = async ()=>{
     menuEl.style.display = 'none';
     controls.enabled = true;
-    screenFade.show();
-    await waitUntil(()=> assetsReady);
-    setTimeout(()=> screenFade.fadeOut(700), 150);
+    showBlack(); setTimeout(hideBlack, 150);
   };
 
   // ===== Resize / Loop =====
