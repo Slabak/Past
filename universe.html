@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Тессеракт — размытые линии</title>
+<title>Тессеракт — стабильная версия</title>
 <script src="./assets/js/three.min.js"></script>
 <script src="./assets/js/OrbitControls.js"></script>
 <style>
@@ -18,37 +18,37 @@
 </style>
 </head>
 <body>
-  <div id="loading" class="overlay"><div>Готовлю линии…</div></div>
+  <div id="loading" class="overlay"><div>Собираю тессеракт…</div></div>
   <div id="menu" class="menu">
     <button id="btnVR" class="btn">Войти в VR</button>
     <button id="btnSpectate" class="btn secondary">Режим наблюдателя</button>
   </div>
-  <div class="hud">ПК: мышь — обзор. Клик включает музыку.</div>
+  <div class="hud">ПК: мышь — обзор. Клик включает музыку. Камера не трясётся.</div>
   <button id="mute" class="mute">🔊 Музыка</button>
   <div class="quality">
     Качество:
     <select id="qsel">
       <option value="auto">auto</option>
       <option value="low">low</option>
-      <option value="med">med</option>
+      <option value="med" selected>med</option>
       <option value="high">high</option>
     </select>
   </div>
 
 <script>
-/*** детекты ***/
+/*** базовые детекты ***/
 const ua = navigator.userAgent;
 const isQuest  = /Quest|Oculus/i.test(ua);
 const isMobile = /Android|iPhone|iPad|iPod|Quest|Oculus/i.test(ua);
 
-/*** сцена ***/
+/*** рендерер/сцена/камера ***/
 const renderer = new THREE.WebGLRenderer({antialias:true, powerPreference:'high-performance'});
 renderer.setPixelRatio(isMobile ? 1 : Math.min(window.devicePixelRatio,2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.xr.enabled = true;
 if ('outputColorSpace' in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace; else renderer.outputEncoding = THREE.sRGBEncoding;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.25;
+renderer.toneMappingExposure = 1.25; // темнее, чем раньше
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -56,15 +56,25 @@ scene.background = new THREE.Color(0x000000);
 
 const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.01, 2000);
 camera.position.set(0,1.6,0.01);
-
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
 controls.enabled = false; controls.target.set(0,1.6,0);
 
-/*** мягкий фейд, чтобы не было «чёрного залипания» при входе в VR ***/
+/*** мягкий фейд вместо «чёрного залипания» ***/
 function makeFade(){const g=new THREE.PlaneGeometry(2,2),m=new THREE.MeshBasicMaterial({color:0x000,transparent:true,opacity:1,depthTest:false});const q=new THREE.Mesh(g,m);q.renderOrder=9999;q.position.z=-0.3;camera.add(q);scene.add(camera);return{show:()=>m.opacity=1,fade:(ms=700)=>{const t0=performance.now();(function f(t){const k=Math.min(1,(t-t0)/ms);m.opacity=1-k;if(k<1)requestAnimationFrame(f)})(t0)}}}
 const screen = makeFade(); let xrFadePending=false, xrFrames=0;
 
-/*** качество ***/
+/*** свет ***/
+scene.add(new THREE.AmbientLight(0x120e0b, 0.9));
+const key = new THREE.DirectionalLight(0xffe0b5, 0.48); key.position.set(-2.5,5,-4.5); scene.add(key);
+const rim = new THREE.DirectionalLight(0xbfd4ff, 0.16);  rim.position.set( 3.0,2.0, 3.5); scene.add(rim);
+
+/*** материалы ***/
+const matWoodHard = new THREE.MeshLambertMaterial({color:0x3a2d22}); // каркас
+const matWoodSoft = new THREE.MeshBasicMaterial({color:0x725840, transparent:true, opacity:0.16}); // «ореол»
+const matGlass    = new THREE.MeshLambertMaterial({color:0xcfd9ff, transparent:true, opacity:0.24});
+const matGlow     = new THREE.MeshBasicMaterial({color:0xffffff, transparent:true, opacity:0.40, blending:THREE.AdditiveBlending, depthWrite:false});
+
+/*** профили качества (чуть скромнее) ***/
 function pickQuality(){
   const v = document.getElementById('qsel').value;
   if (v!=='auto') return v;
@@ -72,188 +82,200 @@ function pickQuality(){
   return isMobile ? 'med' : 'high';
 }
 function qualityParams(q){
-  // distance — отодвигаем решётку подальше; stroke — толщина «ядра» линии
-  if(q==='low')  return {cell:3, count:2, distance:3.6, fillDensity:6, stroke:0.06, falloff:1.8, layers:2, streaks:60};
-  if(q==='med')  return {cell:3, count:3, distance:3.8, fillDensity:8, stroke:0.055,falloff:2.0, layers:2, streaks:90};
-  /* high */     return {cell:3, count:3, distance:4.0, fillDensity:11,stroke:0.05, falloff:2.2, layers:3, streaks:120};
+  if(q==='low')  return {cell:3, count:2, beam:0.085, slat:0.024, distance:3.2, fillDensity:5,  glowCount:70,  layers:2, softCopies:1};
+  if(q==='med')  return {cell:3, count:3, beam:0.09,  slat:0.024, distance:3.4, fillDensity:7,  glowCount:110, layers:2, softCopies:1};
+  /* high */     return {cell:3, count:3, beam:0.10, slat:0.022, distance:3.6, fillDensity:9,  glowCount:150, layers:3, softCopies:2};
 }
 
-/*** рисуем мягкую линейную текстуру (ядро + размытый край) ***/
-function makeLineTexture(){
-  const w=512,h=64, c=document.createElement('canvas'); c.width=w; c.height=h;
-  const ctx=c.getContext('2d');
-  // поперечный градиент: яркое ядро в центре, к краям спад
-  const g=ctx.createLinearGradient(0,0,0,h);
-  g.addColorStop(0.00,'rgba(255,255,255,0.0)');
-  g.addColorStop(0.35,'rgba(255,255,255,0.25)');
-  g.addColorStop(0.50,'rgba(255,255,255,0.9)');
-  g.addColorStop(0.65,'rgba(255,255,255,0.25)');
-  g.addColorStop(1.00,'rgba(255,255,255,0.0)');
-  ctx.fillStyle=g;
-  ctx.fillRect(0,0,w,h);
-  const t=new THREE.CanvasTexture(c);
-  t.generateMipmaps=false; t.minFilter=THREE.LinearFilter; t.magFilter=THREE.LinearFilter;
+/*** маска-боке для мягкого свечения ***/
+function makeBokehTexture(){
+  const s=256, c=document.createElement('canvas'); c.width=c.height=s; const ctx=c.getContext('2d');
+  const g=ctx.createRadialGradient(s/2,s/2,0, s/2,s/2,s/2);
+  g.addColorStop(0,'rgba(255,255,255,0.9)');
+  g.addColorStop(0.6,'rgba(255,255,255,0.22)');
+  g.addColorStop(1,'rgba(255,255,255,0.0)');
+  ctx.fillStyle=g; ctx.fillRect(0,0,s,s);
+  const t=new THREE.CanvasTexture(c); t.generateMipmaps=false; t.minFilter=THREE.LinearFilter; t.magFilter=THREE.LinearFilter;
   if ('colorSpace' in t) t.colorSpace = THREE.SRGBColorSpace; else t.encoding = THREE.sRGBEncoding;
   return t;
 }
-const lineTex = makeLineTexture();
+const bokehTex = makeBokehTexture();
 
-/*** материал «размытой линии» (дешёвый блюм) ***/
-function makeLineMaterial(opacity=0.6){
-  return new THREE.MeshBasicMaterial({
-    map: lineTex,
-    color: 0xE9D7B5,     // тёплый оттенок
-    transparent: true,
-    opacity,
-    blending: THREE.AdditiveBlending,
-    depthWrite: false,
-    side: THREE.DoubleSide
-  });
-}
-
-/*** генерация слоя-решётки из размытых линий (инстансинг) ***/
-function buildBlurGrid(P, phase=0, tintMul=1.0){
-  const {cell,count,distance,fillDensity,stroke,falloff} = P;
+/*** слой решётки (жёсткий + мягкие копии) ***/
+function buildTesseractLayer(P, phase=0, tint=1.0){
+  const {cell,count,beam,slat,distance,fillDensity,glowCount,softCopies} = P;
   const group = new THREE.Group();
 
-  const half = cell/2;
-  const steps = fillDensity;
-  const step  = cell/(steps+1);
+  const half = cell/2, steps=fillDensity, step=cell/(steps+1);
+  const geoX = new THREE.BoxGeometry(cell, beam, beam);
+  const geoY = new THREE.BoxGeometry(beam, cell, beam);
+  const geoZ = new THREE.BoxGeometry(beam, beam, cell);
+  const geoLX= new THREE.BoxGeometry(cell, slat, slat);
+  const geoLY= new THREE.BoxGeometry(slat, cell, slat);
+  const geoLZ= new THREE.BoxGeometry(slat, slat, cell);
+  const geoGlow = new THREE.PlaneGeometry(0.30, 1.10);
 
-  // плоская «линия»: по длине — cell, по толщине — stroke (ядро) * falloff (размытие по краям текстурой)
-  const geoX = new THREE.PlaneGeometry(cell, stroke*falloff);
-  const geoY = new THREE.PlaneGeometry(cell, stroke*falloff);
-  const geoZ = new THREE.PlaneGeometry(cell, stroke*falloff);
+  function makeMeshes(useSoft=false){
+    const mat = useSoft ? matWoodSoft.clone() : matWoodHard.clone();
+    mat.color.multiplyScalar(tint);
+    return {
+      frameX:new THREE.InstancedMesh(geoX, mat, 1),
+      frameY:new THREE.InstancedMesh(geoY, mat, 1),
+      frameZ:new THREE.InstancedMesh(geoZ, mat, 1),
+      lineX :new THREE.InstancedMesh(geoLX,mat, 1),
+      lineY :new THREE.InstancedMesh(geoLY,mat, 1),
+      lineZ :new THREE.InstancedMesh(geoLZ,mat, 1),
+      iFrame:new THREE.InstancedMesh(new THREE.BoxGeometry(cell, beam*0.7, beam*0.7), matGlass.clone(), 1)
+    };
+  }
 
-  const matCore = makeLineMaterial(0.55 * tintMul);
-  const matSoft = makeLineMaterial(0.22 * tintMul);
+  // предварительный проход — считаем нужные количества
+  let nFX=0,nFY=0,nFZ=0,nLX=0,nLY=0,nLZ=0,nIF=0;
+  const innerFrameOffsets=[-cell/3,cell/3];
+  for(let ix=-count; ix<=count; ix++)
+  for(let iy=-count; iy<=count; iy++)
+  for(let iz=-count; iz<=count; iz++){
+    const cx=ix*cell, cy=1.6+iy*cell, cz=iz*cell;
+    if (Math.hypot(cx,cy-1.6,cz) < distance + cell*0.5) continue;
+    nFX+=4; nFY+=4; nFZ+=4;
+    nLX+=(Math.max(0,(steps-1))*2);
+    nLY+=(Math.max(0,(steps-1))*2);
+    nLZ+=(Math.max(0,(steps-1))*2);
+    nIF+=innerFrameOffsets.length*12;
+  }
 
-  // три набора: X,Y,Z
-  const estLinesPerAxis = (count*2+1) * (count*2+1) * (steps+2); // грубая оценка
-  const lineX = new THREE.InstancedMesh(geoX, matCore, estLinesPerAxis);
-  const lineY = new THREE.InstancedMesh(geoY, matCore, estLinesPerAxis);
-  const lineZ = new THREE.InstancedMesh(geoZ, matCore, estLinesPerAxis);
+  function allocMeshes(useSoft){
+    const m = makeMeshes(useSoft);
+    m.frameX.count=nFX; m.frameY.count=nFY; m.frameZ.count=nFZ;
+    m.lineX.count =nLX; m.lineY.count =nLY; m.lineZ.count =nLZ;
+    m.iFrame.count=nIF;
+    return m;
+  }
 
-  const haloX = new THREE.InstancedMesh(geoX, matSoft, estLinesPerAxis);
-  const haloY = new THREE.InstancedMesh(geoY, matSoft, estLinesPerAxis);
-  const haloZ = new THREE.InstancedMesh(geoZ, matSoft, estLinesPerAxis);
+  const hard = allocMeshes(false);
+  const softs = Array.from({length:softCopies},()=>allocMeshes(true));
 
-  let ix=0, iy=0, iz=0, hx=0, hy=0, hz=0;
-  const M = new THREE.Matrix4(), R = new THREE.Matrix4();
+  const M = new THREE.Matrix4(), S = new THREE.Matrix4();
+  function fill(m, scale=1.0){
+    let ixF=0,iyF=0,izF=0, ixL=0,iyL=0,izL=0, iIF=0;
+    for(let ix=-count; ix<=count; ix++)
+    for(let iy=-count; iy<=count; iy++)
+    for(let iz=-count; iz<=count; iz++){
+      const cx=ix*cell, cy=1.6+iy*cell, cz=iz*cell;
+      if (Math.hypot(cx,cy-1.6,cz) < distance + cell*0.5) continue;
 
-  // повороты для плоскостей: X (горизонт), Y (вертикаль спереди-назад), Z (вертикаль слева-вправо)
-  const RX = new THREE.Matrix4().makeRotationZ(Math.PI/2); // X-линии: плоскость развернута
-  const RY = new THREE.Matrix4().makeRotationX(Math.PI/2);
-  const RZ = new THREE.Matrix4().makeRotationY(Math.PI/2);
+      S.identity().makeScale(scale,scale,scale);
 
-  function push(inst, Mtx, idx){ inst.setMatrixAt(idx, Mtx); }
+      M.copy(S).setPosition(cx, cy - half, cz - half); m.frameX.setMatrixAt(ixF++, M);
+      M.copy(S).setPosition(cx, cy - half, cz + half); m.frameX.setMatrixAt(ixF++, M);
+      M.copy(S).setPosition(cx, cy + half, cz - half); m.frameX.setMatrixAt(ixF++, M);
+      M.copy(S).setPosition(cx, cy + half, cz + half); m.frameX.setMatrixAt(ixF++, M);
 
-  for(let gx=-count; gx<=count; gx++)
-  for(let gy=-count; gy<=count; gy++)
-  for(let gz=-count; gz<=count; gz++){
-    const cx=gx*cell, cy=1.6+gy*cell, cz=gz*cell;
-    // «пустота» вокруг зрителя
-    if (Math.hypot(cx,cy-1.6,cz) < distance + cell*0.35) continue;
+      M.copy(S).setPosition(cx - half, cy, cz - half); m.frameY.setMatrixAt(iyF++, M);
+      M.copy(S).setPosition(cx + half, cy, cz - half); m.frameY.setMatrixAt(iyF++, M);
+      M.copy(S).setPosition(cx - half, cy, cz + half); m.frameY.setMatrixAt(iyF++, M);
+      M.copy(S).setPosition(cx + half, cy, cz + half); m.frameY.setMatrixAt(iyF++, M);
 
-    // рамки комнаты — четыре ребра по каждой оси
-    // X-оси (по углам по Z/Y)
-    [
-      [cx, cy - half, cz - half, RX],
-      [cx, cy - half, cz + half, RX],
-      [cx, cy + half, cz - half, RX],
-      [cx, cy + half, cz + half, RX],
-    ].forEach(([x,y,z,rot])=>{
-      M.identity().multiply(rot).setPosition(x,y,z); push(lineX,M,ix++); push(haloX,M,hx++);
-    });
+      M.copy(S).setPosition(cx - half, cy - half, cz); m.frameZ.setMatrixAt(izF++, M);
+      M.copy(S).setPosition(cx + half, cy - half, cz); m.frameZ.setMatrixAt(izF++, M);
+      M.copy(S).setPosition(cx - half, cy + half, cz); m.frameZ.setMatrixAt(izF++, M);
+      M.copy(S).setPosition(cx + half, cy + half, cz); m.frameZ.setMatrixAt(izF++, M);
 
-    // Y-оси
-    [
-      [cx - half, cy, cz - half, RY],
-      [cx + half, cy, cz - half, RY],
-      [cx - half, cy, cz + half, RY],
-      [cx + half, cy, cz + half, RY],
-    ].forEach(([x,y,z,rot])=>{
-      M.identity().multiply(rot).setPosition(x,y,z); push(lineY,M,iy++); push(haloY,M,hy++);
-    });
+      for(let i=1;i<=steps;i++){
+        const d=-half + i*step; if (Math.abs(d)<=0.001) continue;
+        M.copy(S).setPosition(cx, cy, cz + d); m.lineX.setMatrixAt(ixL++, M);
+        M.copy(S).setPosition(cx, cy, cz - d); m.lineX.setMatrixAt(ixL++, M);
+        M.copy(S).setPosition(cx, cy + d, cz); m.lineZ.setMatrixAt(izL++, M);
+        M.copy(S).setPosition(cx, cy - d, cz); m.lineZ.setMatrixAt(izL++, M);
+        M.copy(S).setPosition(cx + d, cy, cz); m.lineY.setMatrixAt(iyL++, M);
+        M.copy(S).setPosition(cx - d, cy, cz); m.lineY.setMatrixAt(iyL++, M);
+      }
 
-    // Z-оси
-    [
-      [cx - half, cy - half, cz, RZ],
-      [cx + half, cy - half, cz, RZ],
-      [cx - half, cy + half, cz, RZ],
-      [cx + half, cy + half, cz, RZ],
-    ].forEach(([x,y,z,rot])=>{
-      M.identity().multiply(rot).setPosition(x,y,z); push(lineZ,M,iz++); push(haloZ,M,hz++);
-    });
+      for(const off of innerFrameOffsets){
+        M.copy(S).setPosition(cx, cy - half, cz + off); m.iFrame.setMatrixAt(iIF++, M);
+        M.copy(S).setPosition(cx, cy + half, cz + off); m.iFrame.setMatrixAt(iIF++, M);
+        M.copy(S).makeRotationZ(Math.PI/2).multiply(S).setPosition(cx - half, cy, cz + off); m.iFrame.setMatrixAt(iIF++, M);
+        M.copy(S).makeRotationZ(Math.PI/2).multiply(S).setPosition(cx + half, cy, cz + off); m.iFrame.setMatrixAt(iIF++, M);
 
-    // внутренние «прутья» — шагами внутрь ячейки
-    for(let i=1;i<=steps;i++){
-      const d=-half + i*step;
-      // вдоль X (расклад по Z)
-      [[cx, cy, cz + d, RX],[cx, cy, cz - d, RX]].forEach(([x,y,z,rot])=>{
-        M.identity().multiply(rot).setPosition(x,y,z); push(lineX,M,ix++); push(haloX,M,hx++);
-      });
-      // вдоль Z (расклад по Y)
-      [[cx, cy + d, cz, RZ],[cx, cy - d, cz, RZ]].forEach(([x,y,z,rot])=>{
-        M.identity().multiply(rot).setPosition(x,y,z); push(lineZ,M,iz++); push(haloZ,M,hz++);
-      });
-      // вдоль Y (расклад по X)
-      [[cx + d, cy, cz, RY],[cx - d, cy, cz, RY]].forEach(([x,y,z,rot])=>{
-        M.identity().multiply(rot).setPosition(x,y,z); push(lineY,M,iy++); push(haloY,M,hy++);
-      });
+        M.copy(S).setPosition(cx, cy + off, cz - half); m.iFrame.setMatrixAt(iIF++, M);
+        M.copy(S).setPosition(cx, cy + off, cz + half); m.iFrame.setMatrixAt(iIF++, M);
+        M.copy(S).makeRotationX(Math.PI/2).multiply(S).setPosition(cx - half, cy + off, cz); m.iFrame.setMatrixAt(iIF++, M);
+        M.copy(S).makeRotationX(Math.PI/2).multiply(S).setPosition(cx + half, cy + off, cz); m.iFrame.setMatrixAt(iIF++, M);
+
+        M.copy(S).makeRotationZ(Math.PI/2).multiply(S).setPosition(cx + off, cy - half, cz); m.iFrame.setMatrixAt(iIF++, M);
+        M.copy(S).makeRotationZ(Math.PI/2).multiply(S).setPosition(cx + off, cy + half, cz); m.iFrame.setMatrixAt(iIF++, M);
+        M.copy(S).makeRotationX(Math.PI/2).multiply(S).setPosition(cx + off, cy, cz - half); m.iFrame.setMatrixAt(iIF++, M);
+        M.copy(S).makeRotationX(Math.PI/2).multiply(S).setPosition(cx + off, cy, cz + half); m.iFrame.setMatrixAt(iIF++, M);
+      }
     }
+    Object.values(m).forEach(im=>{im.instanceMatrix.needsUpdate=true; group.add(im);});
   }
 
-  [lineX,lineY,lineZ,haloX,haloY,haloZ].forEach(im=>{ im.count = Math.min(im.count, im.instanceMatrix.count); im.instanceMatrix.needsUpdate=true; group.add(im); });
+  // жёсткий слой
+  fill(hard, 1.0);
+  // 1–2 мягких «ореола»
+  softs.forEach((m, i)=> fill(m, 1.015 + i*0.015));
 
-  // «световые потёки» — длинные полосы, медленно ползут
-  const streakGeo = new THREE.PlaneGeometry(2.6*cell, P.stroke?P.stroke*P.falloff*1.2:0.12);
-  const streakMat = makeLineMaterial(0.22*tintMul);
-  const streaks   = new THREE.InstancedMesh(streakGeo, streakMat, P.streaks);
-  const M2 = new THREE.Matrix4();
-  for(let i=0;i<P.streaks;i++){
-    const axis=(Math.random()*3)|0;
-    const ring=((Math.random()*(count*2+1))|0)-count;
-    const base=ring*cell, h=half;
+  // редкие световые щели
+  const glows = new THREE.InstancedMesh(geoGlow, matGlow.clone(), glowCount);
+  const M2 = new THREE.Matrix4(); const half2=half;
+  for(let i=0;i<glowCount;i++){
+    const ax=(Math.random()*3)|0;
+    const ring=(Math.random()*(count*2+1)|0)-count;
+    const base=ring*cell;
     let x=0,y=1.6,z=0,rx=0,ry=0;
-    if(axis===0){ y=1.6+(Math.random()*2-1)*h; z=(Math.random()<.5?-1:1)*h + base; ry=Math.PI/2; }
-    if(axis===1){ x=(Math.random()<.5?-1:1)*h + base; z=(Math.random()*2-1)*h; rx=Math.PI/2; }
-    if(axis===2){ x=(Math.random()*2-1)*h + base; y=1.6+(Math.random()<.5?-1:1)*h; }
+    if(ax===0){ y=1.6+(Math.random()*2-1)*half2; z=(Math.random()<.5?-1:1)*half2 + base; ry=Math.PI/2; }
+    if(ax===1){ x=(Math.random()<.5?-1:1)*half2 + base; z=(Math.random()*2-1)*half2; rx=Math.PI/2; }
+    if(ax===2){ x=(Math.random()*2-1)*half2 + base; y=1.6+(Math.random()<.5?-1:1)*half2; }
     M2.identity().makeRotationFromEuler(new THREE.Euler(rx,ry,0)).setPosition(x,y,z);
-    streaks.setMatrixAt(i,M2);
+    glows.setMatrixAt(i,M2);
   }
-  streaks.instanceMatrix.needsUpdate=true;
-  streaks.userData.tick=(t)=>{
-    // еле-заметный сдвиг, чтобы шлейф «дышал»
-    streaks.position.z = Math.sin(t*0.35 + phase)*0.18;
-  };
-  group.add(streaks);
+  glows.instanceMatrix.needsUpdate=true;
+  group.add(glows);
 
-  group.userData.tick=(t)=>{
-    // дрейф всего слоя
-    group.position.z = Math.sin(t*0.45 + phase)*0.22;
+  // плавный дрейф
+  group.userData.tick = (t)=>{
+    const a = 0.22;
+    group.position.z = Math.sin(t*0.45 + phase)*a;
     const s = 1.00 + 0.02*Math.sin(t*0.6 + phase);
-    group.scale.set(1.00, 1.00*s, 1.00/s);
+    group.scale.set(1.00, s, 1.00/s);
   };
+
   return group;
 }
 
-/*** сборка сцены из 2–3 слоёв ***/
+/*** лёгкое «боке-пыль» ***/
+function makeBokehField(P){
+  const n = isQuest ? 90 : 160;
+  const geo = new THREE.PlaneGeometry(1,1);
+  const mat = new THREE.MeshBasicMaterial({map:bokehTex, transparent:true, blending:THREE.AdditiveBlending, depthWrite:false, opacity:0.20});
+  const inst = new THREE.InstancedMesh(geo, mat, n);
+  const M = new THREE.Matrix4();
+  for(let i=0;i<n;i++){
+    const r = P.count*P.cell + 4.0;
+    const x=(Math.random()*2-1)*r, y=1.6+(Math.random()*2-1)*r*0.6, z=(Math.random()*2-1)*r;
+    const s = 0.6 + Math.random()*3.0;
+    M.identity().setPosition(x,y,z).multiply(new THREE.Matrix4().makeScale(s, s*0.85, s));
+    inst.setMatrixAt(i, M);
+  }
+  inst.instanceMatrix.needsUpdate=true;
+  inst.userData.tick=(t)=>{ inst.material.opacity = 0.18 + 0.12*(0.5+0.5*Math.sin(t*0.7)); };
+  return inst;
+}
+
+/*** сборка ***/
 let root=null;
 function rebuild(){
   if(root){ scene.remove(root); root.traverse(o=>{ if(o.dispose) o.dispose(); }); root=null; }
-  const q = pickQuality();
-  const P = qualityParams(q);
-
+  const P = qualityParams(pickQuality());
   root = new THREE.Group();
   const layers = Math.max(2, P.layers||2);
-  for(let i=0;i<layers;i++){
-    const tint = 0.9 + i*0.05;
-    root.add( buildBlurGrid(P, i*1.2, tint) );
-  }
+  for(let i=0;i<layers;i++) root.add( buildTesseractLayer(P, i*1.2, 0.92 + i*0.06) );
+  root.add( makeBokehField(P) );
   root.userData.tick=(t)=>{ root.children.forEach(ch=>{ if(ch.userData.tick) ch.userData.tick(t); }); };
   scene.add(root);
 }
+document.getElementById('qsel').addEventListener('change', rebuild);
 
 /*** музыка ***/
 const MUSIC_PATH = './assets/music/universe.mp3';
@@ -267,11 +289,11 @@ async function ensureMusic(){
     musicGain=audioCtx.createGain(); musicGain.gain.value=0.0001;
     musicNode=audioCtx.createBufferSource(); musicNode.buffer=audioBuf; musicNode.loop=true;
     musicNode.connect(musicGain).connect(audioCtx.destination); musicNode.start();
-    const t=audioCtx.currentTime; musicGain.gain.exponentialRampToValueAtTime(0.10, t+2.0);
+    const t=audioCtx.currentTime; musicGain.gain.exponentialRampToValueAtTime(0.08, t+2.0);
     musicStarted=true; updateMuteUI();
   }catch(e){ console.warn('Музыка не стартанула:',e); }
 }
-function setMuted(m){ musicMuted=m; if(musicGain){ const t=audioCtx.currentTime; musicGain.gain.cancelScheduledValues(t); musicGain.gain.exponentialRampToValueAtTime(m?0.0001:0.10, t+0.25);} updateMuteUI();}
+function setMuted(m){ musicMuted=m; if(musicGain){ const t=audioCtx.currentTime; musicGain.gain.cancelScheduledValues(t); musicGain.gain.exponentialRampToValueAtTime(m?0.0001:0.08, t+0.25);} updateMuteUI();}
 function toggleMute(){ setMuted(!musicMuted); }
 function updateMuteUI(){ document.getElementById('mute').textContent = musicMuted ? '🔇 Без звука' : '🔊 Музыка'; }
 
@@ -303,7 +325,7 @@ async function startXR(){
   catch(e){ console.error(e); alert('Не удалось запустить VR-сессию.'); }
 }
 
-/*** input / resize ***/
+/*** ввод/resize ***/
 addEventListener('click', ()=>{ ensureMusic(); });
 addEventListener('touchstart', ()=>{ ensureMusic(); }, {passive:true});
 addEventListener('keydown', e=>{ if(e.code==='KeyM'){ ensureMusic().then(()=>toggleMute()); } });
