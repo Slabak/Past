@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Тессеракт — cinema</title>
+<title>Тессеракт — заполненные кубы (мягкие полосы)</title>
 <script src="./assets/js/three.min.js"></script>
 <script src="./assets/js/OrbitControls.js"></script>
 <style>
@@ -30,53 +30,44 @@
     <select id="qsel">
       <option value="auto">auto</option>
       <option value="low">low</option>
-      <option value="med">med</option>
+      <option value="med" selected>med</option>
       <option value="high">high</option>
     </select>
   </div>
 
 <script>
-/*** базовые детекты ***/
+/*** детекты ***/
 const ua = navigator.userAgent;
 const isQuest  = /Quest|Oculus/i.test(ua);
 const isMobile = /Android|iPhone|iPad|iPod|Quest|Oculus/i.test(ua);
 
-/*** сцена ***/
+/*** рендерер/сцена ***/
 const renderer = new THREE.WebGLRenderer({antialias:true, powerPreference:'high-performance'});
 renderer.setPixelRatio(isMobile ? 1 : Math.min(window.devicePixelRatio,2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.xr.enabled = true;
 if ('outputColorSpace' in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace; else renderer.outputEncoding = THREE.sRGBEncoding;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.55;
+renderer.toneMappingExposure = 1.25; // киношно, не слепит
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x000000);
-if (!isQuest) scene.fog = new THREE.FogExp2(0x000000, 0.022);
-
 const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.01, 2000);
 camera.position.set(0,1.6,0.01);
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
 controls.enabled = false; controls.target.set(0,1.6,0);
 
-/*** VR-фейд ***/
-function makeFade(){const g=new THREE.PlaneGeometry(2,2),m=new THREE.MeshBasicMaterial({color:0x000,transparent:true,opacity:1,depthTest:false});
-const q=new THREE.Mesh(g,m);q.renderOrder=9999;q.position.z=-0.3;camera.add(q);scene.add(camera);
-return{show:()=>m.opacity=1,fade:(ms=700)=>{const t0=performance.now();(function f(t){const k=Math.min(1,(t-t0)/ms);m.opacity=1-k;if(k<1)requestAnimationFrame(f)})(t0)}}}
+/*** фейд, чтобы не было «чёрного вечного» при входе в VR ***/
+function makeFade(){const g=new THREE.PlaneGeometry(2,2),m=new THREE.MeshBasicMaterial({color:0x000,transparent:true,opacity:1,depthTest:false});const q=new THREE.Mesh(g,m);q.renderOrder=9999;q.position.z=-0.3;camera.add(q);scene.add(camera);return{show:()=>m.opacity=1,fade:(ms=700)=>{const t0=performance.now();(function f(t){const k=Math.min(1,(t-t0)/ms);m.opacity=1-k;if(k<1)requestAnimationFrame(f)})(t0)}}}
 const screen = makeFade(); let xrFadePending=false, xrFrames=0;
 
-/*** свет ***/
-scene.add(new THREE.AmbientLight(0x120e0b, 0.95));
-const key = new THREE.DirectionalLight(0xffe0b5, 0.58); key.position.set(-2.5,5,-4.5); scene.add(key);
-const rim = new THREE.DirectionalLight(0xbfd4ff, 0.18);  rim.position.set( 3.0,2.0, 3.5); scene.add(rim);
+/*** свет (минимум) ***/
+scene.add(new THREE.AmbientLight(0x120e0b, 0.9));
+const key = new THREE.DirectionalLight(0xffe0b5, 0.45); key.position.set(-2.5,5,-4.5); scene.add(key);
+const rim = new THREE.DirectionalLight(0xbfd4ff, 0.16);  rim.position.set( 3.0,2.0, 3.5); scene.add(rim);
 
-/*** материалы максимально простые ***/
-const matWood  = new THREE.MeshLambertMaterial({color: 0x3c2f24});
-const matGlass = new THREE.MeshLambertMaterial({color: 0xcfd9ff, transparent:true, opacity:0.30});
-const matGlow  = new THREE.MeshBasicMaterial({color:0xffffff, transparent:true, opacity:0.65, blending:THREE.AdditiveBlending, depthWrite:false});
-
-/*** параметры качества ***/
+/*** профили качества ***/
 function pickQuality(){
   const v = document.getElementById('qsel').value;
   if (v!=='auto') return v;
@@ -84,213 +75,198 @@ function pickQuality(){
   return isMobile ? 'med' : 'high';
 }
 function qualityParams(q){
-  // «distance» — сколько воздуха в центре (мы увеличили, чтобы отодвинуть решётку)
-  if(q==='low')  return {cell:3, count:2, beam:0.085, slat:0.024, distance:2.4, glassRatio:0.3,  fillDensity:5, glowCount:120, layers:2};
-  if(q==='med')  return {cell:3, count:3, beam:0.09,  slat:0.024, distance:2.6, glassRatio:0.32, fillDensity:7, glowCount:180, layers:2};
-  /* high */     return {cell:3, count:3, beam:0.10, slat:0.022, distance:2.8, glassRatio:0.35, fillDensity:10,glowCount:240, layers:3};
+  // cell — размер одной ячейки решётки
+  // stripCount — насколько «плотно» заполняем каждые грани/внутренний объём
+  if(q==='low')  return {cell:3, count:2, distance:3.4, beam:0.085, slat:0.024, stripCount:6,  volPlanes:2, layers:2};
+  if(q==='med')  return {cell:3, count:3, distance:3.6, beam:0.09,  slat:0.024, stripCount:8,  volPlanes:3, layers:2};
+  /* high */     return {cell:3, count:3, distance:3.8, beam:0.10, slat:0.022, stripCount:11, volPlanes:4, layers:3};
 }
 
-/*** генерация круглого градиента для «боке» ***/
-function makeBokehTexture(){
-  const s=256, c=document.createElement('canvas'); c.width=c.height=s; const ctx=c.getContext('2d');
-  const g=ctx.createRadialGradient(s/2,s/2,0, s/2,s/2,s/2);
-  g.addColorStop(0,'rgba(255,255,255,0.9)');
-  g.addColorStop(0.6,'rgba(255,255,255,0.25)');
-  g.addColorStop(1,'rgba(255,255,255,0.0)');
-  ctx.fillStyle=g; ctx.fillRect(0,0,s,s);
-  const t=new THREE.CanvasTexture(c); t.generateMipmaps=false; t.minFilter=THREE.LinearFilter; t.magFilter=THREE.LinearFilter;
+/*** мягкая текстура полосы (ядро + размытый край) ***/
+function makeLineTexture(){
+  const w=512,h=64, c=document.createElement('canvas'); c.width=w; c.height=h;
+  const ctx=c.getContext('2d');
+  const g=ctx.createLinearGradient(0,0,0,h);
+  g.addColorStop(0.00,'rgba(255,255,255,0.0)');
+  g.addColorStop(0.35,'rgba(255,255,255,0.22)');
+  g.addColorStop(0.50,'rgba(255,255,255,0.85)');
+  g.addColorStop(0.65,'rgba(255,255,255,0.22)');
+  g.addColorStop(1.00,'rgba(255,255,255,0.0)');
+  ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
+  const t=new THREE.CanvasTexture(c);
+  t.generateMipmaps=false; t.minFilter=THREE.LinearFilter; t.magFilter=THREE.LinearFilter;
   if ('colorSpace' in t) t.colorSpace = THREE.SRGBColorSpace; else t.encoding = THREE.sRGBEncoding;
   return t;
 }
-const bokehTex = makeBokehTexture();
+const lineTex = makeLineTexture();
 
-/*** инстанс-тессеракт (как раньше, но вынес в функцию) ***/
-function buildTesseractLayer(p, phase=0, tint=1.0){
-  const {cell,count,beam,slat,distance,glassRatio,fillDensity,glowCount} = p;
+function makeLineMaterial(op=0.55, color=0xE9D7B5){
+  return new THREE.MeshBasicMaterial({
+    map: lineTex,
+    color,
+    transparent: true,
+    opacity: op,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    side: THREE.DoubleSide
+  });
+}
+
+/*** каркас (тонкие бруски) + заполнение плоскими полосами ***/
+function buildLayer(P, phase=0, tint=1.0){
+  const {cell,count,distance,beam,slat,stripCount,volPlanes} = P;
   const group = new THREE.Group();
 
-  // базовые геометрии
-  const half = cell/2, steps=fillDensity, step=cell/(steps+1);
+  const half = cell/2;
+  // Геометрия каркаса (как в твоей «удачной» версии, но не слишком ярко)
+  const matHard = new THREE.MeshLambertMaterial({color:0x3a2d22});
+  const matSoft = new THREE.MeshBasicMaterial({color:0x6f5640,transparent:true,opacity:0.14});
   const geoX = new THREE.BoxGeometry(cell, beam, beam);
   const geoY = new THREE.BoxGeometry(beam, cell, beam);
   const geoZ = new THREE.BoxGeometry(beam, beam, cell);
   const geoLX= new THREE.BoxGeometry(cell, slat, slat);
   const geoLY= new THREE.BoxGeometry(slat, cell, slat);
   const geoLZ= new THREE.BoxGeometry(slat, slat, cell);
-  const geoGlow = new THREE.PlaneGeometry(0.3, 1.2);
 
-  // посчитаем инстансы
-  let nFX=0,nFY=0,nFZ=0,nLX=0,nLY=0,nLZ=0,nIF=0;
-  const innerFrameOffsets=[-cell/3,cell/3];
+  const frameX=new THREE.InstancedMesh(geoX, matHard, 1);
+  const frameY=new THREE.InstancedMesh(geoY, matHard, 1);
+  const frameZ=new THREE.InstancedMesh(geoZ, matHard, 1);
+  const lineX =new THREE.InstancedMesh(geoLX,matSoft, 1);
+  const lineY =new THREE.InstancedMesh(geoLY,matSoft, 1);
+  const lineZ =new THREE.InstancedMesh(geoLZ,matSoft, 1);
 
-  for(let ix=-count; ix<=count; ix++)
-  for(let iy=-count; iy<=count; iy++)
-  for(let iz=-count; iz<=count; iz++){
-    const cx=ix*cell, cy=1.6+iy*cell, cz=iz*cell;
-    if (Math.hypot(cx,cy-1.6,cz) < distance + cell*0.5) continue;
-    nFX+=4; nFY+=4; nFZ+=4;
-    nLX+=Math.max(0,(steps-1))*2;
-    nLY+=Math.max(0,(steps-1))*2;
-    nLZ+=Math.max(0,(steps-1))*2;
-    nIF+=innerFrameOffsets.length*12;
-  }
+  // Полосы: плоскости длиной = cell, высотой = «толщине линии»
+  const stripH   = 0.06;               // базовая «толщина» полосы (визуально размытая краями текстуры)
+  const planeX   = new THREE.PlaneGeometry(cell, stripH*1.8);
+  const planeY   = new THREE.PlaneGeometry(cell, stripH*1.8);
+  const planeZ   = new THREE.PlaneGeometry(cell, stripH*1.8);
+  const matCore  = makeLineMaterial(0.50 * tint, 0xE6D5B9);
+  const matHalo  = makeLineMaterial(0.22 * tint, 0xE6D5B9);
 
-  const frameX=new THREE.InstancedMesh(geoX, matWood.clone(), nFX);
-  const frameY=new THREE.InstancedMesh(geoY, matWood.clone(), nFY);
-  const frameZ=new THREE.InstancedMesh(geoZ, matWood.clone(), nFZ);
-  const lineX =new THREE.InstancedMesh(geoLX, matWood.clone(), nLX);
-  const lineY =new THREE.InstancedMesh(geoLY, matWood.clone(), nLY);
-  const lineZ =new THREE.InstancedMesh(geoLZ, matWood.clone(), nLZ);
-  const iFrame=new THREE.InstancedMesh(new THREE.BoxGeometry(cell, beam*0.7, beam*0.7), matGlass.clone(), nIF);
+  // Оценим нужное количество инстансов
+  const cellsPerAxis = (count*2+1);
+  const approxCells  = cellsPerAxis*cellsPerAxis*cellsPerAxis;
+  const stripsPerCell = (stripCount*3) + (volPlanes*3);
+  const budget = approxCells*stripsPerCell;
 
-  // слегка тонируем слой для «наслоения»
-  const layerMult = tint;
-  [frameX,frameY,frameZ,lineX,lineY,lineZ].forEach(im=>im.material.color.multiplyScalar(layerMult));
-  iFrame.material.opacity*=0.9*layerMult;
+  const sX = new THREE.InstancedMesh(planeX, matCore, budget);
+  const sY = new THREE.InstancedMesh(planeY, matCore, budget);
+  const sZ = new THREE.InstancedMesh(planeZ, matCore, budget);
+  const hX = new THREE.InstancedMesh(planeX, matHalo, budget);
+  const hY = new THREE.InstancedMesh(planeY, matHalo, budget);
+  const hZ = new THREE.InstancedMesh(planeZ, matHalo, budget);
+
+  let ixF=0,iyF=0,izF=0, ixL=0,iyL=0,izL=0;
+  let iSX=0,iSY=0,iSZ=0, iHX=0,iHY=0,iHZ=0;
 
   const M = new THREE.Matrix4();
+  const RX = new THREE.Matrix4().makeRotationZ(Math.PI/2);
+  const RY = new THREE.Matrix4().makeRotationX(Math.PI/2);
+  const RZ = new THREE.Matrix4().makeRotationY(Math.PI/2);
 
-  let ixF=0,iyF=0,izF=0, ixL=0,iyL=0,izL=0, iIF=0;
+  function place(inst, mat){ inst.setMatrixAt(mat.idx++, mat.M); }
 
-  for(let ix=-count; ix<=count; ix++)
-  for(let iy=-count; iy<=count; iy++)
-  for(let iz=-count; iz<=count; iz++){
-    const cx=ix*cell, cy=1.6+iy*cell, cz=iz*cell;
-    if (Math.hypot(cx,cy-1.6,cz) < distance + cell*0.5) continue;
+  // По сцене: обходим клетки
+  for(let gx=-count; gx<=count; gx++)
+  for(let gy=-count; gy<=count; gy++)
+  for(let gz=-count; gz<=count; gz++){
+    const cx=gx*cell, cy=1.6+gy*cell, cz=gz*cell;
+    // «пустая сфера» вокруг камеры
+    if (Math.hypot(cx,cy-1.6,cz) < distance + cell*0.45) continue;
 
-    // каркас
-    M.identity().setPosition(cx, cy - half, cz - half); frameX.setMatrixAt(ixF++, M);
-    M.identity().setPosition(cx, cy - half, cz + half); frameX.setMatrixAt(ixF++, M);
-    M.identity().setPosition(cx, cy + half, cz - half); frameX.setMatrixAt(ixF++, M);
-    M.identity().setPosition(cx, cy + half, cz + half); frameX.setMatrixAt(ixF++, M);
+    // --- Каркас (тонко) ---
+    // X-ребра (4):
+    [[cx, cy - half, cz - half],[cx, cy - half, cz + half],[cx, cy + half, cz - half],[cx, cy + half, cz + half]].forEach(p=>{
+      M.identity().setPosition(...p); frameX.setMatrixAt(ixF++, M);
+    });
+    // Y-ребра (4):
+    [[cx - half, cy, cz - half],[cx + half, cy, cz - half],[cx - half, cy, cz + half],[cx + half, cy, cz + half]].forEach(p=>{
+      M.identity().setPosition(...p); frameY.setMatrixAt(iyF++, M);
+    });
+    // Z-ребра (4):
+    [[cx - half, cy - half, cz],[cx + half, cy - half, cz],[cx - half, cy + half, cz],[cx + half, cy + half, cz]].forEach(p=>{
+      M.identity().setPosition(...p); frameZ.setMatrixAt(izF++, M);
+    });
 
-    M.identity().setPosition(cx - half, cy, cz - half); frameY.setMatrixAt(iyF++, M);
-    M.identity().setPosition(cx + half, cy, cz - half); frameY.setMatrixAt(iyF++, M);
-    M.identity().setPosition(cx - half, cy, cz + half); frameY.setMatrixAt(iyF++, M);
-    M.identity().setPosition(cx + half, cy, cz + half); frameY.setMatrixAt(iyF++, M);
-
-    M.identity().setPosition(cx - half, cy - half, cz); frameZ.setMatrixAt(izF++, M);
-    M.identity().setPosition(cx + half, cy - half, cz); frameZ.setMatrixAt(izF++, M);
-    M.identity().setPosition(cx - half, cy + half, cz); frameZ.setMatrixAt(izF++, M);
-    M.identity().setPosition(cx + half, cy + half, cz); frameZ.setMatrixAt(izF++, M);
-
-    // внутренние рейки
-    for(let i=1;i<=steps;i++){
-      const d=-half + i*step;
-      if (Math.abs(d)<=0.001) continue;
-      M.identity().setPosition(cx, cy, cz + d); lineX.setMatrixAt(ixL++, M);
-      M.identity().setPosition(cx, cy, cz - d); lineX.setMatrixAt(ixL++, M);
-      M.identity().setPosition(cx, cy + d, cz); lineZ.setMatrixAt(izL++, M);
-      M.identity().setPosition(cx, cy - d, cz); lineZ.setMatrixAt(izL++, M);
-      M.identity().setPosition(cx + d, cy, cz); lineY.setMatrixAt(iyL++, M);
-      M.identity().setPosition(cx - d, cy, cz); lineY.setMatrixAt(iyL++, M);
+    // немного внутренних «тонких брусков» (для структуры)
+    const innerSteps = Math.max(0, Math.floor(stripCount/2)-1);
+    const step = cell/(innerSteps+1);
+    for(let i=1;i<=innerSteps;i++){
+      const d = -half + i*step;
+      [[cx,cy,cz+d],[cx,cy,cz-d]].forEach(p=>{ M.identity().setPosition(...p); lineX.setMatrixAt(ixL++, M); });
+      [[cx,cy+d,cz],[cx,cy-d,cz]].forEach(p=>{ M.identity().setPosition(...p); lineZ.setMatrixAt(izL++, M); });
+      [[cx+d,cy,cz],[cx-d,cy,cz]].forEach(p=>{ M.identity().setPosition(...p); lineY.setMatrixAt(iyL++, M); });
     }
 
-    // мини-рамки
-    for(const off of innerFrameOffsets){
-      M.identity().setPosition(cx, cy - half, cz + off); iFrame.setMatrixAt(iIF++, M);
-      M.identity().setPosition(cx, cy + half, cz + off); iFrame.setMatrixAt(iIF++, M);
-      M.identity().makeRotationZ(Math.PI/2).setPosition(cx - half, cy, cz + off); iFrame.setMatrixAt(iIF++, M);
-      M.identity().makeRotationZ(Math.PI/2).setPosition(cx + half, cy, cz + off); iFrame.setMatrixAt(iIF++, M);
+    // --- Заполнение «полосами» — как будто плотно закрашено ---
+    const strips = stripCount;
+    const stride = cell/(strips+1);
 
-      M.identity().setPosition(cx, cy + off, cz - half); iFrame.setMatrixAt(iIF++, M);
-      M.identity().setPosition(cx, cy + off, cz + half); iFrame.setMatrixAt(iIF++, M);
-      M.identity().makeRotationX(Math.PI/2).setPosition(cx - half, cy + off, cz); iFrame.setMatrixAt(iIF++, M);
-      M.identity().makeRotationX(Math.PI/2).setPosition(cx + half, cy + off, cz); iFrame.setMatrixAt(iIF++, M);
+    // вдоль X (полосы расположены по разным Z внутри ячейки)
+    for(let i=1;i<=strips;i++){
+      const zOff = -half + i*stride + (Math.random()-0.5)*0.015*cell;
+      M.identity().multiply(RX).setPosition(cx, cy, cz + zOff);
+      sX.setMatrixAt(iSX++, M);
+      hX.setMatrixAt(iHX++, M);
+    }
+    // вдоль Y (полосы расположены по разным X)
+    for(let i=1;i<=strips;i++){
+      const xOff = -half + i*stride + (Math.random()-0.5)*0.015*cell;
+      M.identity().multiply(RY).setPosition(cx + xOff, cy, cz);
+      sY.setMatrixAt(iSY++, M);
+      hY.setMatrixAt(iHY++, M);
+    }
+    // вдоль Z (полосы расположены по разным Y)
+    for(let i=1;i<=strips;i++){
+      const yOff = -half + i*stride + (Math.random()-0.5)*0.015*cell;
+      M.identity().multiply(RZ).setPosition(cx, cy + yOff, cz);
+      sZ.setMatrixAt(iSZ++, M);
+      hZ.setMatrixAt(iHZ++, M);
+    }
 
-      M.identity().makeRotationZ(Math.PI/2).setPosition(cx + off, cy - half, cz); iFrame.setMatrixAt(iIF++, M);
-      M.identity().makeRotationZ(Math.PI/2).setPosition(cx + off, cy + half, cz); iFrame.setMatrixAt(iIF++, M);
-      M.identity().makeRotationX(Math.PI/2).setPosition(cx + off, cy, cz - half); iFrame.setMatrixAt(iIF++, M);
-      M.identity().makeRotationX(Math.PI/2).setPosition(cx + off, cy, cz + half); iFrame.setMatrixAt(iIF++, M);
+    // объёмные «срезы» (редкие, длинные, дают киношный “пульс”)
+    for(let i=0;i<volPlanes;i++){
+      const axis = (Math.random()*3)|0;
+      if(axis===0){ M.identity().multiply(RX).setPosition(cx, cy, cz + (Math.random()*2-1)*half); sX.setMatrixAt(iSX++, M); }
+      if(axis===1){ M.identity().multiply(RY).setPosition(cx + (Math.random()*2-1)*half, cy, cz); sY.setMatrixAt(iSY++, M); }
+      if(axis===2){ M.identity().multiply(RZ).setPosition(cx, cy + (Math.random()*2-1)*half, cz); sZ.setMatrixAt(iSZ++, M); }
     }
   }
 
-  [frameX,frameY,frameZ,lineX,lineY,lineZ,iFrame].forEach(im=>{im.instanceMatrix.needsUpdate=true; group.add(im);});
+  // финальные counts
+  frameX.count=ixF; frameY.count=iyF; frameZ.count=izF;
+  lineX.count =ixL; lineY.count =iyL; lineZ.count =izL;
+  sX.count=iSX; sY.count=iSY; sZ.count=iSZ; hX.count=iHX; hY.count=iHY; hZ.count=iHZ;
 
-  // свечения (немного, без анимации матриц)
-  const glows = new THREE.InstancedMesh(geoGlow, matGlow.clone(), glowCount);
-  const M2 = new THREE.Matrix4();
-  for(let i=0;i<glowCount;i++){
-    const ax=(Math.random()*3)|0;
-    const ring=(Math.random()*(count*2+1)|0)-count;
-    const base=ring*cell, h=half;
-    let x=0,y=1.6,z=0,rx=0,ry=0,rz=0;
-    if(ax===0){ x=0; y=1.6+(Math.random()*2-1)*h; z=(Math.random()<.5?-1:1)*h + base; ry=Math.PI/2; }
-    if(ax===1){ x=(Math.random()<.5?-1:1)*h + base; y=1.6; z=(Math.random()*2-1)*h; rx=Math.PI/2; }
-    if(ax===2){ x=(Math.random()*2-1)*h + base; y=1.6+(Math.random()<.5?-1:1)*h; z=0; }
-    M2.identity().makeRotationFromEuler(new THREE.Euler(rx,ry,rz)).setPosition(x,y,z);
-    glows.setMatrixAt(i, M2);
-  }
-  glows.instanceMatrix.needsUpdate=true;
-  glows.material.opacity*=0.8*layerMult;
-  group.add(glows);
+  [frameX,frameY,frameZ,lineX,lineY,lineZ,sX,sY,sZ,hX,hY,hZ].forEach(im=>{
+    im.instanceMatrix.needsUpdate=true; group.add(im);
+  });
 
-  // движение слоя (вперёд-назад + лёгкий сквош)
-  group.userData.tick = (t)=>{
-    const a = 0.18;                    // амплитуда сдвига
-    const s = 1.00 + 0.03*Math.sin(t*0.6 + phase);
-    group.position.z = Math.sin(t*0.5 + phase) * a;
-    group.scale.set(1.00, s, 1.00/s); // чуть «дышит»
+  // лёгкое дыхание/дрифт
+  group.userData.tick=(t)=>{
+    const a=0.2;
+    group.position.z = Math.sin(t*0.45 + phase)*a;
+    const s = 1.00 + 0.02*Math.sin(t*0.6 + phase);
+    group.scale.set(1.00, s, 1.00/s);
+    // мягкий «сдвиг» полос (даёт жизнь, но не укачивает)
+    sX.position.x = Math.sin(t*0.2 + phase*1.3)*0.05;
+    sY.position.y = Math.sin(t*0.23+ phase*1.1)*0.05;
+    sZ.position.z = Math.sin(t*0.26+ phase*0.9)*0.05;
   };
 
   return group;
-}
-
-/*** бОКЕ для «киношного» софта (дёшево) ***/
-function buildBokehField(p){
-  const n = isQuest ? 120 : 220;
-  const geo = new THREE.PlaneGeometry(1,1);
-  const mat = new THREE.MeshBasicMaterial({map:bokehTex, transparent:true, blending:THREE.AdditiveBlending, depthWrite:false, opacity:0.35});
-  const inst = new THREE.InstancedMesh(geo, mat, n);
-  const M = new THREE.Matrix4();
-
-  for(let i=0;i<n;i++){
-    const r = p.count*p.cell + 3.0;
-    const x=(Math.random()*2-1)*r, y=1.6+(Math.random()*2-1)*r*0.6, z=(Math.random()*2-1)*r;
-    const s = 0.6 + Math.random()*3.0; // размер «шарика»
-    M.identity().makeRotationFromEuler(new THREE.Euler(0,0,0)).setPosition(x,y,z);
-    M.multiply(new THREE.Matrix4().makeScale(s, s, s));
-    inst.setMatrixAt(i, M);
-  }
-  inst.instanceMatrix.needsUpdate=true;
-  inst.userData.tick=(t)=>{
-    // лёгкое мерцание
-    inst.material.opacity = 0.25 + 0.20*(0.5+0.5*Math.sin(t*0.7));
-  };
-  return inst;
 }
 
 /*** сборка сцены ***/
 let root=null;
 function rebuild(){
   if(root){ scene.remove(root); root.traverse(o=>{ if(o.dispose) o.dispose(); }); root=null; }
-  const q = pickQuality();
-  const P = qualityParams(q);
-
+  const P = qualityParams(pickQuality());
   root = new THREE.Group();
-
-  // несколько слоёв решётки с разной фазой и оттенком — «размытие» и глубина
-  const layers = Math.max(2, P.layers||2);
-  for(let i=0;i<layers;i++){
-    const tint = 0.9 + i*0.08;       // чуть теплее дальше
-    const phase = i*1.2;             // разные фазы движения
-    const layer = buildTesseractLayer(P, phase, tint);
-    root.add(layer);
-  }
-
-  // добавим поле «боке»
-  const bokeh = buildBokehField(P);
-  root.add(bokeh);
-
-  root.userData.tick=(t)=>{
-    root.children.forEach(ch=>{
-      if(ch.userData.tick) ch.userData.tick(t);
-    });
-  };
-
+  const L = Math.max(2, P.layers||2);
+  for(let i=0;i<L;i++) root.add( buildLayer(P, i*1.2, 0.92 + i*0.06) );
   scene.add(root);
 }
-
 document.getElementById('qsel').addEventListener('change', rebuild);
 
 /*** музыка ***/
@@ -305,15 +281,15 @@ async function ensureMusic(){
     musicGain=audioCtx.createGain(); musicGain.gain.value=0.0001;
     musicNode=audioCtx.createBufferSource(); musicNode.buffer=audioBuf; musicNode.loop=true;
     musicNode.connect(musicGain).connect(audioCtx.destination); musicNode.start();
-    const t=audioCtx.currentTime; musicGain.gain.exponentialRampToValueAtTime(0.10, t+2.0);
+    const t=audioCtx.currentTime; musicGain.gain.exponentialRampToValueAtTime(0.08, t+2.0);
     musicStarted=true; updateMuteUI();
   }catch(e){ console.warn('Музыка не стартанула:',e); }
 }
-function setMuted(m){ musicMuted=m; if(musicGain){ const t=audioCtx.currentTime; musicGain.gain.cancelScheduledValues(t); musicGain.gain.exponentialRampToValueAtTime(m?0.0001:0.10, t+0.25);} updateMuteUI();}
+function setMuted(m){ musicMuted=m; if(musicGain){ const t=audioCtx.currentTime; musicGain.gain.cancelScheduledValues(t); musicGain.gain.exponentialRampToValueAtTime(m?0.0001:0.08, t+0.25);} updateMuteUI();}
 function toggleMute(){ setMuted(!musicMuted); }
 function updateMuteUI(){ document.getElementById('mute').textContent = musicMuted ? '🔇 Без звука' : '🔊 Музыка'; }
 
-/*** меню / VR ***/
+/*** меню/VR/цикл ***/
 const loading=document.getElementById('loading');
 const menu=document.getElementById('menu');
 requestAnimationFrame(()=>{ rebuild(); loading.style.display='none'; menu.style.display='flex'; });
@@ -323,31 +299,25 @@ renderer.xr.addEventListener('sessionstart', ()=>{
 });
 document.getElementById('btnVR').onclick = async ()=>{ menu.style.display='none'; screen.show(); await startXR(); };
 document.getElementById('btnSpectate').onclick = ()=>{ menu.style.display='none'; controls.enabled=true; screen.show(); ensureMusic(); setTimeout(()=>screen.fade(700),150); };
-document.getElementById('mute').onclick = ()=>{ ensureMusic().then(()=>toggleMute()); };
 
-/*** цикл ***/
-let last=performance.now()*0.001;
 renderer.setAnimationLoop(()=>{
-  const now=performance.now()*0.001, dt=Math.min(0.033, now-last); last=now;
+  const now=performance.now()*0.001;
   if (renderer.xr.isPresenting && xrFadePending){ xrFrames++; if(xrFrames>=4){ screen.fade(700); xrFadePending=false; } }
   if(root && root.userData.tick) root.userData.tick(now);
   if(controls.enabled) controls.update();
   renderer.render(scene,camera);
 });
 
-/*** XR ***/
 async function startXR(){
   if(!navigator.xr){ alert('WebXR не поддерживается. Открой в Quest Browser.'); return; }
   try{ const s=await navigator.xr.requestSession('immersive-vr',{optionalFeatures:['local-floor','bounded-floor']}); await renderer.xr.setSession(s); }
   catch(e){ console.error(e); alert('Не удалось запустить VR-сессию.'); }
 }
 
-/*** input / resize ***/
 addEventListener('click', ()=>{ ensureMusic(); });
 addEventListener('touchstart', ()=>{ ensureMusic(); }, {passive:true});
 addEventListener('keydown', e=>{ if(e.code==='KeyM'){ ensureMusic().then(()=>toggleMute()); } });
 addEventListener('resize', ()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); });
-
 </script>
 </body>
 </html>
