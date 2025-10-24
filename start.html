@@ -111,7 +111,27 @@
   <audio id="music" src="assets/ambient.mp3" preload="auto" loop playsinline></audio>
 
   <script>
-    // Утилита: плавное изменение громкости
+    // === Глобальные элементы ===
+    const intro    = document.getElementById('intro');
+    const startBtn = document.getElementById('startBtn');
+    const music    = document.getElementById('music');
+    const btnMute  = document.getElementById('btnMute');
+    const toast    = document.getElementById('toast');
+    const glitch   = document.querySelector('.glitch');
+
+    // Стартовые значения
+    let muted = true; // до клика — тишина
+    music.volume = 0;
+
+    // Тост
+    function showToast(msg){
+      if(!toast) return;
+      toast.textContent = msg;
+      toast.classList.add('show');
+      setTimeout(()=>toast.classList.remove('show'), 3200);
+    }
+
+    // Плавная смена громкости
     function fadeAudio(audio, to = 1, ms = 1200){
       const step = 0.02 * Math.sign(to - audio.volume);
       const tick = 16;
@@ -121,51 +141,62 @@
           audio.volume = to; clearInterval(interval);
         }
       }, tick);
-      00 + Math.random()*2400);
-      }catch(e){
-        showToast('Браузер заблокировал автоплей или файл не найден. Проверьте громкость и пути к файлам.');
-      }
-    } catch(e){ showToast('Нажмите «Повтор речи», чтобы услышать сообщение.'); } }, 2200);
+      setTimeout(()=>clearInterval(interval), ms + 2000);
+    }
+
+    // Запуск опыта
+    async function startExperience(){
+      try{
+        // Разблокировка аудио для iOS/Safari
+        try{ const Ctx = window.AudioContext||window.webkitAudioContext; if(Ctx){ const ctx = new Ctx(); await ctx.resume(); } }catch(_){/* необязательно */}
+
+        // На всякий случай перезагрузим тег и попробуем проиграть
+        music.load();
+        await music.play();
+
+        muted = false;
+        btnMute.textContent = 'Звук: вкл';
+        fadeAudio(music, 0.4, 1200);
+
+        // Скрываем заставку
         intro.classList.add('hidden');
-        // периодические короткие глитчи
-        setInterval(()=>{ glitch.classList.toggle('pulse'); setTimeout(()=>glitch.classList.toggle('pulse'), 240); }, 3800 + Math.random()*2400);
+
+        // Периодические короткие глитчи (визуал)
+        setInterval(()=>{
+          glitch.classList.toggle('pulse');
+          setTimeout(()=>glitch.classList.toggle('pulse'), 240);
+        }, 3800 + Math.random()*2400);
+
       }catch(e){
-        showToast('Браузер заблокировал автоплей. Нажмите ещё раз.');
+        showToast('Не удалось запустить звук. Проверьте путь к assets/ambient.mp3 и громкость.');
       }
     }
 
+    // Слушатели
     startBtn.addEventListener('click', startExperience);
 
-    // Повтор речи
-     }catch(e){ showToast('Голос не может проиграться. Проверьте громкость.'); }
-    });
-
-    // Мьют/анмьют фоновой музыки (голос никогда не мутим полностью)
     btnMute.addEventListener('click', () => {
       if(muted){ fadeAudio(music, 0.4, 600); btnMute.textContent = 'Звук: вкл'; }
       else { fadeAudio(music, 0, 600); btnMute.textContent = 'Звук: выкл'; }
       muted = !muted;
     });
 
-    // Подмена фоновой картинки под HiDPI/широкие экраны (опционально)
+    // Подмена фона под HiDPI/широкие экраны (опционально)
     const mqUltra = window.matchMedia('(min-width:1800px)');
     if(mqUltra.matches){
       const bg = document.getElementById('bg');
-      // Замените на вашу 4K картинку
       const hires = 'assets/keeper-4k.jpg';
-      const img = new Image(); img.onload = ()=>{ bg.style.backgroundImage = `url('${hires}')`; }; img.src = hires;
+      const img = new Image();
+      img.onload = ()=>{ bg.style.backgroundImage = `url('${hires}')`; };
+      img.src = hires;
     }
 
-    // Текстовая подсказка, когда голос закончит
-    
-  // Быстрая проверка, что файлы существуют (404) — сообщим сразу
+    // Быстрая проверка наличия файла (HEAD)
     ;(async()=>{
       try{
-        const m = await fetch('assets/ambient.mp3', {method:'HEAD'});
-        if(!m.ok) showToast('Не найден файл музыки: assets/ambient.mp3');
-      }catch(_){ /* оффлайн или file:// — HEAD может быть недоступен */ }
-    })();
-      }catch(_){ /* оффлайн или file:// — HEAD может быть недоступен */ }
+        const resp = await fetch('assets/ambient.mp3', {method:'HEAD'});
+        if(!resp.ok) showToast('Не найден файл музыки: assets/ambient.mp3');
+      }catch(_){ /* при file:// HEAD может не работать — это нормально */ }
     })();
   </script>
 </body>
