@@ -8,7 +8,8 @@
 <script src="./assets/js/OrbitControls.js"></script>
 <style>
   html,body{margin:0;height:100%;background:#000;color:#fff;font-family:system-ui,Segoe UI,Roboto,Arial}
-  #black{position:fixed;inset:0;background:#000;z-index:50;opacity:1;transition:opacity .7s ease}
+  /* Чёрный оверлей СКРЫТ при старте */
+  #black{position:fixed;inset:0;background:#000;z-index:50;opacity:0;display:none;transition:opacity .7s ease}
   .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#000;z-index:40}
   .menu{position:fixed;inset:0;background:rgba(0,0,0,.88);display:none;align-items:center;justify-content:center;flex-direction:column;gap:12px;z-index:30}
   .btn{appearance:none;border:0;padding:12px 16px;border-radius:12px;font-weight:600;cursor:pointer;font-size:15px;background:#14b8a6;color:#00100e;box-shadow:0 4px 20px rgba(0,0,0,.35)}
@@ -30,13 +31,10 @@
 <script>
 /* ---------- настройки ---------- */
 const PHOTO_FILES = Array.from({length:15}, (_,i)=>`./assets/textures/${i+1}.jpg`);
-const GRID_COUNT = 4;            // 4 куба во все стороны, фикс low
-const PHOTO_SIZE = 1.05;
-const PHOTO_NEAR = 2.0;
-const PHOTO_POOL = 18;
+const GRID_COUNT = 4;
+const PHOTO_SIZE = 1.05, PHOTO_NEAR = 2.0, PHOTO_POOL = 18;
 const PHOTO_OPACITY_MAX = 0.65;
-const PHOTO_LIFETIME = [1.8, 3.2];
-const PHOTO_COOLDOWN = [1.2, 2.2];
+const PHOTO_LIFETIME = [1.8, 3.2], PHOTO_COOLDOWN = [1.2, 2.2];
 const PHOTO_RANGE = [0.65, 0.9];
 
 const ua = navigator.userAgent;
@@ -89,7 +87,7 @@ function makeBokehTexture(){
   if ('colorSpace' in t) t.colorSpace = THREE.SRGBColorSpace; else t.encoding = THREE.sRGBEncoding;
   return t;
 }
-const bokehTex = makeBokehTexture(); /* <-- единственное объявление */
+const bokehTex = makeBokehTexture();
 
 /* -------- слой тессеракта -------- */
 function buildTesseractLayer(p, phase=0, tint=1.0){
@@ -244,8 +242,7 @@ function buildMemories(p){
   });
 
   const sceneRadius = GRID_COUNT * p.cell + 3.0;
-  const rMin = sceneRadius * PHOTO_RANGE[0];
-  const rMax = sceneRadius * PHOTO_RANGE[1];
+  const rMin = sceneRadius * PHOTO_RANGE[0], rMax = sceneRadius * PHOTO_RANGE[1];
 
   const rnd = (a,b)=>a + Math.random()*(b-a);
   const pick = arr => arr[(Math.random()*arr.length)|0];
@@ -266,10 +263,7 @@ function buildMemories(p){
     x *= scaleR/len; y = 1.6 + (y-1.6)*scaleR/len; z *= scaleR/len;
 
     const d = Math.hypot(x, y-1.6, z);
-    if (d < PHOTO_NEAR){
-      const k = PHOTO_NEAR/d;
-      x*=k; z*=k; y = 1.6 + (y-1.6)*k;
-    }
+    if (d < PHOTO_NEAR){ const k = PHOTO_NEAR/d; x*=k; z*=k; y = 1.6 + (y-1.6)*k; }
     m.position.set(x,y,z);
     m.lookAt(0,1.6,0);
     m.material.opacity = 0.0;
@@ -278,8 +272,7 @@ function buildMemories(p){
   for(let i=0;i<PHOTO_POOL;i++){
     const tex = pick(textures);
     const ar = (tex.image?.width||1) / (tex.image?.height||1);
-    const w  = PHOTO_SIZE * (0.9 + Math.random()*0.4);
-    const h  = w / ar;
+    const w  = PHOTO_SIZE * (0.9 + Math.random()*0.4), h = w / ar;
 
     const mat = new THREE.MeshBasicMaterial({map:tex, transparent:true, opacity:0.0, depthWrite:false, side:THREE.DoubleSide});
     const geo = new THREE.PlaneGeometry(w, h);
@@ -376,13 +369,12 @@ function updateMuteUI(){ document.getElementById('mute').textContent = musicMute
 /* -------- меню/загрузка -------- */
 const loading=document.getElementById('loading');
 const menu=document.getElementById('menu');
-requestAnimationFrame(()=>{ rebuild(); loading.style.display='none'; menu.style.display='flex'; });
+requestAnimationFrame(()=>{ rebuild(); loading.style.display='none'; menu.style.display='flex'; /* страховка: точно нет чёрного */ hideBlack(); });
 
 /* ================= XR старт без чёрного: DOM-оверлей + XR-кадры ================= */
-let xrSession = null;
-let hideTimeout = null;
+let xrSession = null, hideTimeout = null;
 
-function showBlack(){ const b=document.getElementById('black'); b.style.display='block'; b.style.opacity='1'; }
+function showBlack(){ const b=document.getElementById('black'); b.style.display='block'; requestAnimationFrame(()=>{ b.style.opacity='1'; }); }
 function hideBlack(){ const b=document.getElementById('black'); b.style.opacity='0'; setTimeout(()=>{ b.style.display='none'; }, 750); }
 
 function waitXRFrames(session, n, done){
