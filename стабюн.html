@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Тессеракт — cinema (+больше кубов и дальние фото)</title>
+<title>Тессеракт — cinema</title>
 <script src="./assets/js/three.min.js"></script>
 <script src="./assets/js/OrbitControls.js"></script>
 <style>
@@ -28,7 +28,7 @@
   <div class="quality">
     Качество:
     <select id="qsel">
-      <option value="auto" selected>auto</option>
+      <option value="auto">auto</option>
       <option value="low">low</option>
       <option value="med">med</option>
       <option value="high">high</option>
@@ -36,11 +36,6 @@
   </div>
 
 <script>
-/* ---- конфиг фоток (поправь пути под себя, если нужно) ---- */
-const PHOTO_FILES = Array.from({length:15}, (_,i)=>`./assets/textures/${i+1}.jpg`);
-const PHOTO_SIZE = 0.6;      // базовый размер «окна»
-const PHOTO_FAR   = 1.2;     // множитель дальности (чем больше — тем дальше от сетки)
-
 /*** базовые детекты ***/
 const ua = navigator.userAgent;
 const isQuest  = /Quest|Oculus/i.test(ua);
@@ -81,7 +76,7 @@ const matWood  = new THREE.MeshLambertMaterial({color: 0x3c2f24});
 const matGlass = new THREE.MeshLambertMaterial({color: 0xcfd9ff, transparent:true, opacity:0.30});
 const matGlow  = new THREE.MeshBasicMaterial({color:0xffffff, transparent:true, opacity:0.65, blending:THREE.AdditiveBlending, depthWrite:false});
 
-/*** параметры качества — везде count: 3 ***/
+/*** параметры качества ***/
 function pickQuality(){
   const v = document.getElementById('qsel').value;
   if (v!=='auto') return v;
@@ -89,13 +84,13 @@ function pickQuality(){
   return isMobile ? 'med' : 'high';
 }
 function qualityParams(q){
-  // distance немного поднял, чтобы расширенная решётка не давила
-  if(q==='low')  return {cell:3, count:3, beam:0.085, slat:0.024, distance:2.8, glassRatio:0.3,  fillDensity:5, glowCount:120, layers:2};
-  if(q==='med')  return {cell:3, count:3, beam:0.09,  slat:0.024, distance:3.0, glassRatio:0.32, fillDensity:7, glowCount:180, layers:2};
-  /* high */     return {cell:3, count:3, beam:0.10, slat:0.022, distance:3.2, glassRatio:0.35, fillDensity:10,glowCount:240, layers:3};
+  // «distance» — сколько воздуха в центре (мы увеличили, чтобы отодвинуть решётку)
+  if(q==='low')  return {cell:3, count:2, beam:0.085, slat:0.024, distance:2.4, glassRatio:0.3,  fillDensity:5, glowCount:120, layers:2};
+  if(q==='med')  return {cell:3, count:3, beam:0.09,  slat:0.024, distance:2.6, glassRatio:0.32, fillDensity:7, glowCount:180, layers:2};
+  /* high */     return {cell:3, count:3, beam:0.10, slat:0.022, distance:2.8, glassRatio:0.35, fillDensity:10,glowCount:240, layers:3};
 }
 
-/*** bokeh texture ***/
+/*** генерация круглого градиента для «боке» ***/
 function makeBokehTexture(){
   const s=256, c=document.createElement('canvas'); c.width=c.height=s; const ctx=c.getContext('2d');
   const g=ctx.createRadialGradient(s/2,s/2,0, s/2,s/2,s/2);
@@ -109,11 +104,12 @@ function makeBokehTexture(){
 }
 const bokehTex = makeBokehTexture();
 
-/*** тессеракт-слой (как в стабильной версии) ***/
+/*** инстанс-тессеракт (как раньше, но вынес в функцию) ***/
 function buildTesseractLayer(p, phase=0, tint=1.0){
   const {cell,count,beam,slat,distance,glassRatio,fillDensity,glowCount} = p;
   const group = new THREE.Group();
 
+  // базовые геометрии
   const half = cell/2, steps=fillDensity, step=cell/(steps+1);
   const geoX = new THREE.BoxGeometry(cell, beam, beam);
   const geoY = new THREE.BoxGeometry(beam, cell, beam);
@@ -123,6 +119,7 @@ function buildTesseractLayer(p, phase=0, tint=1.0){
   const geoLZ= new THREE.BoxGeometry(slat, slat, cell);
   const geoGlow = new THREE.PlaneGeometry(0.3, 1.2);
 
+  // посчитаем инстансы
   let nFX=0,nFY=0,nFZ=0,nLX=0,nLY=0,nLZ=0,nIF=0;
   const innerFrameOffsets=[-cell/3,cell/3];
 
@@ -146,6 +143,7 @@ function buildTesseractLayer(p, phase=0, tint=1.0){
   const lineZ =new THREE.InstancedMesh(geoLZ, matWood.clone(), nLZ);
   const iFrame=new THREE.InstancedMesh(new THREE.BoxGeometry(cell, beam*0.7, beam*0.7), matGlass.clone(), nIF);
 
+  // слегка тонируем слой для «наслоения»
   const layerMult = tint;
   [frameX,frameY,frameZ,lineX,lineY,lineZ].forEach(im=>im.material.color.multiplyScalar(layerMult));
   iFrame.material.opacity*=0.9*layerMult;
@@ -160,6 +158,7 @@ function buildTesseractLayer(p, phase=0, tint=1.0){
     const cx=ix*cell, cy=1.6+iy*cell, cz=iz*cell;
     if (Math.hypot(cx,cy-1.6,cz) < distance + cell*0.5) continue;
 
+    // каркас
     M.identity().setPosition(cx, cy - half, cz - half); frameX.setMatrixAt(ixF++, M);
     M.identity().setPosition(cx, cy - half, cz + half); frameX.setMatrixAt(ixF++, M);
     M.identity().setPosition(cx, cy + half, cz - half); frameX.setMatrixAt(ixF++, M);
@@ -175,8 +174,10 @@ function buildTesseractLayer(p, phase=0, tint=1.0){
     M.identity().setPosition(cx - half, cy + half, cz); frameZ.setMatrixAt(izF++, M);
     M.identity().setPosition(cx + half, cy + half, cz); frameZ.setMatrixAt(izF++, M);
 
+    // внутренние рейки
     for(let i=1;i<=steps;i++){
-      const d=-half + i*step; if (Math.abs(d)<=0.001) continue;
+      const d=-half + i*step;
+      if (Math.abs(d)<=0.001) continue;
       M.identity().setPosition(cx, cy, cz + d); lineX.setMatrixAt(ixL++, M);
       M.identity().setPosition(cx, cy, cz - d); lineX.setMatrixAt(ixL++, M);
       M.identity().setPosition(cx, cy + d, cz); lineZ.setMatrixAt(izL++, M);
@@ -185,6 +186,7 @@ function buildTesseractLayer(p, phase=0, tint=1.0){
       M.identity().setPosition(cx - d, cy, cz); lineY.setMatrixAt(iyL++, M);
     }
 
+    // мини-рамки
     for(const off of innerFrameOffsets){
       M.identity().setPosition(cx, cy - half, cz + off); iFrame.setMatrixAt(iIF++, M);
       M.identity().setPosition(cx, cy + half, cz + off); iFrame.setMatrixAt(iIF++, M);
@@ -205,6 +207,7 @@ function buildTesseractLayer(p, phase=0, tint=1.0){
 
   [frameX,frameY,frameZ,lineX,lineY,lineZ,iFrame].forEach(im=>{im.instanceMatrix.needsUpdate=true; group.add(im);});
 
+  // свечения (немного, без анимации матриц)
   const glows = new THREE.InstancedMesh(geoGlow, matGlow.clone(), glowCount);
   const M2 = new THREE.Matrix4();
   for(let i=0;i<glowCount;i++){
@@ -222,17 +225,18 @@ function buildTesseractLayer(p, phase=0, tint=1.0){
   glows.material.opacity*=0.8*layerMult;
   group.add(glows);
 
+  // движение слоя (вперёд-назад + лёгкий сквош)
   group.userData.tick = (t)=>{
-    const a = 0.18;
+    const a = 0.18;                    // амплитуда сдвига
     const s = 1.00 + 0.03*Math.sin(t*0.6 + phase);
     group.position.z = Math.sin(t*0.5 + phase) * a;
-    group.scale.set(1.00, s, 1.00/s);
+    group.scale.set(1.00, s, 1.00/s); // чуть «дышит»
   };
 
   return group;
 }
 
-/*** поле «боке» ***/
+/*** бОКЕ для «киношного» софта (дёшево) ***/
 function buildBokehField(p){
   const n = isQuest ? 120 : 220;
   const geo = new THREE.PlaneGeometry(1,1);
@@ -243,66 +247,17 @@ function buildBokehField(p){
   for(let i=0;i<n;i++){
     const r = p.count*p.cell + 3.0;
     const x=(Math.random()*2-1)*r, y=1.6+(Math.random()*2-1)*r*0.6, z=(Math.random()*2-1)*r;
-    const s = 0.6 + Math.random()*3.0;
+    const s = 0.6 + Math.random()*3.0; // размер «шарика»
     M.identity().makeRotationFromEuler(new THREE.Euler(0,0,0)).setPosition(x,y,z);
     M.multiply(new THREE.Matrix4().makeScale(s, s, s));
     inst.setMatrixAt(i, M);
   }
   inst.instanceMatrix.needsUpdate=true;
-  inst.userData.tick=(t)=>{ inst.material.opacity = 0.25 + 0.20*(0.5+0.5*Math.sin(t*0.7)); };
-  return inst;
-}
-
-/*** дальние «воспоминания» (фотокадры) ***/
-function buildMemories(p){
-  const group = new THREE.Group();
-  const loader = new THREE.TextureLoader();
-  const radiusBase = (p.count * p.cell + 3.0) * PHOTO_FAR; // дальше сетки
-  const minR = radiusBase * 0.9, maxR = radiusBase * 1.15;
-
-  PHOTO_FILES.forEach((path,idx)=>{
-    loader.load(path, (tex)=>{
-      if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace; else tex.encoding = THREE.sRGBEncoding;
-      const ar = tex.image.width / tex.image.height;
-      const w = PHOTO_SIZE * (0.85 + Math.random()*0.5);
-      const h = w / ar;
-
-      const mat = new THREE.MeshBasicMaterial({map:tex, transparent:true, opacity:0.0, depthWrite:false, side:THREE.DoubleSide});
-      const geo = new THREE.PlaneGeometry(w, h);
-      const m = new THREE.Mesh(geo, mat);
-
-      // случайная сферическая позиция вдали
-      const r = minR + Math.random()*(maxR-minR);
-      const th = Math.acos(1 - 2*Math.random());      // 0..pi
-      const ph = 2*Math.PI*Math.random();             // 0..2pi
-      m.position.set(
-        r*Math.sin(th)*Math.cos(ph),
-        1.6 + r*0.35*Math.cos(th), // слегка сдвигаем вверх-вниз
-        r*Math.sin(th)*Math.sin(ph)
-      );
-      m.userData.phase = Math.random()*Math.PI*2;
-      m.userData.speed = 0.25 + Math.random()*0.25;   // скорость мерцания
-      m.userData.drift = new THREE.Vector3(
-        (Math.random()*2-1)*0.02,
-        (Math.random()*2-1)*0.02,
-        (Math.random()*2-1)*0.02
-      );
-      group.add(m);
-    });
-  });
-
-  group.userData.tick = (t)=>{
-    group.children.forEach((m,i)=>{
-      // всегда «смотреть» примерно на центр (не строго на камеру, чтобы не липло)
-      m.lookAt(0,1.6,0);
-      // лёгкий дрейф
-      m.position.addScaledVector(m.userData.drift, 0.005);
-      // плавное появление/исчезание
-      const k = 0.5 + 0.5*Math.sin(t* m.userData.speed + m.userData.phase);
-      m.material.opacity = 0.05 + 0.35*k; // максимум 0.4 — далеко и ненавязчиво
-    });
+  inst.userData.tick=(t)=>{
+    // лёгкое мерцание
+    inst.material.opacity = 0.25 + 0.20*(0.5+0.5*Math.sin(t*0.7));
   };
-  return group;
+  return inst;
 }
 
 /*** сборка сцены ***/
@@ -314,21 +269,25 @@ function rebuild(){
 
   root = new THREE.Group();
 
+  // несколько слоёв решётки с разной фазой и оттенком — «размытие» и глубина
   const layers = Math.max(2, P.layers||2);
   for(let i=0;i<layers;i++){
-    const tint = 0.9 + i*0.08;
-    const phase = i*1.2;
+    const tint = 0.9 + i*0.08;       // чуть теплее дальше
+    const phase = i*1.2;             // разные фазы движения
     const layer = buildTesseractLayer(P, phase, tint);
     root.add(layer);
   }
 
+  // добавим поле «боке»
   const bokeh = buildBokehField(P);
   root.add(bokeh);
 
-  const memories = buildMemories(P);   // добавили дальние фото
-  root.add(memories);
+  root.userData.tick=(t)=>{
+    root.children.forEach(ch=>{
+      if(ch.userData.tick) ch.userData.tick(t);
+    });
+  };
 
-  root.userData.tick=(t)=>{ root.children.forEach(ch=>{ if(ch.userData.tick) ch.userData.tick(t); }); };
   scene.add(root);
 }
 
@@ -369,7 +328,7 @@ document.getElementById('mute').onclick = ()=>{ ensureMusic().then(()=>toggleMut
 /*** цикл ***/
 let last=performance.now()*0.001;
 renderer.setAnimationLoop(()=>{
-  const now=performance.now()*0.001;
+  const now=performance.now()*0.001, dt=Math.min(0.033, now-last); last=now;
   if (renderer.xr.isPresenting && xrFadePending){ xrFrames++; if(xrFrames>=4){ screen.fade(700); xrFadePending=false; } }
   if(root && root.userData.tick) root.userData.tick(now);
   if(controls.enabled) controls.update();
