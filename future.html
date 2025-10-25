@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8" />
-  <title>VR Room — Будущее (встроенный неон в потолке)</title>
+  <title>VR Room — Будущее (встроенный неон, совместимо с твоим three.js)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <script src="./assets/js/three.min.js"></script>
   <script src="./assets/js/OrbitControls.js"></script>
@@ -39,22 +39,27 @@ const PATH  = { models:'./assets/models/', textures:'./assets/textures/' };
 const FILES = { model:'future.glb', floor:'floorf.jpg', wall:'wallf.jpg', ceiling:'potolokf.jpg' };
 const ROOM  = { size:4, height:3 };
 
-/* ===== Встроенные световые полосы (заподлицо) =====
-   y ставим почти вровень с потолком, толщина минимальная. */
-const CEIL_Y_BAR   = ROOM.height - 0.012;     // высота самих «реек»
-const CEIL_Y_LIGHT = ROOM.height - 0.08;      // высота точечных источников
+/* ===== Встроенные световые полосы (заподлицо) ===== */
+const CEIL_Y_BAR   = ROOM.height - 0.012;
+const CEIL_Y_LIGHT = ROOM.height - 0.08;
 
-// логичное расположение: длинная вдоль кровати, короткая — над терминалом (перпендикулярно)
-const BED_BAR =  { x:-0.28, z: 0.08, len:1.20, rotY:0,          color:0xffa073 }; // тёплая
-const TERM_BAR = { x:-1.02, z:-0.28, len:0.80, rotY:Math.PI/2,  color:0x9feaff }; // холодная
+const BED_BAR  = { x:-0.28, z: 0.08, len:1.20, rotY:0,          color:0xffa073 };
+const TERM_BAR = { x:-1.02, z:-0.28, len:0.80, rotY:Math.PI/2,  color:0x9feaff };
 
-/* ===== Renderer / XR ===== */
+/* ===== Renderer / XR (совместимо с разными версиями three) ===== */
 const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false, powerPreference:'high-performance' });
 const isMobile = /Android|iPhone|iPad|iPod|Quest|Oculus/i.test(navigator.userAgent);
 renderer.setPixelRatio(isMobile ? 1 : Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.xr.enabled = true;
-if ('outputColorSpace' in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace; else renderer.outputEncoding = THREE.SRGBEncoding;
+
+// безопасная установка цветового пространства
+if ('outputColorSpace' in renderer && typeof THREE.SRGBColorSpace !== 'undefined') {
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+} else if ('outputEncoding' in renderer && typeof THREE.sRGBEncoding !== 'undefined') {
+  renderer.outputEncoding = THREE.sRGBEncoding;
+}
+
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -86,11 +91,24 @@ scene.add(key);
 const fill = new THREE.PointLight(0x00e5ff, 0.55, 6.0); fill.position.set(-1.8, 1.2, -1.6); scene.add(fill);
 const rim  = new THREE.PointLight(0xff3ea5, 0.30, 6.0); rim.position.set( 1.4, 2.2,  0.8); scene.add(rim);
 
-/* ===== Текстуры ===== */
+/* ===== Текстуры (совместимые setSRGB) ===== */
 const texLoader = new THREE.TextureLoader();
 const ANISO = 4;
-const setSRGB = t => (t && ('colorSpace' in t) ? (t.colorSpace=THREE.SRGBColorSpace,t): (t.encoding=THREE.sRGBEncoding,t));
-const loadT = url => { const t = texLoader.load(url); t.wrapS=t.wrapT=THREE.RepeatWrapping; t.anisotropy=ANISO; return setSRGB(t); };
+function setSRGB(tex){
+  if (!tex) return tex;
+  if ('colorSpace' in tex && typeof THREE.SRGBColorSpace !== 'undefined') {
+    tex.colorSpace = THREE.SRGBColorSpace;
+  } else if ('encoding' in tex && typeof THREE.sRGBEncoding !== 'undefined') {
+    tex.encoding = THREE.sRGBEncoding;
+  }
+  return tex;
+}
+function loadT(url){
+  const t = texLoader.load(url);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = ANISO;
+  return setSRGB(t);
+}
 
 const tFloor = loadT(PATH.textures + FILES.floor);   tFloor.repeat.set(1.3,1.3);
 const tWall  = loadT(PATH.textures + FILES.wall );   tWall.repeat.set(1.2,1.0);
@@ -113,9 +131,9 @@ const tCeil  = loadT(PATH.textures + FILES.ceiling); tCeil.repeat.set(1.2,1.2);
   ].forEach(s=>{ const w=new THREE.Mesh(g,m); w.position.set(...s.pos); w.rotation.set(...s.rot); w.receiveShadow=true; scene.add(w); });
 }
 
-/* ===== Встроенные полосы + реальные источники ===== */
+/* ===== Встроенные полосы + источники ===== */
 function addCeilStrip({x=0,z=0,len=1.0,rotY=0,color=0xffffff,intensity=2.0,thickness=0.008}={}){
-  const geom=new THREE.BoxGeometry(len, thickness, 0.01);               // очень тонко
+  const geom=new THREE.BoxGeometry(len, thickness, 0.01);
   const mat=new THREE.MeshStandardMaterial({
     color:0x121212,
     emissive: color,
@@ -128,7 +146,8 @@ function addCeilStrip({x=0,z=0,len=1.0,rotY=0,color=0xffffff,intensity=2.0,thick
   bar.rotation.y = rotY;
   bar.castShadow=false; bar.receiveShadow=false;
   scene.add(bar);
-  // мягкий ореол на потолке (едва заметный)
+
+  // ореол на потолке
   const g = new THREE.PlaneGeometry(len*0.95, 0.18);
   const m = new THREE.MeshBasicMaterial({ color, transparent:true, opacity:0.18, blending:THREE.AdditiveBlending, depthWrite:false });
   const halo = new THREE.Mesh(g,m);
@@ -138,11 +157,9 @@ function addCeilStrip({x=0,z=0,len=1.0,rotY=0,color=0xffffff,intensity=2.0,thick
   return bar;
 }
 
-// сами полосы
 addCeilStrip({ x:BED_BAR.x,  z:BED_BAR.z,  len:BED_BAR.len,  rotY:BED_BAR.rotY,  color:BED_BAR.color,  intensity:2.2 });
 addCeilStrip({ x:TERM_BAR.x, z:TERM_BAR.z, len:TERM_BAR.len, rotY:TERM_BAR.rotY, color:TERM_BAR.color, intensity:1.9 });
 
-// реальные источники чуть ниже потолка
 const bedLight  = new THREE.PointLight(BED_BAR.color, 1.35, 3.8, 2.0);
 bedLight.position.set(BED_BAR.x, CEIL_Y_LIGHT, BED_BAR.z);  scene.add(bedLight);
 const termLight = new THREE.PointLight(TERM_BAR.color, 1.05, 3.4, 2.0);
@@ -164,6 +181,7 @@ new THREE.GLTFLoader(manager).load(PATH.models + FILES.model, (g)=>{
   const obj = g.scene;
   obj.traverse(n=>{ if(n.isMesh){ n.castShadow = true; n.receiveShadow = true; }});
   scene.add(obj);
+  // прогрев шейдеров
   renderer.compile(scene, camera);
 });
 
@@ -187,11 +205,10 @@ async function startXR(){
   }catch(e){ console.error(e); alert('Не удалось запустить VR-сессию.'); }
 }
 
-/* ===== UI ===== */
+/* ===== UI / цикл ===== */
 document.getElementById('btnVR').onclick = async ()=>{ menuEl.style.display='none'; await startXR(); };
 document.getElementById('btnSpectate').onclick = ()=>{ menuEl.style.display='none'; controls.enabled=true; showBlack(); setTimeout(hideBlack,150); };
 
-/* ===== Контур ===== */
 addEventListener('resize', ()=>{
   camera.aspect = innerWidth/innerHeight;
   camera.updateProjectionMatrix();
