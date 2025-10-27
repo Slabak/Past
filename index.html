@@ -6,11 +6,7 @@
 <title>Комната прошлого — разлом</title>
 <style>
   html,body{height:100%;margin:0;overflow:hidden;background:#000;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
-
-  /* XR чёрный DOM-оверлей — СКРЫТ при старте */
   #black{position:fixed;inset:0;display:none;opacity:0;background:#000;z-index:20;transition:opacity .7s ease}
-
-  /* Экран ЗАГРУЗКИ (показывается сразу) */
   #loading{position:fixed;inset:0;display:grid;place-items:center;z-index:12;
     background:radial-gradient(ellipse at center,rgba(0,0,0,.85),rgba(0,0,0,.98));color:#fff}
   .loadbox{display:flex;flex-direction:column;align-items:center;gap:12px}
@@ -21,8 +17,6 @@
     box-shadow:0 0 0 1px rgba(255,255,255,.1) inset}
   .percent{font:18px/1.1 monospace}
   .hint{font:14px;opacity:.85}
-
-  /* МЕНЮ (покажем ПОСЛЕ загрузки) */
   #overlay{position:fixed;inset:0;display:none;place-items:center;z-index:10;
     background:radial-gradient(ellipse at center,rgba(0,0,0,.82),rgba(0,0,0,.96));color:#fff}
   .panel{display:flex;flex-direction:column;gap:14px;align-items:center;padding:22px 26px;border-radius:14px;
@@ -30,8 +24,6 @@
   .title{font-size:18px;opacity:.92}
   .btn{cursor:pointer;border:0;border-radius:10px;padding:12px 16px;background:#6b3c1e;color:#fff;font-weight:600}
   .btn.secondary{background:#3a2a22}
-  .note{font-size:12px;opacity:.75}
-
   canvas.fade-in{animation:fi .5s ease forwards}@keyframes fi{from{opacity:0}to{opacity:1}}
 </style>
 </head>
@@ -39,7 +31,7 @@
   <!-- XR DOM overlay -->
   <div id="black"></div>
 
-  <!-- Загрузка (сразу видна) -->
+  <!-- Загрузка -->
   <div id="loading">
     <div class="loadbox">
       <div class="ring" id="ring"></div>
@@ -48,7 +40,7 @@
     </div>
   </div>
 
-  <!-- Меню (появится после 100%) -->
+  <!-- Меню -->
   <div id="overlay">
     <div class="panel">
       <div class="title">портал открыт. как войдём?</div>
@@ -58,13 +50,13 @@
     </div>
   </div>
 
-  <!-- three.js: локальные файлы -->
+  <!-- three.js -->
   <script src="assets/js/three.min.js"></script>
   <script src="assets/js/OrbitControls.js"></script>
   <script src="assets/js/GLTFLoader.js"></script>
 
 <script>
-/* ===================== КОНСТАНТЫ СЦЕНЫ ===================== */
+/* ====== КОНСТАНТЫ ====== */
 const W=4, D=4, H=3; // размеры комнаты (м)
 
 // Текстуры
@@ -89,15 +81,16 @@ const POS_BARREL   = new THREE.Vector3(-W/2 + 0.55, 0, -D/2 + 0.65);
 const POS_TABLE    = new THREE.Vector3( 0.0, 0, -D/2 + 0.55);
 const POS_GLOBUS   = new THREE.Vector3( W/2 - 0.55, 0, -D/2 + 0.90);
 const POS_SHIELD   = new THREE.Vector3( W/2 - 0.07, 1.55, -0.40);
-
-// Скамейка
 const POS_BENCH    = new THREE.Vector3( POS_TABLE.x + 0.05, 0, POS_TABLE.z + 0.62 );
 const ROT_BENCH_Y  = 0.22;
 
-// Музыка
-const MUSIC_MP3='assets/music/music.mp3';
+/* ====== АУДИО ====== */
+const MUSIC_BG   = 'assets/music/bgpast.mp3';     // фоновая музыка (loop)
+const VOICE_FILE = 'assets/music/voicepast.mp3';  // речь хранителя (one-shot)
 
-/* ===================== UI ===================== */
+let audioListener, bgMusic, voiceAudio, audioLoader;
+
+/* ====== UI ====== */
 const overlay = document.getElementById('overlay');
 const loading = document.getElementById('loading');
 const ring    = document.getElementById('ring');
@@ -109,35 +102,34 @@ function hideLoading(){ loading.style.display='none'; }
 function showMenu(){ overlay.style.display='grid'; }
 function setProgress(p){ ring.style.setProperty('--p', p+'%'); percent.textContent = Math.round(p)+'%'; }
 
-/* ===================== СТЕЙТ ===================== */
+/* ====== STATE ====== */
 let scene,camera,renderer,controls,tl,manager;
-let candle1,candle2; // «свечи»
-let audioListener,music;
+let candle1,candle2;
 
-/* ===================== XR DOM overlay helpers ===================== */
+/* ====== XR Helpers ====== */
 function showBlack(){ blackEl.style.display='block'; requestAnimationFrame(()=>{ blackEl.style.opacity='1'; }); }
 function hideBlack(){ blackEl.style.opacity='0'; setTimeout(()=>{ blackEl.style.display='none'; }, 750); }
 function waitXRFrames(session, n, cb){ let i=0; function onF(){ if(++i>=n) cb(); else session.requestAnimationFrame(onF);} session.requestAnimationFrame(onF); }
 
-/* ===================== КНОПКИ ===================== */
+/* ====== КНОПКИ ====== */
 document.getElementById('btnVR').addEventListener('click', async ()=>{
   overlay.style.display='none';
-  await startXR(); // скрывать чёрный будем по кадрам XR
+  await startXR(); // музыка стартует внутри XR
 });
 
-document.getElementById('btnFlat').addEventListener('click', async ()=>{
+document.getElementById('btnFlat').addEventListener('click', ()=>{
   overlay.style.display='none';
   controls.enabled=true;
   showBlack(); setTimeout(hideBlack,150);
 });
 
-/* ===================== ПЕРВИЧНЫЙ СТАРТ: СНАЧАЛА ЗАГРУЗКА ===================== */
+/* ====== СТАРТ ====== */
 initRenderer();
 bootSceneAndAssets()
   .then(()=>{ hideLoading(); showMenu(); hideBlack(); })
   .catch(()=>{ hideLoading(); showMenu(); hideBlack(); });
 
-/* ===================== Загрузка сцены/ассетов с прогрессом ===================== */
+/* ====== Загрузка с прогрессом ====== */
 async function bootSceneAndAssets(){
   showLoading(0);
 
@@ -150,17 +142,18 @@ async function bootSceneAndAssets(){
   initScene(manager);
   buildRoom(manager);
   await loadModels(manager);
-  startMusic();
+  await preloadAudio(); // только загружаем буферы
 }
 
-/* ===================== РЕНДЕРЕР ===================== */
+/* ====== РЕНДЕРЕР ====== */
 function initRenderer(){
   if (renderer) return;
   renderer=new THREE.WebGLRenderer({antialias:true});
   const isMobile=/Android|iPhone|iPad|iPod|Quest|Oculus/i.test(navigator.userAgent);
   renderer.setPixelRatio(isMobile?1:Math.min(devicePixelRatio,2));
   renderer.setSize(innerWidth,innerHeight);
-  renderer.outputColorSpace=THREE.SRGBColorSpace;
+  if ('outputColorSpace' in renderer) renderer.outputColorSpace=THREE.SRGBColorSpace;
+  else if ('outputEncoding' in renderer) renderer.outputEncoding=THREE.sRGBEncoding;
   renderer.toneMapping=THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure=0.92;
   renderer.shadowMap.enabled=true;
@@ -176,7 +169,6 @@ function initRenderer(){
     renderer.setSize(innerWidth,innerHeight);
   });
 
-  // цикл рендера
   renderer.setAnimationLoop(()=>{
     const t=performance.now()*0.0025;
     if(candle1) candle1.intensity=0.46+Math.sin(t*3.2)*0.06+Math.sin(t*5.3)*0.04;
@@ -186,7 +178,7 @@ function initRenderer(){
   });
 }
 
-/* ===================== СЦЕНА/КАМЕРА/СВЕТ ===================== */
+/* ====== СЦЕНА/КАМЕРА/СВЕТ ====== */
 function initScene(manager){
   scene=new THREE.Scene();
   scene.background=new THREE.Color(0x0a0706);
@@ -215,17 +207,23 @@ function initScene(manager){
   candle1=new THREE.PointLight(0xffaa66,0.46,5.0); candle1.position.set(-1.2,1.15,1.15); scene.add(candle1);
   candle2=new THREE.PointLight(0xffa260,0.34,4.0); candle2.position.set(0.25,1.05,-1.55); scene.add(candle2);
 
-  // музыка
+  // Аудио-объекты
   audioListener=new THREE.AudioListener(); camera.add(audioListener);
-  music=new THREE.Audio(audioListener);
+  bgMusic    = new THREE.Audio(audioListener);
+  voiceAudio = new THREE.Audio(audioListener);
+  audioLoader = new THREE.AudioLoader(manager);
 }
 
-/* ===================== КОМНАТА ===================== */
+/* ====== КОМНАТА ====== */
 function buildRoom(manager){
-  const floorTex=tl.load(TEX_FLOOR); floorTex.wrapS=floorTex.wrapT=THREE.RepeatWrapping; floorTex.repeat.set(2,2); floorTex.colorSpace=THREE.SRGBColorSpace;
-  const wallTex =tl.load(TEX_WALL ); wallTex.wrapS=wallTex.wrapT=THREE.ClampToEdgeWrapping; wallTex.colorSpace=THREE.SRGBColorSpace;
-  const ceilTex =tl.load(TEX_CEIL ); ceilTex.wrapS=ceilTex.wrapT=THREE.RepeatWrapping; ceilTex.repeat.set(2,2); ceilTex.colorSpace=THREE.SRGBColorSpace;
-  const mirrorTex=tl.load(TEX_MIRROR); mirrorTex.colorSpace=THREE.SRGBColorSpace;
+  const tl = new THREE.TextureLoader(manager);
+  const floorTex=tl.load(TEX_FLOOR); floorTex.wrapS=floorTex.wrapT=THREE.RepeatWrapping; floorTex.repeat.set(2,2);
+  const wallTex =tl.load(TEX_WALL ); wallTex.wrapS=wallTex.wrapT=THREE.ClampToEdgeWrapping;
+  const ceilTex =tl.load(TEX_CEIL ); ceilTex.wrapS=ceilTex.wrapT=THREE.RepeatWrapping; ceilTex.repeat.set(2,2);
+
+  if ('colorSpace' in floorTex) floorTex.colorSpace=THREE.SRGBColorSpace; else floorTex.encoding=THREE.sRGBEncoding;
+  if ('colorSpace' in wallTex ) wallTex.colorSpace =THREE.SRGBColorSpace; else wallTex.encoding =THREE.sRGBEncoding;
+  if ('colorSpace' in ceilTex ) ceilTex.colorSpace =THREE.SRGBColorSpace; else ceilTex.encoding =THREE.sRGBEncoding;
 
   const floor=new THREE.Mesh(new THREE.PlaneGeometry(W,D), new THREE.MeshStandardMaterial({map:floorTex,roughness:.92}));
   floor.rotation.x=-Math.PI/2; floor.receiveShadow=true; scene.add(floor);
@@ -240,13 +238,9 @@ function buildRoom(manager){
 
   const ceil=new THREE.Mesh(new THREE.PlaneGeometry(W,D), new THREE.MeshStandardMaterial({map:ceilTex,roughness:.88}));
   ceil.position.set(0,H,0); ceil.rotation.x=Math.PI/2; scene.add(ceil);
-
-  const mirror=new THREE.Mesh(new THREE.PlaneGeometry(.9,.6),
-    new THREE.MeshStandardMaterial({map:mirrorTex,metalness:.8,roughness:.25}));
-  mirror.position.set(0,1.5,-D/2+0.01); scene.add(mirror);
 }
 
-/* ===================== УТИЛИТЫ МОДЕЛЕЙ ===================== */
+/* ====== Модели ====== */
 function fitByHeight(root, targetH){
   root.traverse(o=>{ if(o.isMesh){o.castShadow=o.receiveShadow=true;} });
   const b=new THREE.Box3().setFromObject(root);
@@ -256,7 +250,7 @@ function fitByHeight(root, targetH){
   const b2=new THREE.Box3().setFromObject(root);
   root.position.sub(b2.getCenter(new THREE.Vector3()));
   const b3=new THREE.Box3().setFromObject(root);
-  root.position.y -= b3.min.y; // поставить на пол
+  root.position.y -= b3.min.y;
 }
 function snapToFrontWall(mesh, inset=-0.018){
   const box=new THREE.Box3().setFromObject(mesh);
@@ -265,7 +259,6 @@ function snapToFrontWall(mesh, inset=-0.018){
   mesh.position.z += (target - maxZ);
 }
 
-/* ===================== ЗАГРУЗКА МОДЕЛЕЙ ===================== */
 async function loadModels(manager){
   const L=new THREE.GLTFLoader(manager);
   await new Promise((res)=>L.load(MODEL_CHEST,(g)=>{ const m=g.scene; fitByHeight(m,0.95); m.position.set(POS_CHEST_X,0,POS_CHEST_Z); m.rotation.y=0; scene.add(m); res(); }));
@@ -277,33 +270,47 @@ async function loadModels(manager){
   await new Promise((res)=>L.load(MODEL_SHIELD,(g)=>{ const m=g.scene; fitByHeight(m,0.8); m.rotation.y=-Math.PI/2; m.position.copy(POS_SHIELD); scene.add(m); res(); }));
 }
 
-/* ===================== МУЗЫКА ===================== */
-function startMusic(){
-  try{
-    const a=new THREE.AudioLoader(manager);
-    a.load(MUSIC_MP3,(buf)=>{ music.setBuffer(buf); music.setLoop(true); music.setVolume(.35); music.play(); },undefined,()=>{});
-  }catch(e){}
+/* ====== Аудио: предварительная загрузка ====== */
+async function preloadAudio(){
+  await Promise.all([
+    new Promise((res,rej)=>audioLoader.load(MUSIC_BG,(buf)=>{ bgMusic.setBuffer(buf); bgMusic.setLoop(true);  bgMusic.setVolume(0.35); res(); },undefined,rej)),
+    new Promise((res,rej)=>audioLoader.load(VOICE_FILE,(buf)=>{ voiceAudio.setBuffer(buf); voiceAudio.setLoop(false); voiceAudio.setVolume(0.95); res(); },undefined,rej)),
+  ]);
 }
 
-/* ===================== XR с анти-«чёрным стартом» ===================== */
+/* ====== Воспроизведение звука в XR ====== */
+function startSoundtrack(){
+  try{
+    if (bgMusic && bgMusic.buffer) { bgMusic.stop(); bgMusic.offset = 0; bgMusic.play(); }
+    if (voiceAudio && voiceAudio.buffer) { voiceAudio.stop(); voiceAudio.offset = 0; voiceAudio.play(); }
+  }catch(e){}
+}
+function stopSoundtrack(){
+  try{ bgMusic && bgMusic.stop(); }catch(e){}
+  try{ voiceAudio && voiceAudio.stop(); }catch(e){}
+}
+
+/* ====== XR с анти-«чёрный старт» ====== */
 async function startXR(){
   if (!navigator.xr) { alert('WebXR не поддерживается. Открой в Quest Browser.'); return; }
   try{
-    // прогрев до VR — уменьшает вероятность пустого первого кадра
-    renderer.render(scene, camera);
+    renderer.render(scene, camera); // «прогрев»
     showBlack();
 
     const session = await navigator.xr.requestSession('immersive-vr', { requiredFeatures:['local-floor'] });
     await renderer.xr.setSession(session);
 
     const onVis = ()=>{
-      if (session.visibilityState === 'visible'){ waitXRFrames(session, 2, hideBlack); }
-      else showBlack();
+      if (session.visibilityState === 'visible'){
+        waitXRFrames(session, 2, ()=>{ hideBlack(); startSoundtrack(); });
+      } else {
+        showBlack();
+      }
     };
     session.addEventListener('visibilitychange', onVis);
     onVis();
 
-    session.addEventListener('end', ()=>{ showBlack(); showMenu(); });
+    session.addEventListener('end', ()=>{ showBlack(); stopSoundtrack(); showMenu(); });
   }catch(e){
     console.error(e); alert('Не удалось запустить VR-сессию.');
   }
