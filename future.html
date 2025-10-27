@@ -43,9 +43,30 @@ const PATH  = { models:'./assets/models/', textures:'./assets/textures/' };
 const FILES = { model:'future.glb', floor:'floorf.jpg', wall:'wallf.jpg', ceiling:'potolokf.jpg' };
 const ROOM  = { size:4, height:3 };
 
-/* ===== HTMLAudio элементы (fallback) ===== */
+/* ===== HTMLAudio элементы (fallback) + уровни ===== */
 const bgEl = document.getElementById('bgm');
 const voiceEl = document.getElementById('voice');
+// базовые уровни
+const BG_BASE_VOL = 0.16;   // тише фон
+const BG_DUCK_VOL = 0.05;   // приглушение на время речи
+const VOICE_VOL   = 1.0;    // голос погромче
+bgEl.volume = BG_BASE_VOL;
+voiceEl.volume = VOICE_VOL;
+
+// утилита плавного изменения громкости
+function fadeVolume(el, to, ms=600){
+  const from = el.volume;
+  const t0 = performance.now();
+  function step(t){
+    const k = Math.min(1, (t - t0)/ms);
+    el.volume = from + (to - from)*k;
+    if (k < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+// дакинг: когда голос стартует — приглушаем фон; когда закончился — возвращаем
+voiceEl.addEventListener('play',  ()=>fadeVolume(bgEl, BG_DUCK_VOL, 600));
+voiceEl.addEventListener('ended', ()=>fadeVolume(bgEl, BG_BASE_VOL, 900));
 
 /* ===== WebGL / XR ===== */
 const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false, powerPreference:'high-performance' });
@@ -194,10 +215,11 @@ async function startXR(){
     const session = await navigator.xr.requestSession('immersive-vr', { requiredFeatures:['local-floor'], optionalFeatures:['bounded-floor'] });
     await renderer.xr.setSession(session);
 
-    // HTMLAudio fallback: надёжный запуск внутри XR
+    // HTMLAudio fallback: запуск внутри XR
     try {
       bgEl.currentTime = 0; await bgEl.play();          // фоновая (loop)
-      voiceEl.currentTime = 0; await voiceEl.play();    // голос (один раз)
+      voiceEl.currentTime = 0; await voiceEl.play();    // голос (one-shot)
+      // если речь началась до дакинга — обработчики наверху подхватят
     } catch(e){}
 
     const onVis=()=>{ if(session.visibilityState==='visible'){ waitXRFrames(session,2,hideBlack); } else showBlack(); };
@@ -205,10 +227,11 @@ async function startXR(){
 
     session.addEventListener('end', ()=>{
       showBlack();
-      // Останавливаем звук при выходе из VR
       try{ bgEl.pause(); }catch(e){}
       try{ voiceEl.pause(); }catch(e){}
       menuEl.style.display='flex';
+      // вернуть фон на базовый уровень (вдруг сессия завершилась на дакинге)
+      bgEl.volume = BG_BASE_VOL;
     });
   }catch(e){ console.error(e); alert('Не удалось запустить VR-сессию.'); }
 }
