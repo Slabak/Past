@@ -39,6 +39,11 @@ const PATH  = { models:'./assets/models/', textures:'./assets/textures/' };
 const FILES = { model:'future.glb', floor:'floorf.jpg', wall:'wallf.jpg', ceiling:'potolokf.jpg' };
 const ROOM  = { size:4, height:3 };
 
+/* === АУДИО (добавлено) === */
+const MUSIC_BG   = './assets/music/bgfuture.mp3';     // фоновая (loop)
+const VOICE_FILE = './assets/music/voicefuture.mp3';  // голос (one-shot)
+let audioListener, audioLoader, bgMusic, voiceAudio;
+
 /* ===== Встроенные световые полосы (заподлицо) ===== */
 const CEIL_Y_BAR   = ROOM.height - 0.012;
 const CEIL_Y_LIGHT = ROOM.height - 0.08;
@@ -46,20 +51,17 @@ const CEIL_Y_LIGHT = ROOM.height - 0.08;
 const BED_BAR  = { x:-0.28, z: 0.08, len:1.20, rotY:0,          color:0xffa073 };
 const TERM_BAR = { x:-1.02, z:-0.28, len:0.80, rotY:Math.PI/2,  color:0x9feaff };
 
-/* ===== Renderer / XR (совместимо с разными версиями three) ===== */
+/* ===== Renderer / XR ===== */
 const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false, powerPreference:'high-performance' });
 const isMobile = /Android|iPhone|iPad|iPod|Quest|Oculus/i.test(navigator.userAgent);
 renderer.setPixelRatio(isMobile ? 1 : Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.xr.enabled = true;
-
-// безопасная установка цветового пространства
 if ('outputColorSpace' in renderer && typeof THREE.SRGBColorSpace !== 'undefined') {
   renderer.outputColorSpace = THREE.SRGBColorSpace;
 } else if ('outputEncoding' in renderer && typeof THREE.sRGBEncoding !== 'undefined') {
   renderer.outputEncoding = THREE.sRGBEncoding;
 }
-
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -78,6 +80,12 @@ const controls = new THREE.OrbitControls(camera, renderer.domElement);
 controls.enabled = false;
 controls.target.set(0, 1.6, 0);
 
+/* === AUDIO init (добавлено): слушатель и объекты === */
+audioListener = new THREE.AudioListener();
+camera.add(audioListener);
+bgMusic    = new THREE.Audio(audioListener);
+voiceAudio = new THREE.Audio(audioListener);
+
 /* ===== Базовый свет ===== */
 scene.add(new THREE.HemisphereLight(0x91a4ff, 0x0a0d16, 0.45));
 const key = new THREE.DirectionalLight(0xffffff, 0.36);
@@ -91,7 +99,7 @@ scene.add(key);
 const fill = new THREE.PointLight(0x00e5ff, 0.55, 6.0); fill.position.set(-1.8, 1.2, -1.6); scene.add(fill);
 const rim  = new THREE.PointLight(0xff3ea5, 0.30, 6.0); rim.position.set( 1.4, 2.2,  0.8); scene.add(rim);
 
-/* ===== Текстуры (совместимые setSRGB) ===== */
+/* ===== Текстуры ===== */
 const texLoader = new THREE.TextureLoader();
 const ANISO = 4;
 function setSRGB(tex){
@@ -165,7 +173,7 @@ bedLight.position.set(BED_BAR.x, CEIL_Y_LIGHT, BED_BAR.z);  scene.add(bedLight);
 const termLight = new THREE.PointLight(TERM_BAR.color, 1.05, 3.4, 2.0);
 termLight.position.set(TERM_BAR.x, CEIL_Y_LIGHT, TERM_BAR.z); scene.add(termLight);
 
-/* ===== Загрузка GLB ===== */
+/* ===== Загрузка GLB + аудио через LoadingManager ===== */
 const loadingEl   = document.getElementById('loading');
 const loadingText = document.getElementById('loadingText');
 const menuEl      = document.getElementById('menu');
@@ -177,6 +185,11 @@ manager.onProgress = (url, loaded, total)=>{ loadingText.textContent = `Загр
 manager.onLoad     = ()=>{ loadingEl.style.display='none'; menuEl.style.display='flex'; };
 manager.onError    = (url)=>{ loadingText.textContent = `Ошибка: ${url}`; };
 
+/* === AUDIO preload (добавлено) === */
+audioLoader = new THREE.AudioLoader(manager);
+audioLoader.load(MUSIC_BG,   (buf)=>{ bgMusic.setBuffer(buf);   bgMusic.setLoop(true);  bgMusic.setVolume(0.35); });
+audioLoader.load(VOICE_FILE, (buf)=>{ voiceAudio.setBuffer(buf); voiceAudio.setLoop(false); voiceAudio.setVolume(0.95); });
+
 new THREE.GLTFLoader(manager).load(PATH.models + FILES.model, (g)=>{
   const obj = g.scene;
   obj.traverse(n=>{ if(n.isMesh){ n.castShadow = true; n.receiveShadow = true; }});
@@ -185,13 +198,32 @@ new THREE.GLTFLoader(manager).load(PATH.models + FILES.model, (g)=>{
   renderer.compile(scene, camera);
 });
 
-/* ===== XR: анти «чёрный старт» ===== */
+/* ===== XR: анти «чёрный старт» + звук ===== */
 function showBlack(){ blackEl.style.display='block'; requestAnimationFrame(()=>{ blackEl.style.opacity='1'; }); }
 function hideBlack(){ blackEl.style.opacity='0'; setTimeout(()=>{ blackEl.style.display='none'; }, 750); }
 function waitXRFrames(session, n, cb){
   let i=0; function onF(){ if(++i>=n) cb(); else session.requestAnimationFrame(onF); }
   session.requestAnimationFrame(onF);
 }
+async function ensureAudioReady(){
+  try{
+    const ctx = audioListener.context;
+    if (ctx && ctx.state === 'suspended') await ctx.resume();
+  }catch(e){}
+}
+function startSoundtrack(){
+  try{
+    if (bgMusic && bgMusic.isPlaying) bgMusic.stop();
+    if (voiceAudio && voiceAudio.isPlaying) voiceAudio.stop();
+    bgMusic && bgMusic.buffer && bgMusic.play();          // loop
+    voiceAudio && voiceAudio.buffer && voiceAudio.play(); // one-shot
+  }catch(e){}
+}
+function stopSoundtrack(){
+  try{ bgMusic && bgMusic.stop(); }catch(e){}
+  try{ voiceAudio && voiceAudio.stop(); }catch(e){}
+}
+
 async function startXR(){
   if (!navigator.xr) { alert('WebXR не поддерживается. Открой в Quest Browser.'); return; }
   try{
@@ -199,9 +231,14 @@ async function startXR(){
     showBlack();
     const session = await navigator.xr.requestSession('immersive-vr', { requiredFeatures:['local-floor'], optionalFeatures:['bounded-floor'] });
     await renderer.xr.setSession(session);
+
+    // стартуем аудио сразу при входе в VR
+    await ensureAudioReady();
+    startSoundtrack();
+
     const onVis=()=>{ if(session.visibilityState==='visible'){ waitXRFrames(session,2,hideBlack); } else showBlack(); };
     session.addEventListener('visibilitychange', onVis); onVis();
-    session.addEventListener('end', ()=>{ showBlack(); menuEl.style.display='flex'; });
+    session.addEventListener('end', ()=>{ showBlack(); stopSoundtrack(); menuEl.style.display='flex'; });
   }catch(e){ console.error(e); alert('Не удалось запустить VR-сессию.'); }
 }
 
