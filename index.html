@@ -8,9 +8,8 @@
   html,body{height:100%;margin:0;overflow:hidden;background:#000;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
   /* XR чёрный оверлей (скрыт при старте) */
   #black{position:fixed;inset:0;display:none;opacity:0;background:#000;z-index:20;transition:opacity .7s ease}
-  /* Экран загрузки с процентами — поверх сцены, виден до onLoad */
-  #loading{position:fixed;inset:0;display:grid;place-items:center;z-index:12;
-    background:rgba(0,0,0,.92);color:#fff}
+  /* Экран загрузки */
+  #loading{position:fixed;inset:0;display:grid;place-items:center;z-index:12;background:#000;color:#fff}
   .loadbox{display:flex;flex-direction:column;align-items:center;gap:12px}
   .ring{width:90px;height:90px;border-radius:50%;
     background:conic-gradient(#ffb366 var(--p,0%), rgba(255,255,255,.08) 0);
@@ -27,10 +26,8 @@
 </style>
 </head>
 <body>
-  <!-- чёрный оверлей XR (только при входе/выходе из VR) -->
   <div id="black"></div>
 
-  <!-- загрузка -->
   <div id="loading">
     <div class="loadbox">
       <div class="ring" id="ring"></div>
@@ -39,7 +36,6 @@
     </div>
   </div>
 
-  <!-- меню -->
   <div id="overlay">
     <div class="panel">
       <div class="title">портал открыт</div>
@@ -55,7 +51,7 @@
   <script src="assets/js/GLTFLoader.js"></script>
 
 <script>
-/* ===== ПУТИ и РАЗМЕРЫ ===== */
+/* ===== ПУТИ и РАЗМЕРЫ (как у тебя) ===== */
 const W=4, D=4, H=3;
 // текстуры
 const TEX_FLOOR ='assets/textures/floor.jpg';
@@ -90,11 +86,12 @@ let scene,camera,renderer,controls,manager,tl;
 let audioListener,audioLoader,bgMusic,voiceAudio;
 
 initRenderer();
-boot().then(()=>{ /* загрузка прячется в onLoad */ });
+boot().then(()=>{ loading.style.display='none'; overlay.style.display='grid'; hideBlack(); });
 
 document.getElementById('btnFlat').onclick = ()=>{
   overlay.style.display='none';
   controls.enabled = true;
+  showBlack(); setTimeout(hideBlack,150);
 };
 document.getElementById('btnVR').onclick = async ()=>{
   overlay.style.display='none';
@@ -102,18 +99,14 @@ document.getElementById('btnVR').onclick = async ()=>{
 };
 
 async function boot(){
-  // ВНИМАНИЕ: чёрный оверлей НЕ показываем — чтобы видеть проценты!
+  showBlack();
   loading.style.display='grid'; setProgress(0);
 
   manager = new THREE.LoadingManager();
   let done=0,total=0;
   manager.onStart    = (_,l,t)=>{ done=l; total=t; setProgress(total?done/total*100:0); };
   manager.onProgress = (_,l,t)=>{ done=l; total=t; setProgress(total?done/total*100:0); };
-  manager.onLoad     = ()=>{
-    setProgress(100);
-    loading.style.display='none';
-    overlay.style.display='grid'; // теперь видим меню с кнопками
-  };
+  manager.onLoad     = ()=>{ setProgress(100); };
 
   initScene(manager);
   buildRoom(manager);
@@ -264,7 +257,7 @@ function startSoundtrack(){
   try{
     if (bgMusic && bgMusic.isPlaying) bgMusic.stop();
     if (voiceAudio && voiceAudio.isPlaying) voiceAudio.stop();
-    bgMusic && bgMusic.buffer && bgMusic.play();          // loop
+    bgMusic && bgMusic.buffer && bgMusic.play();       // loop
     voiceAudio && voiceAudio.buffer && voiceAudio.play(); // one-shot
   }catch(e){}
 }
@@ -279,13 +272,13 @@ function waitXRFrames(session, n, cb){ let i=0; function onF(){ if(++i>=n) cb();
 async function startXR(){
   if (!navigator.xr) { alert('WebXR не поддерживается. Открой в Quest Browser.'); return; }
   try{
-    // показываем чёрный экран ТОЛЬКО на вход
+    renderer.render(scene, camera); // прогрев
     showBlack();
 
     const session = await navigator.xr.requestSession('immersive-vr', { requiredFeatures:['local-floor'] });
     await renderer.xr.setSession(session);
 
-    // политику автоплея чиним тут же
+    // обязательно «resume» аудиоконтекст (автоплей политика)
     await ensureAudioReady();
 
     const onVis = ()=>{
