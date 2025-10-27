@@ -3,11 +3,12 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Тессеракт — XR</title>
+<title>Тессеракт — low, XR старт без чёрного</title>
 <script src="./assets/js/three.min.js"></script>
 <script src="./assets/js/OrbitControls.js"></script>
 <style>
   html,body{margin:0;height:100%;background:#000;color:#fff;font-family:system-ui,Segoe UI,Roboto,Arial}
+  /* Чёрный оверлей СКРЫТ при старте */
   #black{position:fixed;inset:0;background:#000;z-index:50;opacity:0;display:none;transition:opacity .7s ease}
   .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#000;z-index:40}
   .menu{position:fixed;inset:0;background:rgba(0,0,0,.88);display:none;align-items:center;justify-content:center;flex-direction:column;gap:12px;z-index:30}
@@ -27,18 +28,18 @@
   <div class="hud">ПК: мышь — обзор. Клик включает музыку. Камера не трясётся.</div>
   <button id="mute" class="mute">🔊 Музыка</button>
 
-  <!-- HTMLAudio: фоновая у вас уже была в коде; здесь — только ГОЛОС как бэкап -->
-  <audio id="voiceEl" src="./assets/music/voiceuniverse.mp3" preload="auto"></audio>
+  <!-- ДОБАВЛЕНО: голос хранителя (один раз в начале VR) -->
+  <audio id="voice" src="./assets/music/voiceuniverse.mp3" preload="auto"></audio>
 
 <script>
-/* ====== БЫСТРЫЕ НАСТРОЙКИ ====== */
-const USE_HTML_VOICE_FALLBACK = true;     // включён бэкап голоса через <audio>
-const MUSIC_LEVEL_BASE = 0.10;            // базовая громкость музыки
-const MUSIC_LEVEL_DUCK = 0.015;           // приглушение музыки на время речи (глубже)
-const VOICE_GAIN = 2.5;                   // усиление голоса в WebAudio (можно 1.0–3.5)
-const VOICE_MAX_SECS = 90;                // страховка по времени речи
+/* ---------- настройки ---------- */
+const PHOTO_FILES = Array.from({length:15}, (_,i)=>`./assets/textures/${i+1}.jpg`);
+const GRID_COUNT = 4;
+const PHOTO_SIZE = 1.05, PHOTO_NEAR = 2.0, PHOTO_POOL = 18;
+const PHOTO_OPACITY_MAX = 0.65;
+const PHOTO_LIFETIME = [1.8, 3.2], PHOTO_COOLDOWN = [1.2, 2.2];
+const PHOTO_RANGE = [0.65, 0.9];
 
-/* ====== Three.js базовая и ваша стабильная сцена (укорочено) ====== */
 const ua = navigator.userAgent;
 const isQuest  = /Quest|Oculus/i.test(ua);
 const isMobile = /Android|iPhone|iPad|iPod|Quest|Oculus/i.test(ua);
@@ -62,20 +63,22 @@ camera.position.set(0,1.6,0.01);
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
 controls.enabled = false; controls.target.set(0,1.6,0);
 
-// свет
+/* -------- свет -------- */
 scene.add(new THREE.AmbientLight(0x120e0b, 0.95));
 const key = new THREE.DirectionalLight(0xffe0b5, 0.58); key.position.set(-2.5,5,-4.5); scene.add(key);
 const rim = new THREE.DirectionalLight(0xbfd4ff, 0.18);  rim.position.set( 3.0,2.0, 3.5); scene.add(rim);
 
-// материалы
+/* -------- материалы -------- */
 const matWood  = new THREE.MeshLambertMaterial({color: 0x3c2f24});
 const matGlass = new THREE.MeshLambertMaterial({color: 0xcfd9ff, transparent:true, opacity:0.30});
 const matGlow  = new THREE.MeshBasicMaterial({color:0xffffff, transparent:true, opacity:0.65, blending:THREE.AdditiveBlending, depthWrite:false});
 
-/* ====== (ОПУЩЕНО) генерация тессеракта/боке/воспоминаний — та же стабильная версия ====== */
-/* … тот же код построения слоёв/боке/фото, что у тебя сейчас стоит и работает … */
-/* Чтобы не раздувать файл в ответе, он идентичен твоему последнему «стабильному» варианту. */
+/* -------- параметры fixed low -------- */
+function qualityParams(){
+  return {cell:3, count:GRID_COUNT, beam:0.085, slat:0.024, distance:3.6, glassRatio:0.3, fillDensity:5, glowCount:160, layers:2};
+}
 
+/* -------- боке-текстура -------- */
 function makeBokehTexture(){
   const s=256, c=document.createElement('canvas'); c.width=c.height=s; const ctx=c.getContext('2d');
   const g=ctx.createRadialGradient(s/2,s/2,0, s/2,s/2,s/2);
@@ -84,17 +87,16 @@ function makeBokehTexture(){
   g.addColorStop(1,'rgba(255,255,255,0.0)');
   ctx.fillStyle=g; ctx.fillRect(0,0,s,s);
   const t=new THREE.CanvasTexture(c); t.generateMipmaps=false; t.minFilter=THREE.LinearFilter; t.magFilter=THREE.LinearFilter;
-  if ('colorSpace' in t) t.colorSpace = THREE.SRGBColorSpace; else t.encoding = THREE.SRGBEncoding;
+  if ('colorSpace' in t) t.colorSpace = THREE.SRGBColorSpace; else t.encoding = THREE.sRGBEncoding;
   return t;
 }
 const bokehTex = makeBokehTexture();
 
-/* === Ниже краткая сборка ровно как была: два слоя каркаса + боке + «воспоминания» === */
-const GRID_COUNT = 4;
-function qualityParams(){ return {cell:3, beam:0.085, slat:0.024, distance:3.6, fillDensity:5, glowCount:160, layers:2}; }
+/* -------- слой тессеракта -------- */
 function buildTesseractLayer(p, phase=0, tint=1.0){
   const {cell,beam,slat,distance,fillDensity,glowCount} = p;
   const group = new THREE.Group();
+
   const half = cell/2, steps=fillDensity, step=cell/(steps+1);
   const geoX = new THREE.BoxGeometry(cell, beam, beam);
   const geoY = new THREE.BoxGeometry(beam, cell, beam);
@@ -104,7 +106,9 @@ function buildTesseractLayer(p, phase=0, tint=1.0){
   const geoLZ= new THREE.BoxGeometry(slat, slat, cell);
   const geoGlow = new THREE.PlaneGeometry(0.3, 1.2);
 
-  let nFX=0,nFY=0,nFZ=0,nLX=0,nLY=0,nLZ=0;
+  let nFX=0,nFY=0,nFZ=0,nLX=0,nLY=0,nLZ=0,nIF=0;
+  const innerFrameOffsets=[-cell/3,cell/3];
+
   for(let ix=-GRID_COUNT; ix<=GRID_COUNT; ix++)
   for(let iy=-GRID_COUNT; iy<=GRID_COUNT; iy++)
   for(let iz=-GRID_COUNT; iz<=GRID_COUNT; iz++){
@@ -114,6 +118,7 @@ function buildTesseractLayer(p, phase=0, tint=1.0){
     nLX+=Math.max(0,(steps-1))*2;
     nLY+=Math.max(0,(steps-1))*2;
     nLZ+=Math.max(0,(steps-1))*2;
+    nIF+=innerFrameOffsets.length*12;
   }
 
   const frameX=new THREE.InstancedMesh(geoX, matWood.clone(), nFX);
@@ -122,10 +127,14 @@ function buildTesseractLayer(p, phase=0, tint=1.0){
   const lineX =new THREE.InstancedMesh(geoLX, matWood.clone(), nLX);
   const lineY =new THREE.InstancedMesh(geoLY, matWood.clone(), nLY);
   const lineZ =new THREE.InstancedMesh(geoLZ, matWood.clone(), nLZ);
-  const glows = new THREE.InstancedMesh(geoGlow, matGlow.clone(),  qualityParams().glowCount);
+  const iFrame=new THREE.InstancedMesh(new THREE.BoxGeometry(cell, beam*0.7, beam*0.7), matGlass.clone(), nIF);
+
+  const layerMult = tint;
+  [frameX,frameY,frameZ,lineX,lineY,lineZ].forEach(im=>im.material.color.multiplyScalar(layerMult));
+  iFrame.material.opacity*=0.9*layerMult;
 
   const M = new THREE.Matrix4();
-  let ixF=0,iyF=0,izF=0, ixL=0,iyL=0,izL=0;
+  let ixF=0,iyF=0,izF=0, ixL=0,iyL=0,izL=0, iIF=0;
 
   for(let ix=-GRID_COUNT; ix<=GRID_COUNT; ix++)
   for(let iy=-GRID_COUNT; iy<=GRID_COUNT; iy++)
@@ -147,17 +156,70 @@ function buildTesseractLayer(p, phase=0, tint=1.0){
     M.identity().setPosition(cx + half, cy - half, cz); frameZ.setMatrixAt(izF++, M);
     M.identity().setPosition(cx - half, cy + half, cz); frameZ.setMatrixAt(izF++, M);
     M.identity().setPosition(cx + half, cy + half, cz); frameZ.setMatrixAt(izF++, M);
+
+    for(let i=1;i<=steps;i++){
+      const d=-half + i*step; if (Math.abs(d)<=0.001) continue;
+      M.identity().setPosition(cx, cy, cz + d); lineX.setMatrixAt(ixL++, M);
+      M.identity().setPosition(cx, cy, cz - d); lineX.setMatrixAt(ixL++, M);
+      M.identity().setPosition(cx, cy + d, cz); lineZ.setMatrixAt(izL++, M);
+      M.identity().setPosition(cx, cy - d, cz); lineZ.setMatrixAt(izL++, M);
+      M.identity().setPosition(cx + d, cy, cz); lineY.setMatrixAt(iyL++, M);
+      M.identity().setPosition(cx - d, cy, cz); lineY.setMatrixAt(iyL++, M);
+    }
+
+    for(const off of [-cell/3,cell/3]){
+      M.identity().setPosition(cx, cy - half, cz + off); iFrame.setMatrixAt(iIF++, M);
+      M.identity().setPosition(cx, cy + half, cz + off); iFrame.setMatrixAt(iIF++, M);
+      M.identity().makeRotationZ(Math.PI/2).setPosition(cx - half, cy, cz + off); iFrame.setMatrixAt(iIF++, M);
+      M.identity().makeRotationZ(Math.PI/2).setPosition(cx + half, cy, cz + off); iFrame.setMatrixAt(iIF++, M);
+
+      M.identity().setPosition(cx, cy + off, cz - half); iFrame.setMatrixAt(iIF++, M);
+      M.identity().setPosition(cx, cy + off, cz + half); iFrame.setMatrixAt(iIF++, M);
+      M.identity().makeRotationX(Math.PI/2).setPosition(cx - half, cy + off, cz); iFrame.setMatrixAt(iIF++, M);
+      M.identity().makeRotationX(Math.PI/2).setPosition(cx + half, cy + off, cz); iFrame.setMatrixAt(iIF++, M);
+
+      M.identity().makeRotationZ(Math.PI/2).setPosition(cx + off, cy - half, cz); iFrame.setMatrixAt(iIF++, M);
+      M.identity().makeRotationZ(Math.PI/2).setPosition(cx + off, cy + half, cz); iFrame.setMatrixAt(iIF++, M);
+      M.identity().makeRotationX(Math.PI/2).setPosition(cx + off, cy, cz - half); iFrame.setMatrixAt(iIF++, M);
+      M.identity().makeRotationX(Math.PI/2).setPosition(cx + off, cy, cz + half); iFrame.setMatrixAt(iIF++, M);
+    }
   }
-  [frameX,frameY,frameZ,lineX,lineY,lineZ,glows].forEach(im=>{im.instanceMatrix.needsUpdate=true; group.add(im);});
-  group.userData.tick = (t)=>{ const a=0.18; const s=1.00 + 0.03*Math.sin(t*0.6 + phase); group.position.z=Math.sin(t*0.5 + phase)*a; group.scale.set(1.00,s,1.00/s); };
+
+  [frameX,frameY,frameZ,lineX,lineY,lineZ,iFrame].forEach(im=>{im.instanceMatrix.needsUpdate=true; group.add(im);});
+
+  const glows = new THREE.InstancedMesh(geoGlow, matGlow.clone(),  qualityParams().glowCount);
+  const M2 = new THREE.Matrix4();
+  for(let i=0;i<qualityParams().glowCount;i++){
+    const ax=(Math.random()*3)|0;
+    const ring=(Math.random()*(GRID_COUNT*2+1)|0)-GRID_COUNT;
+    const base=ring*qualityParams().cell, h=qualityParams().cell/2;
+    let x=0,y=1.6,z=0,rx=0,ry=0,rz=0;
+    if(ax===0){ x=0; y=1.6+(Math.random()*2-1)*h; z=(Math.random()<.5?-1:1)*h + base; ry=Math.PI/2; }
+    if(ax===1){ x=(Math.random()<.5?-1:1)*h + base; y=1.6; z=(Math.random()*2-1)*h; rx=Math.PI/2; }
+    if(ax===2){ x=(Math.random()*2-1)*h + base; y=1.6+(Math.random()<.5?-1:1)*h; z=0; }
+    M2.identity().makeRotationFromEuler(new THREE.Euler(rx,ry,rz)).setPosition(x,y,z);
+    glows.setMatrixAt(i, M2);
+  }
+  glows.instanceMatrix.needsUpdate=true;
+  group.add(glows);
+
+  group.userData.tick = (t)=>{
+    const a = 0.18;
+    const s = 1.00 + 0.03*Math.sin(t*0.6 + phase);
+    group.position.z = Math.sin(t*0.5 + phase) * a;
+    group.scale.set(1.00, s, 1.00/s);
+  };
   return group;
 }
+
+/* -------- поле «боке» -------- */
 function buildBokehField(p){
   const n = isQuest ? 140 : 220;
   const geo = new THREE.PlaneGeometry(1,1);
   const mat = new THREE.MeshBasicMaterial({map:bokehTex, transparent:true, blending:THREE.AdditiveBlending, depthWrite:false, opacity:0.32});
   const inst = new THREE.InstancedMesh(geo, mat, n);
   const M = new THREE.Matrix4();
+
   for(let i=0;i<n;i++){
     const r = GRID_COUNT*p.cell + 3.0;
     const x=(Math.random()*2-1)*r, y=1.6+(Math.random()*2-1)*r*0.6, z=(Math.random()*2-1)*r;
@@ -170,58 +232,124 @@ function buildBokehField(p){
   inst.userData.tick=(t)=>{ inst.material.opacity = 0.22 + 0.18*(0.5+0.5*Math.sin(t*0.7)); };
   return inst;
 }
-const PHOTO_FILES = Array.from({length:15}, (_,i)=>`./assets/textures/${i+1}.jpg`);
-const PHOTO_SIZE=1.05, PHOTO_NEAR=2.0, PHOTO_POOL=18, PHOTO_OPACITY_MAX=0.65;
-const PHOTO_LIFETIME=[1.8,3.2], PHOTO_COOLDOWN=[1.2,2.2], PHOTO_RANGE=[0.65,0.9];
+
+/* -------- ВОСПОМИНАНИЯ — отдельный якорь -------- */
 function buildMemories(p){
-  const group=new THREE.Group(); const loader=new THREE.TextureLoader(); const textures=[];
-  PHOTO_FILES.forEach(path=>{ const t=loader.load(path); if('colorSpace'in t) t.colorSpace=THREE.SRGBColorSpace; else t.encoding=THREE.sRGBEncoding; textures.push(t);});
-  const sceneRadius=GRID_COUNT*p.cell+3.0; const rMin=sceneRadius*PHOTO_RANGE[0], rMax=sceneRadius*PHOTO_RANGE[1];
-  const rnd=(a,b)=>a+Math.random()*(b-a), pick=a=>a[(Math.random()*a.length)|0];
+  const group = new THREE.Group();
+  const loader = new THREE.TextureLoader();
+  const textures = [];
+  PHOTO_FILES.forEach(path=>{
+    const tex = loader.load(path);
+    if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace; else tex.encoding = THREE.sRGBEncoding;
+    textures.push(tex);
+  });
+
+  const sceneRadius = GRID_COUNT * p.cell + 3.0;
+  const rMin = sceneRadius * PHOTO_RANGE[0], rMax = sceneRadius * PHOTO_RANGE[1];
+
+  const rnd = (a,b)=>a + Math.random()*(b-a);
+  const pick = arr => arr[(Math.random()*arr.length)|0];
+
   function placeRandom(m){
-    const axis=(Math.random()*3)|0, ring=((Math.random()*(GRID_COUNT*2+1))|0)-GRID_COUNT, base=ring*p.cell, half=p.cell/2;
+    const axis = (Math.random()*3)|0;
+    const ring = ((Math.random()*(GRID_COUNT*2+1))|0) - GRID_COUNT;
+    const base = ring * p.cell;
+    const half = p.cell/2;
+
     let x=0,y=1.6,z=0;
     if(axis===0){ x=0; y=1.6 + rnd(-half, half); z=(Math.random()<.5?-1:1)*half + base + rnd(-0.35,0.35); }
     else if(axis===1){ x=(Math.random()<.5?-1:1)*half + base + rnd(-0.35,0.35); y=1.6; z=rnd(-half, half); }
     else { x=rnd(-half, half); y=1.6 + (Math.random()<.5?-1:1)*half + rnd(-0.35,0.35); z=0; }
-    const scaleR=rMin+Math.random()*(rMax-rMin), len=Math.hypot(x,y-1.6,z)||1;
-    x*=scaleR/len; y=1.6+(y-1.6)*scaleR/len; z*=scaleR/len;
-    const d=Math.hypot(x,y-1.6,z); if(d<PHOTO_NEAR){ const k=PHOTO_NEAR/d; x*=k; z*=k; y=1.6+(y-1.6)*k; }
-    m.position.set(x,y,z); m.lookAt(0,1.6,0); m.material.opacity=0;
+
+    const scaleR = rMin + Math.random()*(rMax - rMin);
+    const len = Math.hypot(x, y-1.6, z) || 1;
+    x *= scaleR/len; y = 1.6 + (y-1.6)*scaleR/len; z *= scaleR/len;
+
+    const d = Math.hypot(x, y-1.6, z);
+    if (d < PHOTO_NEAR){ const k = PHOTO_NEAR/d; x*=k; z*=k; y = 1.6 + (y-1.6)*k; }
+    m.position.set(x,y,z);
+    m.lookAt(0,1.6,0);
+    m.material.opacity = 0.0;
   }
+
   for(let i=0;i<PHOTO_POOL;i++){
-    const tex=pick(textures); const ar=(tex.image?.width||1)/(tex.image?.height||1); const w=PHOTO_SIZE*(0.9+Math.random()*0.4), h=w/ar;
-    const mat=new THREE.MeshBasicMaterial({map:tex, transparent:true, opacity:0, depthWrite:false, side:THREE.DoubleSide});
-    const mesh=new THREE.PlaneGeometry(w,h);
-    const m=new THREE.Mesh(mesh,mat); m.userData.state='cooldown'; m.userData.t=rnd(...PHOTO_COOLDOWN);
-    m.userData.fade=rnd(0.45,0.7); m.userData.hold=rnd(...PHOTO_LIFETIME); group.add(m);
+    const tex = pick(textures);
+    const ar = (tex.image?.width||1) / (tex.image?.height||1);
+    const w  = PHOTO_SIZE * (0.9 + Math.random()*0.4), h = w / ar;
+
+    const mat = new THREE.MeshBasicMaterial({map:tex, transparent:true, opacity:0.0, depthWrite:false, side:THREE.DoubleSide});
+    const geo = new THREE.PlaneGeometry(w, h);
+    const m = new THREE.Mesh(geo, mat);
+
+    m.userData.state = 'cooldown';
+    m.userData.t = rnd(...PHOTO_COOLDOWN);
+    m.userData.fade = rnd(0.45,0.7);
+    m.userData.hold = rnd(...PHOTO_LIFETIME);
+
+    group.add(m);
   }
-  group.userData.tick=(dt,t)=>{
-    group.children.forEach(m=>{
-      if(m.userData.state==='cooldown'){ m.userData.t-=dt; if(m.userData.t<=0){ placeRandom(m); if(Math.random()<0.6){ const tex=pick(textures); if('colorSpace'in tex) tex.colorSpace=THREE.SRGBColorSpace; else tex.encoding=THREE.sRGBEncoding; m.material.map=tex; m.material.needsUpdate=true; } m.userData.state='fadein'; m.userData.t=m.userData.fade; } }
-      else if(m.userData.state==='fadein'){ const k=1-Math.max(0,m.userData.t)/Math.max(0.0001,m.userData.fade); m.material.opacity=Math.min(PHOTO_OPACITY_MAX,k*PHOTO_OPACITY_MAX); m.userData.t-=dt; if(m.userData.t<=0){ m.userData.state='hold'; m.userData.t=m.userData.hold; } }
-      else if(m.userData.state==='hold'){ const pulse=0.04*Math.sin(t*0.8+((m.id*9301+49297)%233280)); m.material.opacity=Math.max(0,Math.min(PHOTO_OPACITY_MAX,PHOTO_OPACITY_MAX-0.05+pulse)); m.userData.t-=dt; if(m.userData.t<=0){ m.userData.state='fadeout'; m.userData.t=m.userData.fade; } }
-      else if(m.userData.state==='fadeout'){ const k=Math.max(0,m.userData.t)/Math.max(0.0001,m.userData.fade); m.material.opacity=Math.max(0,k*PHOTO_OPACITY_MAX); m.userData.t-=dt; if(m.userData.t<=0){ m.userData.state='cooldown'; m.userData.t=(Math.random()*(PHOTO_COOLDOWN[1]-PHOTO_COOLDOWN[0])+PHOTO_COOLDOWN[0]); m.material.opacity=0; } }
+
+  group.userData.tick = (dt, t)=>{
+    group.children.forEach((m)=>{
+      if(m.userData.state==='cooldown'){
+        m.userData.t -= dt;
+        if(m.userData.t<=0){
+          placeRandom(m);
+          if(Math.random()<0.6){
+            const tex = pick(textures);
+            if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace; else tex.encoding = THREE.sRGBEncoding;
+            m.material.map = tex; m.material.needsUpdate = true;
+          }
+          m.userData.state='fadein';
+          m.userData.t = m.userData.fade;
+        }
+      }else if(m.userData.state==='fadein'){
+        const k = 1 - Math.max(0, m.userData.t)/Math.max(0.0001, m.userData.fade);
+        m.material.opacity = Math.min(PHOTO_OPACITY_MAX, k*PHOTO_OPACITY_MAX);
+        m.userData.t -= dt;
+        if(m.userData.t<=0){ m.userData.state='hold'; m.userData.t=m.userData.hold; }
+      }else if(m.userData.state==='hold'){
+        const pulse = 0.04*Math.sin(t*0.8 + ((m.id*9301 + 49297) % 233280));
+        m.material.opacity = Math.max(0, Math.min(PHOTO_OPACITY_MAX, PHOTO_OPACITY_MAX - 0.05 + pulse));
+        m.userData.t -= dt;
+        if(m.userData.t<=0){ m.userData.state='fadeout'; m.userData.t=m.userData.fade; }
+      }else if(m.userData.state==='fadeout'){
+        const k = Math.max(0, m.userData.t)/Math.max(0.0001, m.userData.fade);
+        m.material.opacity = Math.max(0, k*PHOTO_OPACITY_MAX);
+        m.userData.t -= dt;
+        if(m.userData.t<=0){ m.userData.state='cooldown'; m.userData.t = rnd(...PHOTO_COOLDOWN); m.material.opacity=0; }
+      }
     });
   };
+
   return group;
 }
 
-let root=null, memories=null;
+/* -------- сборка сцены -------- */
+let root=null, memoriesAnchor=null, memories=null;
 function rebuild(){
-  if(root){ scene.remove(root); root=null; }
-  const P=qualityParams();
-  root=new THREE.Group();
-  for(let i=0;i<Math.max(2,P.layers||2);i++){
-    const tint=0.9+i*0.08, phase=i*1.2;
-    root.add( buildTesseractLayer(P,phase,tint) );
+  if(root){ scene.remove(root); root.traverse(o=>{ if(o.dispose) o.dispose(); }); root=null; }
+  if(memoriesAnchor){ scene.remove(memoriesAnchor); memoriesAnchor=null; memories=null; }
+
+  const P = qualityParams();
+
+  root = new THREE.Group();
+  const layers = Math.max(2, P.layers||2);
+  for(let i=0;i<layers;i++){
+    const tint = 0.9 + i*0.08;
+    const phase = i*1.2;
+    root.add( buildTesseractLayer(P, phase, tint) );
   }
   root.add( buildBokehField(P) );
   scene.add(root);
-  memories = buildMemories(P); scene.add(memories);
+
+  memoriesAnchor = new THREE.Group();
+  memories = buildMemories(P);
+  memoriesAnchor.add(memories);
+  scene.add(memoriesAnchor);
 }
 
-/* ====== МУЗЫКА (WebAudio — как у тебя) ====== */
+/* -------- музыка -------- */
 const MUSIC_PATH = './assets/music/universe.mp3';
 let audioCtx=null, musicNode=null, musicGain=null, musicStarted=false, musicMuted=false;
 async function ensureMusic(){
@@ -233,107 +361,68 @@ async function ensureMusic(){
     musicGain=audioCtx.createGain(); musicGain.gain.value=0.0001;
     musicNode=audioCtx.createBufferSource(); musicNode.buffer=audioBuf; musicNode.loop=true;
     musicNode.connect(musicGain).connect(audioCtx.destination); musicNode.start();
-    const t=audioCtx.currentTime; musicGain.gain.exponentialRampToValueAtTime(MUSIC_LEVEL_BASE, t+2.0);
+    const t=audioCtx.currentTime; musicGain.gain.exponentialRampToValueAtTime(0.10, t+2.0);
     musicStarted=true; updateMuteUI();
   }catch(e){ console.warn('Музыка не стартанула:',e); }
 }
-function setMuted(m){ musicMuted=m; if(musicGain){ const t=audioCtx?.currentTime||0; musicGain.gain.cancelScheduledValues(t); musicGain.gain.exponentialRampToValueAtTime(m?0.0001:MUSIC_LEVEL_BASE, t+0.25);} updateMuteUI();}
+function setMuted(m){ musicMuted=m; if(musicGain){ const t=audioCtx.currentTime; musicGain.gain.cancelScheduledValues(t); musicGain.gain.exponentialRampToValueAtTime(m?0.0001:0.10, t+0.25);} updateMuteUI();}
 function toggleMute(){ setMuted(!musicMuted); }
 function updateMuteUI(){ document.getElementById('mute').textContent = musicMuted ? '🔇 Без звука' : '🔊 Музыка'; }
 
-/* ====== ГОЛОС: WebAudio + (опционально) HTMLAudio параллельно ====== */
-const VOICE_PATH = './assets/music/voiceuniverse.mp3';
-const voiceEl = document.getElementById('voiceEl');
-let voiceBuf=null;
-
-async function preloadVoice(){
-  try{
-    if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
-    if (voiceBuf) return;
-    const r=await fetch(VOICE_PATH); if(!r.ok) throw new Error('HTTP '+r.status);
-    const ab=await r.arrayBuffer();
-    voiceBuf = await audioCtx.decodeAudioData(ab);
-    console.log('[voice] decoded OK');
-  }catch(e){ console.warn('[voice] decode failed:', e); }
-}
-function duckOn(){
-  try{
-    if(musicGain && audioCtx){
-      const t=audioCtx.currentTime;
-      musicGain.gain.cancelScheduledValues(t);
-      musicGain.gain.exponentialRampToValueAtTime(MUSIC_LEVEL_DUCK, t+0.10);
-    }
-  }catch(_){}
-}
-function duckOff(){
-  try{
-    if(musicGain && audioCtx){
-      const t=audioCtx.currentTime;
-      musicGain.gain.cancelScheduledValues(t);
-      musicGain.gain.exponentialRampToValueAtTime(MUSIC_LEVEL_BASE, t+0.40);
-    }
-  }catch(_){}
-}
-async function playVoiceOnce(){
-  duckOn();
-  let endedCount = 0;
-  const onEnd = ()=>{ if(++endedCount>=1){ duckOff(); } };
-
-  // 1) WebAudio
-  if (audioCtx && voiceBuf){
-    try{
-      const src = audioCtx.createBufferSource();
-      const g = audioCtx.createGain();
-      g.gain.value = VOICE_GAIN; // усиление
-      src.buffer = voiceBuf;
-      src.connect(g).connect(audioCtx.destination);
-      src.onended = onEnd;
-      src.start(0);
-    }catch(e){ console.warn('[voice] WebAudio start error:', e); }
-  }
-
-  // 2) HTMLAudio fallback (параллельно, если включён)
-  if (USE_HTML_VOICE_FALLBACK && voiceEl){
-    try{
-      voiceEl.currentTime = 0;
-      voiceEl.volume = 1.0;
-      voiceEl.play().catch(()=>{});
-      voiceEl.onended = onEnd;
-    }catch(e){ console.warn('[voice] HTMLAudio start error:', e); }
-  }
-
-  // страховка: вернём фон через VOICE_MAX_SECS даже если события не придут
-  setTimeout(()=>duckOff(), VOICE_MAX_SECS*1000);
-}
-
-/* ====== UI / XR glue ====== */
+/* -------- меню/загрузка -------- */
 const loading=document.getElementById('loading');
 const menu=document.getElementById('menu');
+requestAnimationFrame(()=>{ rebuild(); loading.style.display='none'; menu.style.display='flex'; /* страховка: точно нет чёрного */ hideBlack(); });
+
+/* ================= XR старт без чёрного: DOM-оверлей + XR-кадры ================= */
+let xrSession = null, hideTimeout = null;
 
 function showBlack(){ const b=document.getElementById('black'); b.style.display='block'; requestAnimationFrame(()=>{ b.style.opacity='1'; }); }
 function hideBlack(){ const b=document.getElementById('black'); b.style.opacity='0'; setTimeout(()=>{ b.style.display='none'; }, 750); }
-function waitXRFrames(session, n, done){ let i=0; function onF(){ i++; if(i>=n){ done(); } else { session.requestAnimationFrame(onF); } } session.requestAnimationFrame(onF); }
 
-requestAnimationFrame(()=>{ rebuild(); loading.style.display='none'; menu.style.display='flex'; hideBlack(); });
+function waitXRFrames(session, n, done){
+  let i=0;
+  function onFrame(){ i++; if(i>=n){ done(); } else { session.requestAnimationFrame(onFrame); } }
+  session.requestAnimationFrame(onFrame);
+}
 
 async function startXR(){
   if(!navigator.xr){ alert('WebXR не поддерживается. Открой в Quest Browser.'); return; }
-  try{
-    renderer.render(scene, camera);
-    showBlack();
-    const session = await navigator.xr.requestSession('immersive-vr', { requiredFeatures:['local-floor'], optionalFeatures:['bounded-floor'] });
-    await renderer.xr.setSession(session);
-    try{ await audioCtx.resume(); }catch(_){}
-    playVoiceOnce();
 
-    if (renderer.xr.setFoveation) { try{ renderer.xr.setFoveation(0.5); }catch(_){} }
-    const onVis=()=>{ if(session.visibilityState==='visible'){ waitXRFrames(session,2,hideBlack); } else { showBlack(); } };
-    session.addEventListener('visibilitychange', onVis); onVis();
-    session.addEventListener('end', ()=>{ showBlack(); duckOff(); menu.style.display='flex'; });
-  }catch(e){ console.error(e); alert('Не удалось запустить VR-сессию.'); }
+  renderer.render(scene, camera); // прогрев
+  showBlack();
+
+  const session = await navigator.xr.requestSession('immersive-vr', {
+    requiredFeatures: ['local-floor'],
+    optionalFeatures: ['bounded-floor']
+  });
+
+  await renderer.xr.setSession(session);
+  xrSession = session;
+
+  if (renderer.xr.setFoveation) { try{ renderer.xr.setFoveation(0.5); }catch(_){} }
+
+  const onVis = ()=>{
+    if (session.visibilityState === 'visible'){
+      if (hideTimeout){ clearTimeout(hideTimeout); hideTimeout=null; }
+      waitXRFrames(session, 2, hideBlack);
+    } else {
+      showBlack();
+    }
+  };
+  session.addEventListener('visibilitychange', onVis);
+  onVis();
+  hideTimeout = setTimeout(hideBlack, 2000);
+
+  session.addEventListener('end', ()=>{
+    xrSession = null;
+    showBlack();
+    const menu = document.getElementById('menu');
+    if (menu) menu.style.display='flex';
+  });
 }
 
-/* ====== цикл ====== */
+/* -------- основной цикл -------- */
 let lastTS = performance.now()*0.001;
 renderer.setAnimationLoop(()=>{
   const now=performance.now()*0.001, dt=Math.min(0.05, now-lastTS); lastTS=now;
@@ -343,31 +432,40 @@ renderer.setAnimationLoop(()=>{
   renderer.render(scene,camera);
 });
 
-/* ====== кнопки ====== */
+/* -------- ДОБАВЛЕНО: голос при старте VR -------- */
+const voiceEl = document.getElementById('voice');
+
 document.getElementById('btnVR').addEventListener('click', async ()=>{
   menu.style.display='none';
+
+  // Прайминг: кратко включаем/выключаем, чтобы браузер разрешил autoplay в XR
   try{
-    if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
-    await audioCtx.resume();
-  }catch(_){}
+    voiceEl.muted = true;
+    await voiceEl.play();
+    voiceEl.pause();
+    voiceEl.currentTime = 0;
+    voiceEl.muted = false;
+  }catch(e){}
+
   ensureMusic();
-  await preloadVoice(); // заранее декодим
   await startXR();
+
+  // Проигрываем голос уже внутри VR
+  try{
+    voiceEl.currentTime = 0;
+    await voiceEl.play();
+  }catch(e){}
 });
-document.getElementById('btnSpectate').addEventListener('click', async ()=>{
+
+document.getElementById('btnSpectate').addEventListener('click', ()=>{
   menu.style.display='none';
   controls.enabled=true;
-  try{
-    if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
-    await audioCtx.resume();
-  }catch(_){}
   ensureMusic();
-  await preloadVoice();
   showBlack(); setTimeout(hideBlack,150);
 });
 document.getElementById('mute').addEventListener('click', ()=>{ ensureMusic(); toggleMute(); });
 
-/* ====== input/resize ====== */
+/* -------- input/resize -------- */
 addEventListener('click', ()=>{ ensureMusic(); });
 addEventListener('touchstart', ()=>{ ensureMusic(); }, {passive:true});
 addEventListener('keydown', e=>{ if(e.code==='KeyM'){ ensureMusic(); toggleMute(); } });
