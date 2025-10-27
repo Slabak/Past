@@ -28,6 +28,9 @@
   <div class="hud">ПК: мышь — обзор. Клик включает музыку. Камера не трясётся.</div>
   <button id="mute" class="mute">🔊 Музыка</button>
 
+  <!-- === ГОЛОС (HTMLAudio fallback) === -->
+  <audio id="voice" src="./assets/music/voiceuniverse.mp3" preload="auto"></audio>
+
 <script>
 /* ---------- настройки ---------- */
 const PHOTO_FILES = Array.from({length:15}, (_,i)=>`./assets/textures/${i+1}.jpg`);
@@ -346,7 +349,7 @@ function rebuild(){
   scene.add(memoriesAnchor);
 }
 
-/* -------- музыка -------- */
+/* -------- музыка (как было) -------- */
 const MUSIC_PATH = './assets/music/universe.mp3';
 let audioCtx=null, musicNode=null, musicGain=null, musicStarted=false, musicMuted=false;
 async function ensureMusic(){
@@ -362,9 +365,32 @@ async function ensureMusic(){
     musicStarted=true; updateMuteUI();
   }catch(e){ console.warn('Музыка не стартанула:',e); }
 }
-function setMuted(m){ musicMuted=m; if(musicGain){ const t=audioCtx.currentTime; musicGain.gain.cancelScheduledValues(t); musicGain.gain.exponentialRampToValueAtTime(m?0.0001:0.10, t+0.25);} updateMuteUI();}
+function setMuted(m){ musicMuted=m; if(musicGain){ const t=audioCtx?.currentTime||0; musicGain.gain.cancelScheduledValues(t); musicGain.gain.exponentialRampToValueAtTime(m?0.0001:0.10, t+0.25);} updateMuteUI();}
 function toggleMute(){ setMuted(!musicMuted); }
 function updateMuteUI(){ document.getElementById('mute').textContent = musicMuted ? '🔇 Без звука' : '🔊 Музыка'; }
+
+/* -------- ГОЛОС: дакинг фона -------- */
+const voiceEl = document.getElementById('voice');
+function duckOn(){
+  try{
+    if(musicGain && audioCtx){
+      const t=audioCtx.currentTime;
+      musicGain.gain.cancelScheduledValues(t);
+      musicGain.gain.exponentialRampToValueAtTime(0.04, t+0.12);
+    }
+  }catch(_){}
+}
+function duckOff(){
+  try{
+    if(musicGain && audioCtx){
+      const t=audioCtx.currentTime;
+      musicGain.gain.cancelScheduledValues(t);
+      musicGain.gain.exponentialRampToValueAtTime(0.10, t+0.40);
+    }
+  }catch(_){}
+}
+voiceEl.addEventListener('play', duckOn);
+voiceEl.addEventListener('ended', duckOff);
 
 /* -------- меню/загрузка -------- */
 const loading=document.getElementById('loading');
@@ -397,6 +423,9 @@ async function startXR(){
   await renderer.xr.setSession(session);
   xrSession = session;
 
+  // === Запуск голоса внутри VR ===
+  try{ voiceEl.currentTime = 0; await voiceEl.play(); }catch(e){}
+
   if (renderer.xr.setFoveation) { try{ renderer.xr.setFoveation(0.5); }catch(_){} }
 
   const onVis = ()=>{
@@ -414,8 +443,11 @@ async function startXR(){
   session.addEventListener('end', ()=>{
     xrSession = null;
     showBlack();
+    try{ voiceEl.pause(); }catch(_){}
     const menu = document.getElementById('menu');
     if (menu) menu.style.display='flex';
+    // Вернуть фон, если он был приглушён
+    duckOff();
   });
 }
 
@@ -432,11 +464,27 @@ renderer.setAnimationLoop(()=>{
 /* -------- кнопки -------- */
 document.getElementById('btnVR').addEventListener('click', async ()=>{
   menu.style.display='none';
+
+  // Приминг: щёлкаем голосом тихо, чтобы Quest разрешил play() в XR
+  try{
+    voiceEl.muted = true;
+    await voiceEl.play(); voiceEl.pause();
+    voiceEl.currentTime = 0; voiceEl.muted = false;
+  }catch(_){}
+
   ensureMusic();
   await startXR();
 });
-document.getElementById('btnSpectate').addEventListener('click', ()=>{
+document.getElementById('btnSpectate').addEventListener('click', async ()=>{
   menu.style.display='none';
+
+  // Приминг голоса и музыка в плоском режиме
+  try{
+    voiceEl.muted = true;
+    await voiceEl.play(); voiceEl.pause();
+    voiceEl.currentTime = 0; voiceEl.muted = false;
+  }catch(_){}
+
   controls.enabled=true;
   ensureMusic();
   showBlack(); setTimeout(hideBlack,150);
