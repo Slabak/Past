@@ -102,10 +102,6 @@
     <nav class="controls">
       <button id="btnReplay">Повтор речи</button>
       <button id="btnMute">Звук: выкл</button>
-      <label style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:12px;background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.1);backdrop-filter:blur(2px)">
-        Громкость
-        <input id="vol" type="range" min="0" max="100" value="85" style="width:160px">
-      </label>
     </nav>
 
     <div class="toast" id="toast">Если нет звука — нажмите «Войти в связь» или включите громкость.</div>
@@ -142,16 +138,9 @@
     var subtitle = document.getElementById('subtitle');
     var glitch   = document.querySelector('.glitch');
 
-    // Константы громкости
-    var MUSIC_TARGET = 0.7;   // раньше было ~0.4
-    var MUSIC_DUCK   = 0.35;  // раньше было ~0.18
-    var VOICE_VOL    = 1.0;   // речь всегда на полном уровне
-    var masterGain   = 0.85;  // множитель по слайдеру (0..1)
-    var vol          = document.getElementById('vol');
-
     var muted = true; // стартуем без звука
     if(music){ music.volume = 0; }
-    if(voice){ voice.volume = VOICE_VOL; }
+    if(voice){ voice.volume = 1; }
 
     function showToast(msg){
       if(!toast) return;
@@ -175,7 +164,7 @@
 
         if(music){ music.load(); await music.play(); }
         muted = false; if(btnMute) btnMute.textContent = 'Звук: вкл';
-        if(music){ fadeAudio(music, MUSIC_TARGET*masterGain, 1200); }
+        if(music){ fadeAudio(music, 0.4, 1200); }
 
         // Старт речи немного позже, если есть
         if(voice){
@@ -199,7 +188,7 @@
 
     if(btnMute){
       btnMute.addEventListener('click', function(){
-        if(muted){ if(music) fadeAudio(music, MUSIC_TARGET*masterGain, 600); btnMute.textContent = 'Звук: вкл'; }
+        if(muted){ if(music) fadeAudio(music, 0.4, 600); btnMute.textContent = 'Звук: вкл'; }
         else { if(music) fadeAudio(music, 0, 600); btnMute.textContent = 'Звук: выкл'; }
         muted = !muted;
       });
@@ -212,8 +201,8 @@
       });
 
       // Ducking музыки
-      voice.addEventListener('play', function(){ if(!muted && music) fadeAudio(music, MUSIC_DUCK*masterGain, 300); });
-      voice.addEventListener('ended', function(){ if(!muted && music) fadeAudio(music, MUSIC_TARGET*masterGain, 500); });
+      voice.addEventListener('play', function(){ if(!muted && music) fadeAudio(music, 0.18, 300); });
+      voice.addEventListener('ended', function(){ if(!muted && music) fadeAudio(music, 0.4, 500); });
     }
 
     // HEAD-проверка файлов (может не работать при file://)
@@ -225,15 +214,6 @@
         }
       }catch(e){}
     })();
-
-    // Слайдер громкости (меняет masterGain)
-    if(vol){
-      vol.addEventListener('input', function(){
-        masterGain = Math.max(0, Math.min(1, parseInt(vol.value,10)/100));
-        // мгновенно применим к текущей громкости музыки
-        if(music && !muted){ music.volume = +(MUSIC_TARGET*masterGain).toFixed(3); }
-      });
-    }
 
     // Подмена фоновой картинки под HiDPI/широкие экраны (опционально)
     (function(){
